@@ -37,9 +37,9 @@ export namespace Config {
     let result = await global()
 
     // Override with custom config if provided
-    if (Flag.OPENCODE_CONFIG) {
-      result = mergeConfigWithPlugins(result, await loadFile(Flag.OPENCODE_CONFIG))
-      log.debug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
+    if (Flag.MARKSCODE_CONFIG) {
+      result = mergeConfigWithPlugins(result, await loadFile(Flag.MARKSCODE_CONFIG))
+      log.debug("loaded custom config", { path: Flag.MARKSCODE_CONFIG })
     }
 
     for (const file of ["opencode.jsonc", "opencode.json"]) {
@@ -49,9 +49,8 @@ export namespace Config {
       }
     }
 
-    if (Flag.OPENCODE_CONFIG_CONTENT) {
-      result = mergeConfigWithPlugins(result, JSON.parse(Flag.OPENCODE_CONFIG_CONTENT))
-      log.debug("loaded custom config from OPENCODE_CONFIG_CONTENT")
+    if (Flag.MARKSCODE_CONFIG_CONTENT) {
+      result = mergeConfigWithPlugins(result, JSON.parse(Flag.MARKSCODE_CONFIG_CONTENT))
     }
 
     for (const [key, value] of Object.entries(auth)) {
@@ -115,8 +114,8 @@ export namespace Config {
       })
     }
 
-    if (Flag.OPENCODE_PERMISSION) {
-      result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+    if (Flag.MARKSCODE_PERMISSION) {
+      result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.MARKSCODE_PERMISSION))
     }
 
     if (!result.username) result.username = os.userInfo().username

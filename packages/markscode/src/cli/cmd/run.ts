@@ -273,7 +273,7 @@ export const RunCommand = cmd({
       }
 
       const cfgResult = await sdk.config.get()
-      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.OPENCODE_AUTO_SHARE || args.share)) {
+      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.MARKSCODE_AUTO_SHARE || args.share)) {
         const shareResult = await sdk.session.share({ path: { id: sessionID } }).catch((error) => {
           if (error instanceof Error && error.message.includes("disabled")) {
             UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)
@@ -326,7 +326,7 @@ export const RunCommand = cmd({
       }
 
       const cfgResult = await sdk.config.get()
-      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.OPENCODE_AUTO_SHARE || args.share)) {
+      if (cfgResult.data && (cfgResult.data.share === "auto" || Flag.MARKSCODE_AUTO_SHARE || args.share)) {
         const shareResult = await sdk.session.share({ path: { id: sessionID } }).catch((error) => {
           if (error instanceof Error && error.message.includes("disabled")) {
             UI.println(UI.Style.TEXT_DANGER_BOLD + "!  " + error.message)

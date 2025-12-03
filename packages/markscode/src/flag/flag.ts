@@ -1,10 +1,10 @@
 export namespace Flag {
   export const MARKSCODE_AUTO_SHARE = truthy("MARKSCODE_AUTO_SHARE")
+  export const MARKSCODE_DISABLE_PRUNE = truthy("MARKSCODE_DISABLE_PRUNE")
   export const MARKSCODE_CONFIG = process.env["MARKSCODE_CONFIG"]
   export const MARKSCODE_CONFIG_DIR = process.env["MARKSCODE_CONFIG_DIR"]
   export const MARKSCODE_CONFIG_CONTENT = process.env["MARKSCODE_CONFIG_CONTENT"]
   export const MARKSCODE_DISABLE_AUTOUPDATE = truthy("MARKSCODE_DISABLE_AUTOUPDATE")
-  export const MARKSCODE_DISABLE_PRUNE = truthy("MARKSCODE_DISABLE_PRUNE")
   export const MARKSCODE_PERMISSION = process.env["MARKSCODE_PERMISSION"]
   export const MARKSCODE_DISABLE_DEFAULT_PLUGINS = truthy("MARKSCODE_DISABLE_DEFAULT_PLUGINS")
   export const MARKSCODE_DISABLE_LSP_DOWNLOAD = truthy("MARKSCODE_DISABLE_LSP_DOWNLOAD")
@@ -13,6 +13,11 @@ export namespace Flag {
   export const MARKSCODE_FAKE_VCS = process.env["MARKSCODE_FAKE_VCS"]
   export const MARKSCODE_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH =
     process.env["MARKSCODE_EXPERIMENTAL_BASH_MAX_OUTPUT_LENGTH"]
+
+  // Additional flags
+  export const MARKSCODE_WORKER_PATH = process.env["MARKSCODE_WORKER_PATH"]
+  export const MARKSCODE_CHANNEL = process.env["MARKSCODE_CHANNEL"]
+  export const MARKSCODE_VERSION = process.env["MARKSCODE_VERSION"]
 
   // Experimental
   export const MARKSCODE_EXPERIMENTAL = truthy("MARKSCODE_EXPERIMENTAL")

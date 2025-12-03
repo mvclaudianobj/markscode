@@ -52,7 +52,7 @@ export function Home() {
       promptText = args.prompt
     } else {
       // Only load automatic prompt in new sessions
-      if (!args.continue && !args.session) {
+      if (!args.continue && !args.sessionID) {
         // Load default prompt from prompt_default.txt
         const promptFile = path.join(directory(), "prompt_default.txt")
         try {
