@@ -11,6 +11,9 @@ import {
 } from "solid-js"
 import { useKeyboard } from "@opentui/solid"
 import { useKeybind } from "@tui/context/keybind"
+import { useSDK } from "@tui/context/sdk"
+import { useToast } from "../ui/toast"
+import { Clipboard } from "@tui/util/clipboard"
 import type { KeybindsConfig } from "@opencode-ai/sdk"
 import { loadMemory, type MemoryData } from "../../../../memory"
 import { useDirectory } from "../context/directory"
@@ -28,29 +31,16 @@ export type CommandOption = DialogSelectOption & {
 function init() {
   const [registrations, setRegistrations] = createSignal<Accessor<CommandOption[]>[]>([])
   const [suspendCount, setSuspendCount] = createSignal(0)
-  const dialog = useDialog()
-  const keybind = useKeybind()
   const options = createMemo(() => {
     return registrations().flatMap((x) => x())
   })
   const suspended = () => suspendCount() > 0
 
-  useKeyboard((evt) => {
-    if (suspended()) return
-    for (const option of options()) {
-      if (option.keybind && keybind.match(option.keybind, evt)) {
-        evt.preventDefault()
-        option.onSelect?.(dialog)
-        return
-      }
-    }
-  })
-
   const result = {
     trigger(name: string, source?: "prompt") {
       for (const option of options()) {
         if (option.value === name) {
-          option.onSelect?.(dialog, source)
+          option.onSelect?.()
           return
         }
       }
@@ -59,9 +49,6 @@ function init() {
       setSuspendCount((count) => count + (enabled ? -1 : 1))
     },
     suspended,
-    show() {
-      dialog.replace(() => <DialogCommand options={options()} />)
-    },
     register(cb: () => CommandOption[]) {
       const results = createMemo(cb)
       setRegistrations((arr) => [results, ...arr])
@@ -98,27 +85,22 @@ export function CommandProvider(props: ParentProps) {
       dialog.replace(() => <DialogCommand options={value.options} />)
       return
     }
+    for (const option of value.options()) {
+      if (option.keybind && keybind.match(option.keybind, evt)) {
+        evt.preventDefault()
+        option.onSelect?.()
+        return
+      }
+    }
   })
 
   return <ctx.Provider value={value}>{props.children}</ctx.Provider>
 }
 
-function DialogCommand(props: { options: CommandOption[] }) {
-  const keybind = useKeybind()
-  return (
-    <DialogSelect
-      title="Commands"
-      options={props.options.map((x) => ({
-        ...x,
-        footer: x.keybind ? keybind.print(x.keybind) : undefined,
-      }))}
-    />
-  )
-}
-
-export function DialogInsertFile() {
+export function DialogInsertFile(props: { command: ReturnType<typeof useCommandDialog> }) {
   const dialog = useDialog()
-  const command = useCommandDialog()
+  const { event } = useSDK()
+  const toast = useToast()
   const [currentDir, setCurrentDir] = createSignal(os.homedir())
   const [files, setFiles] = createSignal<string[]>([])
 
@@ -129,9 +111,9 @@ export function DialogInsertFile() {
       const fs = await import("fs/promises")
       const entries = await fs.readdir(dir, { withFileTypes: true })
       const fileList = entries
-        .filter(entry => entry.isFile())
-        .map(entry => entry.name)
-        .filter(name => !name.startsWith('.'))
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => !name.startsWith("."))
       setFiles(fileList)
     } catch {
       setFiles([])
@@ -140,7 +122,7 @@ export function DialogInsertFile() {
 
   const options = createMemo(() => {
     const dir = currentDir()
-    const fileOpts = files().map(file => ({
+    const fileOpts = files().map((file) => ({
       title: file,
       value: path.join(dir, file),
       description: "File",
@@ -169,19 +151,23 @@ export function DialogInsertFile() {
             setCurrentDir(option.value)
           } else {
             const content = await Bun.file(option.value).text()
-            command.trigger("append_to_prompt", content)
+            await Clipboard.copy(content)
+            event.emit("insert_file_content", { content })
+            toast.show({ message: `Inserted ${content.length} chars into chat`, variant: "info" })
+            dialog.clear()
           }
         } catch (error) {
-          // Show error
+          toast.show({ message: `Error reading file: ${error.message}`, variant: "error" })
         }
       }}
     />
   )
 }
 
-export function DialogInsertImage() {
+export function DialogInsertImage(props: { command: ReturnType<typeof useCommandDialog> }) {
   const dialog = useDialog()
-  const command = useCommandDialog()
+  const { event } = useSDK()
+  const toast = useToast()
   const [currentDir, setCurrentDir] = createSignal(os.homedir())
   const [files, setFiles] = createSignal<string[]>([])
 
@@ -191,10 +177,10 @@ export function DialogInsertImage() {
       const dir = currentDir()
       const fs = await import("fs/promises")
       const entries = await fs.readdir(dir, { withFileTypes: true })
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+      const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
       const fileList = entries
-        .filter(entry => entry.isFile() && imageExtensions.some(ext => entry.name.toLowerCase().endsWith(ext)))
-        .map(entry => entry.name)
+        .filter((entry) => entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext)))
+        .map((entry) => entry.name)
       setFiles(fileList)
     } catch {
       setFiles([])
@@ -203,7 +189,7 @@ export function DialogInsertImage() {
 
   const options = createMemo(() => {
     const dir = currentDir()
-    const fileOpts = files().map(file => ({
+    const fileOpts = files().map((file) => ({
       title: file,
       value: path.join(dir, file),
       description: "Image file",
@@ -231,14 +217,29 @@ export function DialogInsertImage() {
           if (stat.isDirectory) {
             setCurrentDir(option.value)
           } else {
-            // Insert image path for now
             const content = `[Image: ${option.value}]`
-            command.trigger("append_to_prompt", content)
+            await Clipboard.copy(content)
+            event.emit("insert_file_content", { content })
+            toast.show({ message: `Inserted image reference into chat`, variant: "info" })
+            dialog.clear()
           }
         } catch (error) {
           // Show error
         }
       }}
+    />
+  )
+}
+
+function DialogCommand(props: { options: CommandOption[] }) {
+  const keybind = useKeybind()
+  return (
+    <DialogSelect
+      title="Commands"
+      options={props.options.map((x) => ({
+        ...x,
+        footer: x.keybind ? keybind.print(x.keybind) : undefined,
+      }))}
     />
   )
 }
@@ -286,4 +287,3 @@ export function DialogMemories() {
     />
   )
 }
-

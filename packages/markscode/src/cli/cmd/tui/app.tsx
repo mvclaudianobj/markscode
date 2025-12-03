@@ -520,7 +520,8 @@ function ErrorComponent(props: { error: Error; reset: () => void; onExit: () => 
   const term = useTerminalDimensions()
   useKeyboard((evt) => {
     if (evt.name === "tab") {
-      local.agent.move(1)
+      if (dialog.stack.length > 0) return
+      local.agent.cycle()
       evt.preventDefault()
     }
   })
