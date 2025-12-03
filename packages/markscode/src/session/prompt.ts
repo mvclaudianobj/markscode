@@ -1,6 +1,7 @@
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
+import path from "path"
 import z from "zod"
 import { Identifier } from "../id/id"
 import { MessageV2 } from "./message-v2"
@@ -648,13 +649,34 @@ export namespace SessionPrompt {
     modelID: string
   }) {
     let system = SystemPrompt.header(input.providerID)
-    system.push(
-      ...(() => {
-        if (input.system) return [input.system]
-        if (input.agent.prompt) return [input.agent.prompt]
-        return SystemPrompt.provider(input.modelID)
-      })(),
-    )
+    // Load default prompt from prompt_default.txt
+    const defaultPromptPath = path.join(process.cwd(), "prompt_default.txt")
+    let defaultPrompt = ""
+    try {
+      defaultPrompt = await Bun.file(defaultPromptPath).text()
+      if (defaultPrompt.trim()) {
+        // Use default prompt as primary system prompt
+        system.push(defaultPrompt.trim())
+      } else {
+        // Fallback to standard prompts
+        system.push(
+          ...(() => {
+            if (input.system) return [input.system]
+            if (input.agent.prompt) return [input.agent.prompt]
+            return SystemPrompt.provider(input.modelID)
+          })(),
+        )
+      }
+    } catch {
+      // File not found, use standard prompts
+      system.push(
+        ...(() => {
+          if (input.system) return [input.system]
+          if (input.agent.prompt) return [input.agent.prompt]
+          return SystemPrompt.provider(input.modelID)
+        })(),
+      )
+    }
     system.push(...(await SystemPrompt.environment()))
     system.push(...(await SystemPrompt.custom()))
     // max 2 system prompt messages for caching purposes

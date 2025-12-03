@@ -530,7 +530,7 @@ export namespace Provider {
           // Filter out experimental models
           .filter(
             ([, model]) =>
-              ((!model.experimental && model.status !== "alpha") || Flag.OPENCODE_ENABLE_EXPERIMENTAL_MODELS) &&
+              ((!model.experimental && model.status !== "alpha") || Flag.MARKSCODE_ENABLE_EXPERIMENTAL_MODELS) &&
               model.status !== "deprecated",
           )
           // Filter by provider's whitelist/blacklist from config
