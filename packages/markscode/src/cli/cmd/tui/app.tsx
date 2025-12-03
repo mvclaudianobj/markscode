@@ -14,7 +14,13 @@ import { DialogModel } from "@tui/component/dialog-model"
 import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
-import { CommandProvider, useCommandDialog, DialogMemories, DialogInsertFile, DialogInsertImage } from "@tui/component/dialog-command"
+import {
+  CommandProvider,
+  useCommandDialog,
+  DialogMemories,
+  DialogInsertFile,
+  DialogInsertImage,
+} from "@tui/component/dialog-command"
 import { DialogAgent } from "@tui/component/dialog-agent"
 import { DialogSessionList } from "@tui/component/dialog-session-list"
 import { KeybindProvider } from "@tui/context/keybind"
@@ -513,8 +519,9 @@ function App() {
 function ErrorComponent(props: { error: Error; reset: () => void; onExit: () => Promise<void> }) {
   const term = useTerminalDimensions()
   useKeyboard((evt) => {
-    if (evt.ctrl && evt.name === "c") {
-      props.onExit()
+    if (evt.name === "tab") {
+      local.agent.move(1)
+      evt.preventDefault()
     }
   })
   const [copied, setCopied] = createSignal(false)
