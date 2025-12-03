@@ -14,7 +14,7 @@ import { DialogModel } from "@tui/component/dialog-model"
 import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
-import { CommandProvider, useCommandDialog, DialogMemories } from "@tui/component/dialog-command"
+import { CommandProvider, useCommandDialog, DialogMemories, DialogInsertFile, DialogInsertImage } from "@tui/component/dialog-command"
 import { DialogAgent } from "@tui/component/dialog-agent"
 import { DialogSessionList } from "@tui/component/dialog-session-list"
 import { KeybindProvider } from "@tui/context/keybind"
@@ -381,6 +381,22 @@ function App() {
       category: "Project",
       onSelect: () => {
         dialog.replace(() => <DialogMemories />)
+      },
+    },
+    {
+      title: "Insert file",
+      value: "project.insert_file",
+      category: "Project",
+      onSelect: () => {
+        dialog.replace(() => <DialogInsertFile />)
+      },
+    },
+    {
+      title: "Insert image file",
+      value: "project.insert_image",
+      category: "Project",
+      onSelect: () => {
+        dialog.replace(() => <DialogInsertImage />)
       },
     },
   ])

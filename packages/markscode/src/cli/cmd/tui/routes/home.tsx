@@ -53,24 +53,12 @@ export function Home() {
     } else {
       // Only load automatic prompt in new sessions
       if (!args.continue && !args.sessionID) {
-        // Load default prompt from prompt_default.txt
-        const promptFile = path.join(directory(), "prompt_default.txt")
-        try {
-          const content = await Bun.file(promptFile).text()
-          if (content.trim()) {
-            promptText = content.trim()
-            console.log("Prompt default carregado:", content.slice(0, 50) + "...")
-          }
-        } catch (error) {
-          console.log("Erro ao carregar prompt_default.txt:", error)
-        }
-
-        // Load memory for current directory
+        // Load memory for current directory (prompt_default.txt is now system prompt)
         const assunto = path.basename(directory())
         const memory = await getMemoryForAssunto(assunto)
         if (memory) {
           const memoryText = `\n\nMemória do projeto:\nResumo: ${memory.resumo}\nPalavras-chave: ${memory.palavras.join(", ")}\nAvanços: ${memory.avancos.join("; ")}`
-          promptText += memoryText
+          promptText = memoryText
           console.log("Memória carregada para assunto:", assunto)
         }
       }
