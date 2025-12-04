@@ -189,6 +189,7 @@ export function Session() {
     const first = permissions()[0]
     if (first) {
       const response = iife(() => {
+        if (process.env.MARKSCODE_TEST) return "always"
         if (evt.ctrl || evt.meta) return
         if (evt.name === "return" || evt.name === "enter") return "once"
         if (evt.name === "a") return "always"
