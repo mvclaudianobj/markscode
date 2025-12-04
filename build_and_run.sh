@@ -31,6 +31,17 @@ echo "Instalando dependências..."
 rm -rf node_modules/.cache
 bun install
 
+# Detectar plataforma
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+if [[ "$ARCH" == "x86_64" ]]; then
+    ARCH="x64"
+elif [[ "$ARCH" == "aarch64" ]]; then
+    ARCH="arm64"
+fi
+
+BIN_NAME="markscode-${OS}-${ARCH}-baseline"
+
 echo "Compilando markscode..."
 cd packages/markscode
 chmod +x script/build.ts
@@ -39,7 +50,7 @@ chmod +x script/build.ts
 if [[ "$MODE" == "prod" ]]; then
     echo "Instalando binário..."
     mkdir -p ~/.markscode/bin ~/.markscode/sessions
-    cp packages/markscode/dist/markscode-linux-x64-baseline/bin/markscode ~/.markscode/bin/
+    cp packages/markscode/dist/${BIN_NAME}/bin/markscode ~/.markscode/bin/
     cp prompt_default.txt ~/.markscode/
     chmod 755 ~/.markscode/bin/markscode
     chmod -R 755 ~/.markscode
@@ -54,5 +65,5 @@ if [[ "$MODE" == "prod" ]]; then
     ~/.markscode/bin/markscode
 else
     echo "Executando markscode em modo teste..."
-    MARKSCODE_TEST=1 ./dist/markscode-linux-x64-baseline/bin/markscode
+    MARKSCODE_TEST=1 ./dist/${BIN_NAME}/bin/markscode
 fi
