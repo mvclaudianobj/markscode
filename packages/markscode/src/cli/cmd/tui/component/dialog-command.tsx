@@ -101,8 +101,25 @@ export function DialogInsertFile(props: { command: ReturnType<typeof useCommandD
   const dialog = useDialog()
   const { event } = useSDK()
   const toast = useToast()
-  const [currentDir, setCurrentDir] = createSignal(os.homedir())
+  const keybind = useKeybind()
+  const [currentDir, setCurrentDir] = createSignal("/home")
   const [files, setFiles] = createSignal<string[]>([])
+  const [selectedFile, setSelectedFile] = createSignal<string | null>(null)
+
+  useKeyboard(async (evt) => {
+    if (keybind.match("file_copy", evt)) {
+      const file = selectedFile()
+      if (file) {
+        try {
+          const content = await Bun.file(file).text()
+          await Clipboard.copy(content)
+          toast.show({ message: `Copied ${content.length} chars to clipboard`, variant: "info" })
+        } catch (error) {
+          toast.show({ message: `Error copying file: ${error.message}`, variant: "error" })
+        }
+      }
+    }
+  })
 
   // Load files on mount
   createMemo(async () => {
@@ -111,7 +128,7 @@ export function DialogInsertFile(props: { command: ReturnType<typeof useCommandD
       const fs = await import("fs/promises")
       const entries = await fs.readdir(dir, { withFileTypes: true })
       const fileList = entries
-        .filter((entry) => entry.isFile())
+        .filter((entry) => entry.isFile() || entry.isDirectory())
         .map((entry) => entry.name)
         .filter((name) => !name.startsWith("."))
       setFiles(fileList)
@@ -147,18 +164,18 @@ export function DialogInsertFile(props: { command: ReturnType<typeof useCommandD
       onSelect={async (option) => {
         try {
           const stat = await Bun.file(option.value).stat()
-          if (stat.isDirectory) {
+          if (stat.isDirectory()) {
             setCurrentDir(option.value)
           } else {
             const content = await Bun.file(option.value).text()
             await Clipboard.copy(content)
-            event.emit("insert_file_content", { content })
+            event.emit("tui.insert_file_content", { content })
             toast.show({ message: `Inserted ${content.length} chars into chat`, variant: "info" })
             dialog.clear()
           }
-        } catch (error) {
-          toast.show({ message: `Error reading file: ${error.message}`, variant: "error" })
-        }
+         } catch (error) {
+           toast.show({ message: `Error reading file: ${error instanceof Error ? error.message : String(error)}`, variant: "error" })
+         }
       }}
     />
   )
@@ -168,7 +185,7 @@ export function DialogInsertImage(props: { command: ReturnType<typeof useCommand
   const dialog = useDialog()
   const { event } = useSDK()
   const toast = useToast()
-  const [currentDir, setCurrentDir] = createSignal(os.homedir())
+  const [currentDir, setCurrentDir] = createSignal("/home")
   const [files, setFiles] = createSignal<string[]>([])
 
   // Load image files on mount or dir change
@@ -179,8 +196,9 @@ export function DialogInsertImage(props: { command: ReturnType<typeof useCommand
       const entries = await fs.readdir(dir, { withFileTypes: true })
       const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
       const fileList = entries
-        .filter((entry) => entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext)))
+        .filter((entry) => (entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext))) || entry.isDirectory())
         .map((entry) => entry.name)
+        .filter((name) => !name.startsWith("."))
       setFiles(fileList)
     } catch {
       setFiles([])
@@ -214,18 +232,18 @@ export function DialogInsertImage(props: { command: ReturnType<typeof useCommand
       onSelect={async (option) => {
         try {
           const stat = await Bun.file(option.value).stat()
-          if (stat.isDirectory) {
+          if (stat.isDirectory()) {
             setCurrentDir(option.value)
           } else {
             const content = `[Image: ${option.value}]`
             await Clipboard.copy(content)
-            event.emit("insert_file_content", { content })
+            event.emit("tui.insert_file_content", { content })
             toast.show({ message: `Inserted image reference into chat`, variant: "info" })
             dialog.clear()
           }
-        } catch (error) {
-          // Show error
-        }
+         } catch (error) {
+           toast.show({ message: `Error reading image: ${error instanceof Error ? error.message : String(error)}`, variant: "error" })
+         }
       }}
     />
   )
@@ -268,22 +286,13 @@ export function DialogMemories() {
       title="Memories"
       placeholder="Search memories"
       options={options()}
-      onSelect={(option) => {
-        // For now, just show the memory details
-        // In future, integrate with prompt
-        const mem = memories()[option.value]
-        dialog.replace(() => (
-          <box paddingLeft={2} paddingRight={2} gap={1}>
-            <text>{`Memória: ${option.value}`}</text>
-            <text>{`Resumo: ${mem.resumo}`}</text>
-            <text>{`Palavras: ${mem.palavras.join(", ")}`}</text>
-            <text>{`Avanços: ${mem.avancos.join("; ")}`}</text>
-            <box paddingTop={1}>
-              <text fg="blue">Pressione esc para voltar</text>
-            </box>
-          </box>
-        ))
-      }}
+       onSelect={async (option) => {
+         const mem = memories()[option.value]
+         await Clipboard.copy(mem.resumo)
+         event.emit("tui.insert_file_content", { content: mem.resumo })
+         toast.show({ message: `Memória importada: ${mem.resumo.slice(0, 50)}...`, variant: "info" })
+         dialog.clear()
+       }}
     />
   )
 }

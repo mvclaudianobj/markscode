@@ -99,10 +99,19 @@ export namespace Config {
       promises.push(installDependencies(dir))
       result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
       result.agent = mergeDeep(result.agent, await loadAgent(dir))
-      result.agent = mergeDeep(result.agent, await loadMode(dir))
-      result.plugin.push(...(await loadPlugin(dir)))
-    }
-    await Promise.allSettled(promises)
+       result.agent = mergeDeep(result.agent, await loadMode(dir))
+     }
+     await Promise.allSettled(promises)
+
+     // Load default prompt for agents without prompt
+     for (const [name, agent] of Object.entries(result.agent)) {
+       if (!agent.prompt) {
+         try {
+           const defaultPrompt = await Bun.file(path.join(process.cwd(), "prompt_default.txt")).text()
+           agent.prompt = defaultPrompt
+         } catch {}
+       }
+     }
 
     // Migrate deprecated mode field to agent field
     for (const [name, mode] of Object.entries(result.mode)) {
@@ -427,7 +436,7 @@ export namespace Config {
       model_list: z.string().optional().default("<leader>m").describe("List available models"),
       model_cycle_recent: z.string().optional().default("f2").describe("Next recently used model"),
       model_cycle_recent_reverse: z.string().optional().default("shift+f2").describe("Previous recently used model"),
-      command_list: z.string().optional().default("ctrl+p").describe("List available commands"),
+       command_list: z.string().optional().default("ctrl+p").describe("List available commands"),
       agent_list: z.string().optional().default("<leader>a").describe("List agents"),
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
@@ -437,11 +446,13 @@ export namespace Config {
       input_submit: z.string().optional().default("return").describe("Submit input"),
       input_newline: z.string().optional().default("shift+return,ctrl+j").describe("Insert newline in input"),
       history_previous: z.string().optional().default("up").describe("Previous history item"),
-      history_next: z.string().optional().default("down").describe("Next history item"),
-      session_child_cycle: z.string().optional().default("<leader>right").describe("Next child session"),
-      session_child_cycle_reverse: z.string().optional().default("<leader>left").describe("Previous child session"),
-      terminal_suspend: z.string().optional().default("ctrl+z").describe("Suspend terminal"),
-    })
+       history_next: z.string().optional().default("down").describe("Next history item"),
+       memory_save: z.string().optional().default("ctrl+shift+s").describe("Save current memory"),
+       memory_list: z.string().optional().default("ctrl+shift+m").describe("List memories"),
+       session_child_cycle: z.string().optional().default("<leader>right").describe("Next child session"),
+       session_child_cycle_reverse: z.string().optional().default("<leader>left").describe("Previous child session"),
+       terminal_suspend: z.string().optional().default("ctrl+z").describe("Suspend terminal"),
+     })
     .strict()
     .meta({
       ref: "KeybindsConfig",

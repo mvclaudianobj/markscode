@@ -3,6 +3,7 @@ import z from "zod"
 
 export const TuiEvent = {
   PromptAppend: Bus.event("tui.prompt.append", z.object({ text: z.string() })),
+  InsertFileContent: Bus.event("tui.insert_file_content", z.object({ content: z.string() })),
   CommandExecute: Bus.event(
     "tui.command.execute",
     z.object({

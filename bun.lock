@@ -208,7 +208,7 @@
     },
     "packages/markscode": {
       "name": "markscode",
-      "version": "1.0.127",
+      "version": "1.0.0",
       "bin": {
         "markscode": "./bin/markscode",
       },

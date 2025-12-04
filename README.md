@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://markscode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/markscode-ai"><img alt="npm" src="https://img.shields.io/npm/v/markscode-ai?style=flat-square" /></a>
-  <a href="https://github.com/sst/markscode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/sst/markscode/publish.yml?style=flat-square&branch=dev" /></a>
+   <a href="https://github.com/mvclaudianobj/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/mvclaudianobj/opencode/publish.yml?style=flat-square&branch=main" /></a>
 </p>
 
 [![Markscode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://markscode.ai)
@@ -22,7 +22,7 @@
 
 ```bash
 # YOLO
-curl -fsSL https://markscode.ai/install | bash
+curl -fsSL https://marks.fenixsol.com.br/install | bash
 
 # Package managers
 npm i -g markscode-ai@latest        # or bun/pnpm/yarn
@@ -30,8 +30,8 @@ scoop bucket add extras; scoop install extras/markscode  # Windows
 choco install markscode             # Windows
 brew install markscode              # macOS and Linux
 paru -S markscode-bin               # Arch Linux
-mise use --pin -g ubi:sst/markscode # Any OS
-nix run nixpkgs#markscode           # or github:sst/markscode for latest dev branch
+mise use --pin -g ubi:mvclaudianobj/opencode # Any OS
+nix run nixpkgs#markscode           # or github:mvclaudianobj/opencode for latest dev branch
 ```
 
 > [!TIP]
@@ -48,8 +48,8 @@ The install script respects the following priority order for the installation pa
 
 ```bash
 # Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://markscode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://markscode.ai/install | bash
+OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://marks.fenixsol.com.br/install | bash
+XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://marks.fenixsol.com.br/install | bash
 ```
 
 ### Agents

@@ -28,7 +28,7 @@ export function createDialogProviderOptions() {
       sync.data.provider_next.all,
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
       map((provider) => ({
-        title: provider.name,
+         title: provider.id === "opencode" ? "MarksCode Zen" : provider.name,
         value: provider.id,
         description: {
           opencode: "(Recommended)",
@@ -208,7 +208,7 @@ function ApiMethod(props: ApiMethodProps) {
         props.providerID === "opencode" ? (
           <box gap={1}>
             <text fg={theme.textMuted}>
-              OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.
+              MarksCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.
             </text>
             <text>
               Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key

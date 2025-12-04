@@ -80,7 +80,7 @@ const targets = singleFlag
   ? allTargets.filter((item) => item.os === process.platform && item.arch === process.arch)
   : allTargets
 
-await $`rm -rf dist`
+await $`rm -rf dist || true`
 
 const binaries: Record<string, string> = {}
 await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`

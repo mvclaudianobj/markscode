@@ -12,7 +12,7 @@ import { createStore, produce } from "solid-js/store"
 import { useKeybind } from "@tui/context/keybind"
 import { usePromptHistory, type PromptInfo } from "./history"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
-import { useCommandDialog } from "../dialog-command"
+import { useCommandDialog, DialogInsertFile, DialogInsertImage, DialogMemories } from "../dialog-command"
 import { useRenderer } from "@opentui/solid"
 import { Editor } from "@tui/util/editor"
 import { useExit } from "../../context/exit"
@@ -20,6 +20,7 @@ import { Clipboard } from "../../util/clipboard"
 import type { FilePart } from "@opencode-ai/sdk"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
+import { updateMemory } from "@/memory"
 import { Locale } from "@/util/locale"
 import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useDialog } from "@tui/ui/dialog"
@@ -243,28 +244,61 @@ export function Prompt(props: PromptProps) {
           }
           if (!props.sessionID) return
 
-          setStore("interrupt", store.interrupt + 1)
-
-          setTimeout(() => {
-            setStore("interrupt", 0)
-          }, 5000)
-
-          if (store.interrupt >= 2) {
-            sdk.client.session.abort({
-              path: {
-                id: props.sessionID,
-              },
-            })
-            setStore("interrupt", 0)
-          }
-          dialog.clear()
-        },
-      },
-    ]
-  })
+           sdk.client.session.abort({
+             path: {
+               id: props.sessionID,
+             },
+           })
+           dialog.clear()
+         },
+       },
+       {
+         title: "Include Files",
+         category: "Session",
+         value: "include.files",
+         onSelect: (dialog) => {
+           dialog.replace(() => <DialogInsertFile command={useCommandDialog()} />)
+         },
+       },
+       {
+         title: "Include Images",
+         category: "Session",
+         value: "include.images",
+         onSelect: (dialog) => {
+           dialog.replace(() => <DialogInsertImage command={useCommandDialog()} />)
+         },
+       },
+       {
+         title: "Memories",
+         category: "Session",
+         keybind: "memory_list" as any,
+         value: "memory.list",
+         onSelect: (dialog) => {
+           dialog.replace(() => <DialogMemories />)
+         },
+       },
+       {
+         title: "Save memory",
+         category: "Session",
+         keybind: "memory_save" as any,
+         value: "memory.save",
+         onSelect: async (dialog) => {
+           const prompt = store.prompt.input
+           await updateMemory("manual", { resumo: prompt, palavras: [], avancos: [] })
+           dialog.clear()
+         },
+       },
+     ]
+   })
 
   sdk.event.on(TuiEvent.PromptAppend.type, (evt) => {
     input.insertText(evt.properties.text)
+  })
+
+  sdk.event.on("tui.insert_file_content" as any, (evt: any) => {
+    const content = evt.content || evt.properties?.content || evt
+    toast.show({ message: `Inserting ${content.length} chars`, variant: "info" })
+    input.insertText(content)
   })
 
   createEffect(() => {
@@ -275,16 +309,16 @@ export function Prompt(props: PromptProps) {
   const [store, setStore] = createStore<{
     prompt: PromptInfo
     mode: "normal" | "shell"
-    extmarkToPartIndex: Map<number, number>
-    interrupt: number
+     extmarkToPartIndex: Map<number, number>
+     interrupt: number
   }>({
     prompt: {
       input: "",
       parts: [],
     },
     mode: "normal",
-    extmarkToPartIndex: new Map(),
-    interrupt: 0,
+     extmarkToPartIndex: new Map(),
+     interrupt: 0,
   })
 
   createEffect(() => {
@@ -473,30 +507,35 @@ export function Prompt(props: PromptProps) {
           messageID,
         },
       })
-    } else {
-      sdk.client.session.prompt({
-        path: {
-          id: sessionID,
-        },
-        body: {
-          ...selectedModel,
-          messageID,
-          agent: local.agent.current().name,
-          model: selectedModel,
-          parts: [
-            {
-              id: Identifier.ascending("part"),
-              type: "text",
-              text: inputText,
-            },
-            ...nonTextParts.map((x) => ({
-              id: Identifier.ascending("part"),
-              ...x,
-            })),
-          ],
-        },
-      })
-    }
+     } else {
+       sdk.client.session.prompt({
+         path: {
+           id: sessionID,
+         },
+         body: {
+           ...selectedModel,
+           messageID,
+           agent: local.agent.current().name,
+           model: selectedModel,
+           parts: [
+             {
+               id: Identifier.ascending("part"),
+               type: "text",
+               text: inputText,
+             },
+             ...nonTextParts.map((x) => ({
+               id: Identifier.ascending("part"),
+               ...x,
+             })),
+           ],
+         },
+       })
+
+       // Auto-save memory if prompt is long
+       if (inputText.length > 100) {
+         await updateMemory("auto", { resumo: inputText.slice(0, 200) + "...", palavras: [], avancos: [] })
+       }
+     }
     history.append(store.prompt)
     input.extmarks.clear()
     setStore("prompt", {
@@ -716,8 +755,58 @@ export function Prompt(props: PromptProps) {
                     return
                   }
                 }
-                if (store.mode === "normal") autocomplete.onKeyDown(e)
-                if (!autocomplete.visible) {
+                 if (e.name === "escape") {
+                   if (store.mode === "shell") {
+                     setStore("mode", "normal")
+                     e.preventDefault()
+                     return
+                   }
+                   if (props.sessionID) {
+                     setStore("interrupt", store.interrupt + 1)
+                     setTimeout(() => {
+                       setStore("interrupt", 0)
+                     }, 5000)
+                     if (store.interrupt >= 2) {
+                       sdk.client.session.abort({
+                         path: {
+                           id: props.sessionID,
+                         },
+                       })
+                       setStore("interrupt", 0)
+                     }
+                   }
+                   e.preventDefault()
+                   return
+                 }
+                 if (e.name === "tab" && !autocomplete.visible) {
+                   const current = local.agent.current().name
+                   const agents = ["build", "plan"]
+                   const index = agents.indexOf(current)
+                   const next = agents[(index + 1) % agents.length]
+                   local.agent.set(next)
+                   e.preventDefault()
+                   return
+                 }
+                 if (e.ctrl && e.shift && e.name === "s") {
+                   const prompt = store.prompt.input
+                   iife(async () => {
+                     try {
+                       await updateMemory("manual", { resumo: prompt, palavras: [], avancos: [] })
+                       toast.show({ message: "Memória salva", variant: "info" })
+                     } catch (e) {
+                       toast.show({ message: "Erro ao salvar memória", variant: "error" })
+                     }
+                   })
+                   e.preventDefault()
+                   return
+                 }
+                 if (e.ctrl && e.shift && e.name === "m") {
+                   dialog.replace(() => <DialogMemories />)
+                   e.preventDefault()
+                   return
+                 }
+                 if (store.mode === "normal") autocomplete.onKeyDown(e)
+                 if (!autocomplete.visible) {
                   if (
                     (keybind.match("history_previous", e) && input.cursorOffset === 0) ||
                     (keybind.match("history_next", e) && input.cursorOffset === input.plainText.length)
@@ -903,12 +992,12 @@ export function Prompt(props: PromptProps) {
                   })()}
                 </box>
               </box>
-              <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
-                esc{" "}
-                <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
-                  {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
-                </span>
-              </text>
+               <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
+                 esc{" "}
+                 <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
+                   {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                 </span>
+               </text>
             </box>
           </Show>
           <Show when={status().type !== "retry"}>

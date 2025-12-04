@@ -381,30 +381,6 @@ function App() {
         process.kill(0, "SIGTSTP")
       },
     },
-    {
-      title: "Memories",
-      value: "memories.list",
-      category: "Project",
-      onSelect: () => {
-        dialog.replace(() => <DialogMemories />)
-      },
-    },
-    {
-      title: "Insert file",
-      value: "project.insert_file",
-      category: "Project",
-      onSelect: () => {
-        dialog.replace(() => <DialogInsertFile />)
-      },
-    },
-    {
-      title: "Insert image file",
-      value: "project.insert_image",
-      category: "Project",
-      onSelect: () => {
-        dialog.replace(() => <DialogInsertImage />)
-      },
-    },
   ])
 
   createEffect(() => {
@@ -415,7 +391,7 @@ function App() {
         DialogAlert.show(
           dialog,
           "Warning",
-          "While openrouter is a convenient way to access LLMs your request will often be routed to subpar providers that do not work well in our testing.\n\nFor reliable access to models check out OpenCode Zen\nhttps://opencode.ai/zen",
+          "While openrouter is a convenient way to access LLMs your request will often be routed to subpar providers that do not work well in our testing.\n\nFor reliable access to models check out MarksCode Zen\nhttps://opencode.ai/zen",
         ).then(() => kv.set("openrouter_warning", true))
       })
     }
@@ -470,7 +446,7 @@ function App() {
     toast.show({
       variant: "success",
       title: "Update Complete",
-      message: `OpenCode updated to v${evt.properties.version}`,
+      message: `MarksCode updated to v${evt.properties.version}`,
       duration: 5000,
     })
   })
@@ -479,7 +455,7 @@ function App() {
     toast.show({
       variant: "info",
       title: "Update Available",
-      message: `OpenCode v${evt.properties.version} is available. Run 'opencode upgrade' to update manually.`,
+      message: `MarksCode v${evt.properties.version} is available. Run 'markscode upgrade' to update manually.`,
       duration: 10000,
     })
   })
