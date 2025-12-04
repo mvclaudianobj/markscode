@@ -1,11 +1,22 @@
 #!/bin/bash
 
-# Verificar se é modo teste
+# Verificar modo
 if [[ "$1" == "--test" || "$1" == "--dev" ]]; then
     MODE="test"
+elif [[ "$1" == "--prod" || "$1" == "--release" ]]; then
+    MODE="prod"
+else
+    read -p "Qual modo? (prod/dev): " MODE
+    if [[ "$MODE" == "dev" || "$MODE" == "test" ]]; then
+        MODE="test"
+    else
+        MODE="prod"
+    fi
+fi
+
+if [[ "$MODE" == "test" ]]; then
     echo "Modo teste ativado: executando diretamente do dist."
 else
-    MODE="prod"
     echo "Modo produção: instalando e executando do bin."
 fi
 
@@ -32,6 +43,12 @@ if [[ "$MODE" == "prod" ]]; then
     cp prompt_default.txt ~/.markscode/
     chmod 755 ~/.markscode/bin/markscode
     chmod -R 755 ~/.markscode
+
+    # Preparar ambiente bash
+    if ! grep -q "~/.markscode/bin" ~/.bashrc; then
+        echo 'export PATH="$HOME/.markscode/bin:$PATH"' >> ~/.bashrc
+        echo "Adicionado ~/.markscode/bin ao PATH no ~/.bashrc"
+    fi
 
     echo "Executando markscode..."
     ~/.markscode/bin/markscode
