@@ -103,10 +103,10 @@ INSTALL_DIR=$HOME/.markscode/bin
 mkdir -p "$INSTALL_DIR"
 
 if [ -z "$requested_version" ]; then
-    url="https://marks.fenixsol.com.br/download/$filename"
+    url="https://github.com/mvclaudianobj/opencode/releases/download/v1.0.0/$filename"
     specific_version="1.0.0"
 else
-    url="https://marks.fenixsol.com.br/download/$filename"
+    url="https://github.com/mvclaudianobj/opencode/releases/download/v$requested_version/$filename"
     specific_version=$requested_version
 fi
 
