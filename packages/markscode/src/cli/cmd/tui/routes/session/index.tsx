@@ -190,7 +190,7 @@ export function Session() {
     if (first) {
       const response = iife(() => {
         if (evt.ctrl || evt.meta) return
-        if (evt.name === "return") return "once"
+        if (evt.name === "return" || evt.name === "enter") return "once"
         if (evt.name === "a") return "always"
         if (evt.name === "d") return "reject"
         if (evt.name === "escape") return "reject"

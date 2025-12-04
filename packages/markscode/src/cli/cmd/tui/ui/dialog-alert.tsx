@@ -14,7 +14,7 @@ export function DialogAlert(props: DialogAlertProps) {
   const { theme } = useTheme()
 
   useKeyboard((evt) => {
-    if (evt.name === "return") {
+    if (evt.name === "return" || evt.name === "enter") {
       props.onConfirm?.()
       dialog.clear()
     }
