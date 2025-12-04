@@ -101,6 +101,8 @@ for (const item of targets) {
   console.log(`building ${name}`)
   await $`mkdir -p dist/${name}/bin`
 
+  console.log(`Target: ${name.replace(pkg.name, "bun")}, Outfile: dist/${name}/bin/markscode`)
+
   const parserWorker = fs.realpathSync(path.resolve(dir, "./node_modules/@opentui/core/parser.worker.js"))
   const workerPath = "./src/cli/cmd/tui/worker.ts"
 
@@ -130,6 +132,8 @@ for (const item of targets) {
     console.error(`Failed to build ${name}:`, error)
     throw error
   }
+
+  console.log(`Build completed for ${name}`)
 
   await $`rm -rf ./dist/${name}/bin/tui`
   await Bun.file(`dist/${name}/package.json`).write(
