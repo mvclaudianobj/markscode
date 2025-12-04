@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Salvar diretório inicial
+ORIGINAL_DIR=$(pwd)
+
 # Verificar se é modo teste
 if [[ "$1" == "--test" || "$1" == "--dev" ]]; then
     MODE="test"
@@ -29,13 +32,21 @@ if [[ "$MODE" == "prod" ]]; then
     echo "Instalando binário..."
     mkdir -p ~/.markscode/bin ~/.markscode/sessions
     cp packages/markscode/dist/markscode-linux-x64-baseline/bin/markscode ~/.markscode/bin/
-    cp prompt_default.txt ~/.markscode/
     chmod 755 ~/.markscode/bin/markscode
     chmod -R 755 ~/.markscode
+
+    echo "Preparando prompt..."
+    cd "$ORIGINAL_DIR"
+    cp prompt_default.txt .
 
     echo "Executando markscode..."
     ~/.markscode/bin/markscode
 else
+    echo "Preparando prompt..."
+    cd "$ORIGINAL_DIR"
+    cp prompt_default.txt .
+
     echo "Executando markscode em modo teste..."
+    cd packages/markscode
     ./dist/markscode-linux-x64-baseline/bin/markscode
 fi
