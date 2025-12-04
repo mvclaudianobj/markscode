@@ -1,8 +1,8 @@
 #!/bin/sh
 EXPECTED_VERSION=$(grep '"packageManager"' package.json | sed 's/.*"bun@\([^"]*\)".*/\1/')
-CURRENT_VERSION=$(./node_modules/.bin/bun --version)
+CURRENT_VERSION=$($HOME/.bun/bin/bun --version 2>/dev/null || echo "not found")
 if [ "$CURRENT_VERSION" != "$EXPECTED_VERSION" ]; then
   echo "Error: Bun version $CURRENT_VERSION does not match expected $EXPECTED_VERSION"
   exit 1
 fi
-./node_modules/.bin/bun typecheck
+$HOME/.bun/bin/bun typecheck
