@@ -104,27 +104,32 @@ for (const item of targets) {
   const parserWorker = fs.realpathSync(path.resolve(dir, "./node_modules/@opentui/core/parser.worker.js"))
   const workerPath = "./src/cli/cmd/tui/worker.ts"
 
-  await Bun.build({
-    conditions: ["browser"],
-    tsconfig: "./tsconfig.json",
-    plugins: [solidPlugin],
-    sourcemap: "external",
-    compile: {
-      autoloadBunfig: false,
-      autoloadDotenv: false,
-      target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist/${name}/bin/markscode`,
-      execArgv: [`--user-agent=markscode/${Script.version}`, "--"],
-      windows: {},
-    },
-    entrypoints: ["./src/index.ts", parserWorker, workerPath],
-    define: {
-      MARKSCODE_VERSION: `'${Script.version}'`,
-      OTUI_TREE_SITTER_WORKER_PATH: "/$bunfs/root/" + path.relative(dir, parserWorker).replaceAll("\\", "/"),
-      MARKSCODE_WORKER_PATH: workerPath,
-      MARKSCODE_CHANNEL: `'${Script.channel}'`,
-    },
-  })
+  try {
+    await Bun.build({
+      conditions: ["browser"],
+      tsconfig: "./tsconfig.json",
+      plugins: [solidPlugin],
+      sourcemap: "external",
+      compile: {
+        autoloadBunfig: false,
+        autoloadDotenv: false,
+        target: name.replace(pkg.name, "bun") as any,
+        outfile: `dist/${name}/bin/markscode`,
+        execArgv: [`--user-agent=markscode/${Script.version}`, "--"],
+        windows: {},
+      },
+      entrypoints: ["./src/index.ts", parserWorker, workerPath],
+      define: {
+        MARKSCODE_VERSION: `'${Script.version}'`,
+        OTUI_TREE_SITTER_WORKER_PATH: "/$bunfs/root/" + path.relative(dir, parserWorker).replaceAll("\\", "/"),
+        MARKSCODE_WORKER_PATH: workerPath,
+        MARKSCODE_CHANNEL: `'${Script.channel}'`,
+      },
+    })
+  } catch (error) {
+    console.error(`Failed to build ${name}:`, error)
+    throw error
+  }
 
   await $`rm -rf ./dist/${name}/bin/tui`
   await Bun.file(`dist/${name}/package.json`).write(
