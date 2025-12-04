@@ -12,6 +12,7 @@ bun install
 
 echo "Compilando markscode..."
 cd packages/markscode
+chmod +x script/build.ts
 ./script/build.ts --single
 
 echo "Comprimindo binário..."
