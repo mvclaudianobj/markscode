@@ -82,7 +82,7 @@ const targets = singleFlag
       .map((item) => ({
         ...item,
         avx2: false,
-        target: process.platform === "linux" ? "linux-x64" : `${item.os}-${item.arch}`,
+        target: process.platform === "linux" ? "bun-linux-x64" : `bun-${item.os}-${item.arch}`,
       }))
   : allTargets
 
