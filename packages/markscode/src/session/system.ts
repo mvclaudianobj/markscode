@@ -17,6 +17,8 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_SUMMARIZE from "./prompt/summarize.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_CODEX from "./prompt/codex.txt"
+import PROMPT_MARKS from "./prompt/marks.txt"
+export { PROMPT_MARKS }
 
 export namespace SystemPrompt {
   export function header(providerID: string) {
@@ -30,7 +32,7 @@ export namespace SystemPrompt {
     if (modelID.includes("gemini-")) return [PROMPT_GEMINI]
     if (modelID.includes("claude")) return [PROMPT_ANTHROPIC]
     if (modelID.includes("polaris-alpha")) return [PROMPT_POLARIS]
-    return [PROMPT_ANTHROPIC_WITHOUT_TODO]
+    return [PROMPT_MARKS]
   }
 
   export async function environment() {

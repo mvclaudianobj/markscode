@@ -62,25 +62,7 @@ export namespace Provider {
         },
       }
     },
-    async opencode(input) {
-      const hasKey = await (async () => {
-        if (input.env.some((item) => process.env[item])) return true
-        if (await Auth.get(input.id)) return true
-        return false
-      })()
 
-      if (!hasKey) {
-        for (const [key, value] of Object.entries(input.models)) {
-          if (value.cost.input === 0) continue
-          delete input.models[key]
-        }
-      }
-
-      return {
-        autoload: Object.keys(input.models).length > 0,
-        options: hasKey ? {} : { apiKey: "public" },
-      }
-    },
     openai: async () => {
       return {
         autoload: false,

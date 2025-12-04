@@ -264,6 +264,7 @@ function DialogCommand(props: { options: CommandOption[] }) {
 
 export function DialogMemories() {
   const dialog = useDialog()
+  const { event } = useSDK()
   const [memories, setMemories] = createSignal<MemoryData>({})
 
   // Load memories on mount
