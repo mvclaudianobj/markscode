@@ -6,6 +6,7 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 echo "Instalando dependências..."
+rm -rf node_modules/.cache
 bun install
 
 echo "Compilando markscode..."
