@@ -5,7 +5,7 @@
 
 set -e
 
-OPENCODE_REPO="https://github.com/sst/opencode"
+OPENCODE_REPO="https://github.com/sst/opencode.git"
 OPENCODE_BRANCH="dev"
 LOCAL_OPENCODE_BRANCH="opencode-dev"
 MAIN_BRANCH="markscode"
