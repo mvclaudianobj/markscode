@@ -24,11 +24,12 @@ import os from "os"
 type Context = ReturnType<typeof init>
 const ctx = createContext<Context>()
 
-export type CommandOption = DialogSelectOption & {
+export type CommandOption = Omit<DialogSelectOption, "onSelect"> & {
+  onSelect?: () => void
   keybind?: keyof KeybindsConfig
 }
 
-function init() {
+function init(toast: any) {
   const [registrations, setRegistrations] = createSignal<Accessor<CommandOption[]>[]>([])
   const [suspendCount, setSuspendCount] = createSignal(0)
   const options = createMemo(() => {
@@ -72,7 +73,7 @@ export function useCommandDialog() {
 }
 
 export function CommandProvider(props: ParentProps) {
-  const value = init()
+  const value = init(toast)
   const dialog = useDialog()
   const keybind = useKeybind()
 
@@ -173,9 +174,12 @@ export function DialogInsertFile(props: { command: ReturnType<typeof useCommandD
             toast.show({ message: `Inserted ${content.length} chars into chat`, variant: "info" })
             dialog.clear()
           }
-         } catch (error) {
-           toast.show({ message: `Error reading file: ${error instanceof Error ? error.message : String(error)}`, variant: "error" })
-         }
+        } catch (error) {
+          toast.show({
+            message: `Error reading file: ${error instanceof Error ? error.message : String(error)}`,
+            variant: "error",
+          })
+        }
       }}
     />
   )
@@ -196,7 +200,11 @@ export function DialogInsertImage(props: { command: ReturnType<typeof useCommand
       const entries = await fs.readdir(dir, { withFileTypes: true })
       const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
       const fileList = entries
-        .filter((entry) => (entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext))) || entry.isDirectory())
+        .filter(
+          (entry) =>
+            (entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext))) ||
+            entry.isDirectory(),
+        )
         .map((entry) => entry.name)
         .filter((name) => !name.startsWith("."))
       setFiles(fileList)
@@ -241,20 +249,23 @@ export function DialogInsertImage(props: { command: ReturnType<typeof useCommand
             toast.show({ message: `Inserted image reference into chat`, variant: "info" })
             dialog.clear()
           }
-         } catch (error) {
-           toast.show({ message: `Error reading image: ${error instanceof Error ? error.message : String(error)}`, variant: "error" })
-         }
+        } catch (error) {
+          toast.show({
+            message: `Error reading image: ${error instanceof Error ? error.message : String(error)}`,
+            variant: "error",
+          })
+        }
       }}
     />
   )
 }
 
-function DialogCommand(props: { options: CommandOption[] }) {
+function DialogCommand(props: { options: Accessor<CommandOption[]> }) {
   const keybind = useKeybind()
   return (
     <DialogSelect
       title="Commands"
-      options={props.options.map((x) => ({
+      options={props.options().map((x) => ({
         ...x,
         footer: x.keybind ? keybind.print(x.keybind) : undefined,
       }))}
@@ -287,13 +298,13 @@ export function DialogMemories() {
       title="Memories"
       placeholder="Search memories"
       options={options()}
-       onSelect={async (option) => {
-         const mem = memories()[option.value]
-         await Clipboard.copy(mem.resumo)
-         event.emit("tui.insert_file_content", { content: mem.resumo })
-         toast.show({ message: `Memória importada: ${mem.resumo.slice(0, 50)}...`, variant: "info" })
-         dialog.clear()
-       }}
+      onSelect={async (option) => {
+        const mem = memories()[option.value]
+        await Clipboard.copy(mem.resumo)
+        event.emit("tui.insert_file_content", { content: mem.resumo })
+        toast.show({ message: `Memória importada: ${mem.resumo.slice(0, 50)}...`, variant: "info" })
+        dialog.clear()
+      }}
     />
   )
 }
