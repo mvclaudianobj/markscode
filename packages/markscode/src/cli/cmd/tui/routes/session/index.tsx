@@ -66,6 +66,43 @@ import { Footer } from "./footer.tsx"
 
 addDefaultParsers(parsers.parsers)
 
+function DialogPermission(props: { permission: any; onResponse: (response: string) => void }) {
+  const { theme } = useTheme()
+  useKeyboard((evt) => {
+    const response = iife(() => {
+      if (process.env.MARKSCODE_TEST) return "always"
+      if (evt.ctrl || evt.meta) return
+      if (evt.name === "return" || evt.name === "enter") return "once"
+      if (evt.name === "a") return "always"
+      if (evt.name === "d") return "reject"
+      if (evt.name === "escape") return "reject"
+      return
+    })
+    if (response) {
+      props.onResponse(response)
+    }
+  })
+  return (
+    <box paddingLeft={2} paddingRight={2} gap={1}>
+      <text fg={theme.text}>Permission required to run this tool:</text>
+      <box flexDirection="row" gap={2}>
+        <text fg={theme.text}>
+          <b>enter</b>
+          <span style={{ fg: theme.textMuted }}> accept</span>
+        </text>
+        <text fg={theme.text}>
+          <b>a</b>
+          <span style={{ fg: theme.textMuted }}> accept always</span>
+        </text>
+        <text fg={theme.text}>
+          <b>d</b>
+          <span style={{ fg: theme.textMuted }}> deny</span>
+        </text>
+      </box>
+    </box>
+  )
+}
+
 class CustomSpeedScroll implements ScrollAcceleration {
   constructor(private speed: number) {}
 
@@ -182,34 +219,6 @@ export function Session() {
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef
   const keybind = useKeybind()
-
-  useKeyboard((evt) => {
-    if (dialog.stack.length > 0) return
-
-    const first = permissions()[0]
-    if (first) {
-      const response = iife(() => {
-        if (process.env.MARKSCODE_TEST) return "always"
-        if (evt.ctrl || evt.meta) return
-        if (evt.name === "return" || evt.name === "enter") return "once"
-        if (evt.name === "a") return "always"
-        if (evt.name === "d") return "reject"
-        if (evt.name === "escape") return "reject"
-        return
-      })
-      if (response) {
-        sdk.client.postSessionIdPermissionsPermissionId({
-          path: {
-            permissionID: first.id,
-            id: route.sessionID,
-          },
-          body: {
-            response: response,
-          },
-        })
-      }
-    }
-  })
 
   function toBottom() {
     setTimeout(() => {
@@ -768,6 +777,26 @@ export function Session() {
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
 
+  createEffect(() => {
+    const first = permissions()[0]
+    if (first) {
+      dialog.replace(
+        () => (
+          <DialogPermission
+            permission={first}
+            onResponse={(response) => {
+              sdk.client.postSessionIdPermissionsPermissionId({
+                path: { permissionID: first.id, id: route.sessionID },
+                body: { response: response as "always" | "once" | "reject" },
+              })
+            }}
+          />
+        ),
+        () => {},
+      )
+    }
+  })
+
   return (
     <context.Provider
       value={{
@@ -1231,25 +1260,6 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         {props.part.state.status === "error" && (
           <box paddingLeft={2}>
             <text fg={theme.error}>{props.part.state.error.replace("Error: ", "")}</text>
-          </box>
-        )}
-        {permission && (
-          <box gap={1}>
-            <text fg={theme.text}>Permission required to run this tool:</text>
-            <box flexDirection="row" gap={2}>
-              <text fg={theme.text}>
-                <b>enter</b>
-                <span style={{ fg: theme.textMuted }}> accept</span>
-              </text>
-              <text fg={theme.text}>
-                <b>a</b>
-                <span style={{ fg: theme.textMuted }}> accept always</span>
-              </text>
-              <text fg={theme.text}>
-                <b>d</b>
-                <span style={{ fg: theme.textMuted }}> deny</span>
-              </text>
-            </box>
           </box>
         )}
       </box>
