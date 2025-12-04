@@ -119,7 +119,7 @@ for (const item of targets) {
       compile: {
         autoloadBunfig: false,
         autoloadDotenv: false,
-        target: name.replace(pkg.name, "bun") as any,
+        target: item.target || (name.replace(pkg.name, "bun") as any),
         outfile: `dist/${name}/bin/markscode`,
         execArgv: [`--user-agent=markscode/${Script.version}`, "--"],
         windows: {},
