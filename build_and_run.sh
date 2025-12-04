@@ -10,7 +10,7 @@ cd ../../../..
 echo "Instalando binário..."
 mkdir -p ~/.markscode/sessions
 cp dist/markscode-linux-x64-baseline/bin/markscode ~/.markscode/bin/
-cp ../../../prompt_default.txt ~/.markscode/
+cp prompt_default.txt ~/.markscode/
 chmod 755 ~/.markscode/bin/markscode
 chmod -R 755 ~/.markscode
 
