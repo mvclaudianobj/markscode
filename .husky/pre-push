@@ -1,9 +1,8 @@
 #!/bin/sh
-# Check if bun version matches package.json
 EXPECTED_VERSION=$(grep '"packageManager"' package.json | sed 's/.*"bun@\([^"]*\)".*/\1/')
-CURRENT_VERSION=$(bun --version)
+CURRENT_VERSION=$(./node_modules/.bin/bun --version)
 if [ "$CURRENT_VERSION" != "$EXPECTED_VERSION" ]; then
-  echo "Error: Bun version $CURRENT_VERSION does not match expected version $EXPECTED_VERSION from package.json"
+  echo "Error: Bun version $CURRENT_VERSION does not match expected $EXPECTED_VERSION"
   exit 1
 fi
-bun typecheck
+./node_modules/.bin/bun typecheck
