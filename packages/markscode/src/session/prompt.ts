@@ -655,7 +655,7 @@ export namespace SessionPrompt {
       await fs.access(defaultPromptPath)
     } catch {
       // File doesn't exist, create it with Marks prompt
-      const marksPrompt = await Bun.file(path.join(__dirname, "../../../prompt_default.txt")).text()
+      const marksPrompt = await Bun.file(path.join(__dirname, "../../../../prompt_default.txt")).text()
       await Bun.write(defaultPromptPath, marksPrompt)
     }
 
