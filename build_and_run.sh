@@ -1,8 +1,9 @@
+#!/bin/bash
 echo "Verificando Bun..."
 if ! command -v bun >/dev/null 2>&1; then
     echo "Bun não encontrado, instalando..."
     curl -fsSL https://bun.sh/install | bash
-    source ~/.bashrc
+    export PATH="$HOME/.bun/bin:$PATH"
 fi
 
 echo "Instalando dependências..."
