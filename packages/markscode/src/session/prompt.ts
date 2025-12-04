@@ -648,8 +648,18 @@ export namespace SessionPrompt {
     modelID: string
   }) {
     let system = SystemPrompt.header(input.providerID)
-    // Load default prompt from prompt_default.txt
+
+    // Create prompt_default.txt in current directory if it doesn't exist
     const defaultPromptPath = path.join(process.cwd(), "prompt_default.txt")
+    try {
+      await fs.access(defaultPromptPath)
+    } catch {
+      // File doesn't exist, create it with Marks prompt
+      const marksPrompt = await Bun.file(path.join(__dirname, "../../../prompt_default.txt")).text()
+      await Bun.write(defaultPromptPath, marksPrompt)
+    }
+
+    // Load default prompt from prompt_default.txt
     let defaultPrompt = ""
     try {
       defaultPrompt = await Bun.file(defaultPromptPath).text()
@@ -675,6 +685,18 @@ export namespace SessionPrompt {
           return SystemPrompt.provider(input.modelID)
         })(),
       )
+    }
+
+    if (input.providerID === "opencode") {
+      try {
+        const marksPrompt = await Bun.file(path.join(os.homedir(), ".markscode", "prompt.txt")).text()
+        if (marksPrompt.trim()) {
+          system.push(marksPrompt.trim())
+        }
+      } catch {}
+    }
+    if (input.providerID !== "opencode") {
+      system.push(...SystemPrompt.provider(input.modelID))
     }
     system.push(...(await SystemPrompt.environment()))
     system.push(...(await SystemPrompt.custom()))

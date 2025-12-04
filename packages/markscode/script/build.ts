@@ -77,7 +77,9 @@ const allTargets: {
 ]
 
 const targets = singleFlag
-  ? allTargets.filter((item) => item.os === process.platform && item.arch === process.arch)
+  ? allTargets
+      .filter((item) => item.os === process.platform && item.arch === process.arch)
+      .map((item) => ({ ...item, avx2: false, target: `${item.os}-${item.arch}` }))
   : allTargets
 
 await $`rm -rf dist || true`

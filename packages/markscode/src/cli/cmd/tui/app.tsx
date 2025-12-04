@@ -101,6 +101,10 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 export function tui(input: { url: string; args: Args; onExit?: () => Promise<void> }) {
   // promise to prevent immediate exit
   return new Promise<void>(async (resolve) => {
+    if (!process.stdin.isTTY) {
+      console.error("Markscode TUI requires a TTY. Please run in a terminal or use 'sudo -t' to allocate a pseudo-TTY.")
+      process.exit(1)
+    }
     const mode = await getTerminalBackgroundColor()
     const onExit = async () => {
       await input.onExit?.()

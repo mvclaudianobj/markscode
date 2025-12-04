@@ -73,8 +73,13 @@ export namespace ModelsDev {
     const file = Bun.file(filepath)
     const result = await file.json().catch(() => {})
     if (result) return result as Record<string, Provider>
-    const json = await data()
-    return JSON.parse(json) as Record<string, Provider>
+    try {
+      const json = await data()
+      return JSON.parse(json) as Record<string, Provider>
+    } catch {
+      log.warn("Failed to fetch models from models.dev, using empty providers")
+      return {} as Record<string, Provider>
+    }
   }
 
   export async function refresh() {
