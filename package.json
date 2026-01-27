@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "opencode",
+  "name": "markscode",
   "description": "AI-powered development tool",
   "private": true,
   "type": "module",
@@ -73,9 +73,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.933.0",
-    "@opencode-ai/plugin": "workspace:*",
-    "@opencode-ai/script": "workspace:*",
-    "@opencode-ai/sdk": "workspace:*",
+    "@markscode-ai/plugin": "workspace:*",
+    "@markscode-ai/script": "workspace:*",
+    "@markscode-ai/sdk": "workspace:*",
     "typescript": "catalog:"
   },
   "repository": {
