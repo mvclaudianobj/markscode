@@ -1,0 +1,75 @@
+{
+  "$schema": "https://markscode.ai/config.json",
+  "provider": {
+    "fenix": {
+      "name": "Fenix",
+      "api": "https://api.fenixsol.com.br/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [
+        "FENIX_API_KEY"
+      ],
+      "options": {
+        "baseURL": "https://api.fenixsol.com.br/v1"
+      },
+      "models": {
+        "gpt-oss-120b": {
+          "id": "gpt-oss-120b",
+          "name": "gpt-oss-120b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "options": {
+            "provider": "DeepInfra"
+          }
+        },
+        "Qwen/Qwen3-235B-A22B-Instruct-2507": {
+          "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+          "name": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "options": {
+            "provider": "DeepInfra"
+          }
+        },
+        "deepseek-ai/DeepSeek-V3": {
+          "id": "deepseek-ai/DeepSeek-V3",
+          "name": "deepseek-ai/DeepSeek-V3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false,
+          "options": {
+            "provider": "DeepInfra"
+          }
+        }
+      }
+    }
+  },
+  "model": "gpt-oss-120b",
+  "permission": {
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "bash": "allow",
+    "external_directory": "allow"
+  },
+  "experimental": {
+    "chatMaxRetries": 0
+  }
+}
