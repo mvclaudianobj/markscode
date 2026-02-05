@@ -26,6 +26,10 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+<<<<<<< Updated upstream:packages/opencode/src/index.ts
+=======
+// import { MemoryCommand } from "./cli/cmd/memory" // MemoryCommand not available in current version
+>>>>>>> Stashed changes:packages/markscode/src/index.ts
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -86,6 +90,10 @@ const cli = yargs(hideBin(process.argv))
   .command(DebugCommand)
   .command(AuthCommand)
   .command(AgentCommand)
+<<<<<<< Updated upstream:packages/opencode/src/index.ts
+=======
+  //   .command(MemoryCommand) // MemoryCommand not available in current version
+>>>>>>> Stashed changes:packages/markscode/src/index.ts
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
