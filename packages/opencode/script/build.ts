@@ -130,12 +130,11 @@ for (const item of targets) {
   console.log(`building ${name}`)
   await $`mkdir -p dist/${name}/bin`
 
-  const parserWorker = fs.realpathSync(path.resolve(dir, "./node_modules/@opentui/core/parser.worker.js"))
   const workerPath = "./src/cli/cmd/tui/worker.ts"
 
   // Use platform-specific bunfs root path based on target OS
   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
-  const workerRelativePath = path.relative(dir, parserWorker).replaceAll("\\", "/")
+  const workerRelativePath = path.relative(dir, workerPath).replaceAll("\\", "/")
 
   await Bun.build({
     conditions: ["browser"],
@@ -153,7 +152,7 @@ for (const item of targets) {
       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    entrypoints: ["./src/index.ts", parserWorker, workerPath],
+    entrypoints: ["./src/index.ts", workerPath],
     define: {
       OPENCODE_VERSION: `'${Script.version}'`,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,

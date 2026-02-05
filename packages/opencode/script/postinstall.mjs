@@ -106,11 +106,8 @@ async function main() {
       return
     }
 
-    // On non-Windows platforms, just verify the binary package exists
-    // Don't replace the wrapper script - it handles binary execution
-    const { binaryPath } = findBinary()
-    console.log(`Platform binary verified at: ${binaryPath}`)
-    console.log("Wrapper script will handle binary execution")
+    const { binaryPath, binaryName } = findBinary()
+    symlinkBinary(binaryPath, binaryName)
   } catch (error) {
     console.error("Failed to setup opencode binary:", error.message)
     process.exit(1)

@@ -1,62 +1,32 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createMemo, Match, onMount, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Match, onMount, Show, Switch, type ParentProps } from "solid-js"
 import { useTheme } from "@tui/context/theme"
-import { useKeybind } from "@tui/context/keybind"
+import { useKeybind } from "../context/keybind"
+import type { KeybindsConfig } from "@opencode-ai/sdk"
 import { Logo } from "../component/logo"
-import { Tips } from "../component/tips"
 import { Locale } from "@/util/locale"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
 import { useArgs } from "../context/args"
+import { Global } from "@/global"
 import { useDirectory } from "../context/directory"
-import { useRouteData } from "@tui/context/route"
-import { usePromptRef } from "../context/prompt"
-import { Installation } from "@/installation"
-import { useKV } from "../context/kv"
-import { useCommandDialog } from "../component/dialog-command"
+import path from "path"
+import { getMemoryForAssunto } from "../../../../memory"
 
 // TODO: what is the best way to do this?
 let once = false
 
 export function Home() {
   const sync = useSync()
-  const kv = useKV()
   const { theme } = useTheme()
-  const route = useRouteData("home")
-  const promptRef = usePromptRef()
-  const command = useCommandDialog()
+  const [defaultPrompt, setDefaultPrompt] = createSignal("")
   const mcp = createMemo(() => Object.keys(sync.data.mcp).length > 0)
   const mcpError = createMemo(() => {
     return Object.values(sync.data.mcp).some((x) => x.status === "failed")
   })
 
-  const connectedMcpCount = createMemo(() => {
-    return Object.values(sync.data.mcp).filter((x) => x.status === "connected").length
-  })
-
-  const isFirstTimeUser = createMemo(() => sync.data.session.length === 0)
-  const tipsHidden = createMemo(() => kv.get("tips_hidden", false))
-  const showTips = createMemo(() => {
-    // Don't show tips for first-time users
-    if (isFirstTimeUser()) return false
-    return !tipsHidden()
-  })
-
-  command.register(() => [
-    {
-      title: tipsHidden() ? "Show tips" : "Hide tips",
-      value: "tips.toggle",
-      keybind: "tips_toggle",
-      category: "System",
-      onSelect: (dialog) => {
-        kv.set("tips_hidden", !tipsHidden())
-        dialog.clear()
-      },
-    },
-  ])
-
   const Hint = (
-    <Show when={connectedMcpCount() > 0}>
+    <Show when={Object.keys(sync.data.mcp).length > 0}>
       <box flexShrink={0} flexDirection="row" gap={1}>
         <text fg={theme.text}>
           <Switch>
@@ -66,7 +36,7 @@ export function Home() {
             </Match>
             <Match when={true}>
               <span style={{ fg: theme.success }}>•</span>{" "}
-              {Locale.pluralize(connectedMcpCount(), "{} mcp server", "{} mcp servers")}
+              {Locale.pluralize(Object.values(sync.data.mcp).length, "{} mcp server", "{} mcp servers")}
             </Match>
           </Switch>
         </text>
@@ -76,39 +46,49 @@ export function Home() {
 
   let prompt: PromptRef
   const args = useArgs()
-  onMount(() => {
+  onMount(async () => {
     if (once) return
-    if (route.initialPrompt) {
-      prompt.set(route.initialPrompt)
-      once = true
-    } else if (args.prompt) {
-      prompt.set({ input: args.prompt, parts: [] })
-      once = true
-      prompt.submit()
+    let promptText = ""
+    if (args.prompt) {
+      promptText = args.prompt
+    } else {
+      // Only load automatic prompt in new sessions
+      if (!args.continue && !args.sessionID) {
+        // Load default prompt from prompt_default.txt
+        const promptFile = path.join(process.cwd(), "prompt_default.txt")
+        console.log("Tentando carregar prompt de:", promptFile)
+        try {
+          const content = await Bun.file(promptFile).text()
+          if (content.trim()) {
+            setDefaultPrompt(content.trim())
+            console.log("Prompt default carregado:", content.slice(0, 50) + "...")
+          } else {
+            console.log("Prompt default vazio")
+          }
+        } catch (error) {
+          console.log("Erro ao carregar prompt_default.txt:", error, "cwd:", process.cwd())
+        }
+
+        // Load memory for current directory
+        const assunto = path.basename(directory())
+        const memory = await getMemoryForAssunto(assunto)
+        if (memory) {
+          const memoryText = `\n\nMemória do projeto:\nResumo: ${memory.resumo}\nPalavras-chave: ${memory.palavras.join(", ")}\nAvanços: ${memory.avancos.join("; ")}`
+          promptText += memoryText
+          console.log("Memória carregada para assunto:", assunto)
+        }
+      }
     }
+    // Prompt is now handled in Prompt component
   })
   const directory = useDirectory()
-
-  const keybind = useKeybind()
 
   return (
     <>
       <box flexGrow={1} justifyContent="center" alignItems="center" paddingLeft={2} paddingRight={2} gap={1}>
-        <box height={3} />
         <Logo />
         <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1}>
-          <Prompt
-            ref={(r) => {
-              prompt = r
-              promptRef.set(r)
-            }}
-            hint={Hint}
-          />
-        </box>
-        <box height={3} width="100%" maxWidth={75} alignItems="center" paddingTop={2}>
-          <Show when={showTips()}>
-            <Tips />
-          </Show>
+          <Prompt hint={Hint} defaultPrompt={defaultPrompt()} />
         </box>
         <Toast />
       </box>
@@ -122,17 +102,13 @@ export function Home() {
                   <span style={{ fg: theme.error }}>⊙ </span>
                 </Match>
                 <Match when={true}>
-                  <span style={{ fg: connectedMcpCount() > 0 ? theme.success : theme.textMuted }}>⊙ </span>
+                  <span style={{ fg: theme.success }}>⊙ </span>
                 </Match>
               </Switch>
-              {connectedMcpCount()} MCP
+              {Object.keys(sync.data.mcp).length} MCP
             </text>
             <text fg={theme.textMuted}>/status</text>
           </Show>
-        </box>
-        <box flexGrow={1} />
-        <box flexShrink={0}>
-          <text fg={theme.textMuted}>{Installation.VERSION}</text>
         </box>
       </box>
     </>
