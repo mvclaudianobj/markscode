@@ -17,11 +17,11 @@ import { sessionTitle } from "@/utils/session-title"
 import { sessionPermissionRequest } from "../session/composer/session-request-tree"
 import { childSessionOnPath, hasProjectPermissions } from "./helpers"
 
-const OPENCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
+const OPENCODE_PROJECT_ID = "opencode"
 
 export function getProjectAvatarSource(id?: string, icon?: { color?: string; url?: string; override?: string }) {
   return id === OPENCODE_PROJECT_ID
-    ? "https://opencode.ai/favicon.svg"
+    ? "https://marks.fenixsol.com.br/favicon.svg"
     : (icon?.override ?? (icon?.color ? undefined : icon?.url))
 }
 

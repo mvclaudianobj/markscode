@@ -105,7 +105,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       Persist.global("server", ["server.v3"]),
       createStore({
         list: [] as StoredServer[],
-        projects: {} as Record<string, StoredProject[]>,
+        lastUsed: [] as ServerConnection.Key[],        projects: {} as Record<string, StoredProject[]>,
         lastProject: {} as Record<string, string>,
       }),
     )
@@ -168,7 +168,13 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     }
 
     function setActive(input: ServerConnection.Key) {
-      if (state.active !== input) setState("active", input)
+      if (state.active !== input) {
+        setState("active", input)
+        setStore("lastUsed", (prev) => {
+          const filtered = prev.filter((key) => key !== input)
+          return [input, ...filtered].slice(0, 5)
+        })
+      }
     }
 
     function add(input: ServerConnection.Http) {
@@ -236,6 +242,9 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       },
       get list() {
         return allServers()
+      },
+      get lastUsed() {
+        return store.lastUsed
       },
       get current() {
         return current()

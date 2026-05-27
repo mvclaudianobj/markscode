@@ -542,9 +542,13 @@ export function DialogSelectServer() {
             class="flex-1 min-h-0 px-5 [&_[data-slot=list-search-wrapper]]:w-full [&_[data-slot=list-scroll]]:flex-1 [&_[data-slot=list-scroll]]:overflow-y-auto [&_[data-slot=list-items]]:bg-surface-base [&_[data-slot=list-items]]:rounded-md [&_[data-slot=list-item]]:min-h-14 [&_[data-slot=list-item]]:p-3 [&_[data-slot=list-item]]:!bg-transparent"
           >
             {(i) => {
+              const index = sortedItems().indexOf(i)
               const key = ServerConnection.key(i)
               return (
                 <div class="flex items-center gap-3 min-w-0 flex-1 w-full group/item">
+                  <div class="flex flex-col h-full items-start w-8">
+                    <span class="text-text-weak text-12-regular">{index + 1}.</span>
+                  </div>
                   <div class="flex flex-col h-full items-start w-5">
                     <ServerHealthIndicator health={store.status[key]} />
                   </div>
@@ -560,7 +564,7 @@ export function DialogSelectServer() {
                         </span>
                       </Show>
                     }
-                    showCredentials
+                    showCredentials={false}
                   />
                   <div class="flex items-center justify-center gap-4 pl-4">
                     <Show when={ServerConnection.key(current()) === key}>
@@ -586,6 +590,81 @@ export function DialogSelectServer() {
                               }}
                             >
                               <DropdownMenu.ItemLabel>{language.t("dialog.server.menu.edit")}</DropdownMenu.ItemLabel>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              onSelect={() => {
+                                showToast({
+                                  title: i.displayName || "Servidor",
+                                  description: `URL: ${i.http.url}\nUsuário: ${i.http.username || "Não definido"}\nSenha: ${i.http.password ? "••••••••" : "Não definida"}`,
+                                })
+                              }}
+                            >
+                              <DropdownMenu.ItemLabel>Detalhes</DropdownMenu.ItemLabel>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              onSelect={() => {
+                                const exportData = {
+                                  name: i.displayName || "",
+                                  url: i.http.url,
+                                  username: i.http.username || "",
+                                  password: i.http.password || "",
+                                }
+                                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" })
+                                const url = URL.createObjectURL(blob)
+                                const a = document.createElement("a")
+                                a.href = url
+                                a.download = `server-${i.displayName || "profile"}.json`
+                                a.click()
+                                URL.revokeObjectURL(url)
+                              }}
+                            >
+                              <DropdownMenu.ItemLabel>Exportar</DropdownMenu.ItemLabel>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              onSelect={() => {
+                                const input = document.createElement("input")
+                                input.type = "file"
+                                input.accept = ".json"
+                                input.multiple = true
+                                input.onchange = async (e) => {
+                                  const files = (e.target as HTMLInputElement).files
+                                  if (!files) return
+                                  for (const file of files) {
+                                    try {
+                                      const text = await file.text()
+                                      const data = JSON.parse(text)
+                                      const existing = server.list.find(
+                                        (s) => ServerConnection.key(s) === ServerConnection.key({ type: "http", http: { url: data.url } }),
+                                      )
+                                      if (existing) {
+                                        showToast({
+                                          title: "Servidor já existe",
+                                          description: `O servidor ${data.url} já está cadastrado.`,
+                                        })
+                                        continue
+                                      }
+                                      const newConn: ServerConnection.Http = {
+                                        type: "http",
+                                        http: { url: data.url, username: data.username, password: data.password },
+                                      }
+                                      if (data.name) newConn.displayName = data.name
+                                      server.add(newConn)
+                                      showToast({
+                                        title: "Servidor importado",
+                                        description: `${data.name || data.url} importado com sucesso.`,
+                                      })
+                                    } catch (err) {
+                                      showToast({
+                                        title: "Erro ao importar",
+                                        description: `Falha ao processar ${file.name}`,
+                                      })
+                                    }
+                                  }
+                                }
+                                input.click()
+                              }}
+                            >
+                              <DropdownMenu.ItemLabel>Importar</DropdownMenu.ItemLabel>
                             </DropdownMenu.Item>
                             <Show when={canDefault() && defaultKey() !== key}>
                               <DropdownMenu.Item onSelect={() => setDefault(key)}>

@@ -35,14 +35,7 @@ export const SIDECAR_BINARIES: Array<{ rustTarget: string; ocBinary: string; ass
 
 export const RUST_TARGET = Bun.env.RUST_TARGET
 
-export function getCurrentSidecar(target = RUST_TARGET) {
-  if (!target && !RUST_TARGET) throw new Error("RUST_TARGET not set")
-
-  const binaryConfig = SIDECAR_BINARIES.find((b) => b.rustTarget === target)
-  if (!binaryConfig) throw new Error(`Sidecar configuration not available for Rust target '${RUST_TARGET}'`)
-
-  return binaryConfig
-}
+export function getCurrentSidecar(target = RUST_TARGET ?? Bun.env.TAURI_ENV_TARGET_TRIPLE ?? nativeTarget()) {\n  const binaryConfig = SIDECAR_BINARIES.find((b) => b.rustTarget === target)\n  if (!binaryConfig) throw new Error(`Sidecar configuration not available for Rust target ${target}`)\n\n  return binaryConfig\n}
 
 export async function copyBinaryToSidecarFolder(source: string, target = RUST_TARGET) {
   await $`mkdir -p src-tauri/sidecars`

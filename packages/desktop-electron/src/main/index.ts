@@ -19,17 +19,17 @@ try {
 process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
 
 const APP_NAMES: Record<string, string> = {
-  dev: "OpenCode Dev",
-  beta: "OpenCode Beta",
-  prod: "OpenCode",
+  dev: "MarksCode Dev",
+  beta: "MarksCode Beta",
+  prod: "MarksCode",
 }
 const APP_IDS: Record<string, string> = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
+  dev: "ai.markscode.desktop.dev",
+  beta: "ai.markscode.desktop.beta",
+  prod: "ai.markscode.desktop",
 }
-const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"
-app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
+const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.markscode.desktop.dev"
+app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "MarksCode Dev")
 app.setAppUserModelId(appId)
 app.setPath("userData", join(app.getPath("appData"), appId))
 const { autoUpdater } = pkg

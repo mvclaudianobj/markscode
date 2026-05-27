@@ -1,0 +1,3841 @@
+{
+  "compaction": {
+    "auto": false,
+    "prune": true
+  },
+  "enabled_providers": [
+    "marks",
+    "zen",
+    "kil",
+    "local-proxy",
+    "local-proxy2"
+  ],
+  "provider": {
+    "zen": {
+      "id": "zen",
+      "name": "Zen",
+      "api": "https://opencode.ai/zen/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [
+        "OPENCODE_API_KEY"
+      ],
+      "options": {
+        "baseURL": "https://opencode.ai/zen/v1",
+        "apiKey": "{env:OPENCODE_API_KEY}"
+      },
+      "whitelist": [
+        "big-pickle",
+        "deepseek-v4-flash-free",
+        "nemotron-3-super-free"
+      ],
+      "models": {
+        "big-pickle": {
+          "id": "big-pickle",
+          "name": "big-pickle",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "deepseek-v4-flash-free": {
+          "id": "deepseek-v4-flash-free",
+          "name": "deepseek-v4-flash-free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "nemotron-3-super-free": {
+          "id": "nemotron-3-super-free",
+          "name": "nemotron-3-super-free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        }
+      }
+    },
+    "kil": {
+      "id": "kil",
+      "name": "Kil",
+      "api": "https://api.kilo.ai/api/openrouter",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "options": {
+        "baseURL": "https://api.kilo.ai/api/openrouter",
+        "apiKey": "{env:OPENROUTER_API_KEY}"
+      },
+      "whitelist": [
+        "kilo-auto/free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "openrouter/free",
+        "poolside/laguna-m.1:free",
+        "poolside/laguna-xs.2:free"
+      ],
+      "models": {
+        "kilo-auto/free": {
+          "id": "kilo-auto/free",
+          "name": "kilo-auto/free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+          "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+          "name": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "nvidia/nemotron-3-super-120b-a12b:free": {
+          "id": "nvidia/nemotron-3-super-120b-a12b:free",
+          "name": "nvidia/nemotron-3-super-120b-a12b:free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "openrouter/free": {
+          "id": "openrouter/free",
+          "name": "openrouter/free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "poolside/laguna-m.1:free": {
+          "id": "poolside/laguna-m.1:free",
+          "name": "poolside/laguna-m.1:free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "poolside/laguna-xs.2:free": {
+          "id": "poolside/laguna-xs.2:free",
+          "name": "poolside/laguna-xs.2:free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        }
+      }
+    },
+    "opencode": {
+      "id": "opencode",
+      "name": "OpenCode",
+      "env": [],
+      "options": {}
+    },
+    "marks": {
+      "id": "marks",
+      "name": "Marks",
+      "api": "https://api.marks.ia.br/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [
+        "MARKS_OMNIROUTER_API_KEY",
+        "OMNIROUTER_API_KEY",
+        "MARKS_AI_API_KEY",
+        "FENIX_API_KEY"
+      ],
+      "options": {
+        "baseURL": "https://api.marks.ia.br/v1",
+        "apiKey": "sk-03cea16d0bed32b4-9434b7-e9728f44"
+      },
+      "models": {
+        "cc/claude-haiku-4-5-20251001": {
+          "id": "cc/claude-haiku-4-5-20251001",
+          "name": "cc/claude-haiku-4-5-20251001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cc/claude-opus-4-5-20251101": {
+          "id": "cc/claude-opus-4-5-20251101",
+          "name": "cc/claude-opus-4-5-20251101",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cc/claude-opus-4-6": {
+          "id": "cc/claude-opus-4-6",
+          "name": "cc/claude-opus-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cc/claude-opus-4-7": {
+          "id": "cc/claude-opus-4-7",
+          "name": "cc/claude-opus-4-7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cc/claude-sonnet-4-5-20250929": {
+          "id": "cc/claude-sonnet-4-5-20250929",
+          "name": "cc/claude-sonnet-4-5-20250929",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cc/claude-sonnet-4-6": {
+          "id": "cc/claude-sonnet-4-6",
+          "name": "cc/claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cerebras/gpt-oss-120b": {
+          "id": "cerebras/gpt-oss-120b",
+          "name": "cerebras/gpt-oss-120b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "cerebras/zai-glm-4.7": {
+          "id": "cerebras/zai-glm-4.7",
+          "name": "cerebras/zai-glm-4.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-haiku-4-5-20251001": {
+          "id": "claude/claude-haiku-4-5-20251001",
+          "name": "claude/claude-haiku-4-5-20251001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-opus-4-5-20251101": {
+          "id": "claude/claude-opus-4-5-20251101",
+          "name": "claude/claude-opus-4-5-20251101",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-opus-4-6": {
+          "id": "claude/claude-opus-4-6",
+          "name": "claude/claude-opus-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-opus-4-7": {
+          "id": "claude/claude-opus-4-7",
+          "name": "claude/claude-opus-4-7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-sonnet-4-5-20250929": {
+          "id": "claude/claude-sonnet-4-5-20250929",
+          "name": "claude/claude-sonnet-4-5-20250929",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "claude/claude-sonnet-4-6": {
+          "id": "claude/claude-sonnet-4-6",
+          "name": "claude/claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/agent-mode": {
+          "id": "codex-proxy/agent-mode",
+          "name": "codex-proxy/agent-mode",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/arcanine": {
+          "id": "codex-proxy/arcanine",
+          "name": "codex-proxy/arcanine",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/codex-auto-review": {
+          "id": "codex-proxy/codex-auto-review",
+          "name": "codex-proxy/codex-auto-review",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/glacier-alpha": {
+          "id": "codex-proxy/glacier-alpha",
+          "name": "codex-proxy/glacier-alpha",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/glacier-alpha-block-cy3": {
+          "id": "codex-proxy/glacier-alpha-block-cy3",
+          "name": "codex-proxy/glacier-alpha-block-cy3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/glacier-alpha-block-cy4": {
+          "id": "codex-proxy/glacier-alpha-block-cy4",
+          "name": "codex-proxy/glacier-alpha-block-cy4",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5": {
+          "id": "codex-proxy/gpt-5",
+          "name": "codex-proxy/gpt-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-1": {
+          "id": "codex-proxy/gpt-5-1",
+          "name": "codex-proxy/gpt-5-1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-2": {
+          "id": "codex-proxy/gpt-5-2",
+          "name": "codex-proxy/gpt-5-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-2-instant": {
+          "id": "codex-proxy/gpt-5-2-instant",
+          "name": "codex-proxy/gpt-5-2-instant",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-2-thinking": {
+          "id": "codex-proxy/gpt-5-2-thinking",
+          "name": "codex-proxy/gpt-5-2-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-3": {
+          "id": "codex-proxy/gpt-5-3",
+          "name": "codex-proxy/gpt-5-3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-3-instant": {
+          "id": "codex-proxy/gpt-5-3-instant",
+          "name": "codex-proxy/gpt-5-3-instant",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-3-mini": {
+          "id": "codex-proxy/gpt-5-3-mini",
+          "name": "codex-proxy/gpt-5-3-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-4-t-mini": {
+          "id": "codex-proxy/gpt-5-4-t-mini",
+          "name": "codex-proxy/gpt-5-4-t-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-4-thinking": {
+          "id": "codex-proxy/gpt-5-4-thinking",
+          "name": "codex-proxy/gpt-5-4-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-5": {
+          "id": "codex-proxy/gpt-5-5",
+          "name": "codex-proxy/gpt-5-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-5-instant": {
+          "id": "codex-proxy/gpt-5-5-instant",
+          "name": "codex-proxy/gpt-5-5-instant",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-5-thinking": {
+          "id": "codex-proxy/gpt-5-5-thinking",
+          "name": "codex-proxy/gpt-5-5-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-codex": {
+          "id": "codex-proxy/gpt-5-codex",
+          "name": "codex-proxy/gpt-5-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-codex-mini": {
+          "id": "codex-proxy/gpt-5-codex-mini",
+          "name": "codex-proxy/gpt-5-codex-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5-mini": {
+          "id": "codex-proxy/gpt-5-mini",
+          "name": "codex-proxy/gpt-5-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.1": {
+          "id": "codex-proxy/gpt-5.1",
+          "name": "codex-proxy/gpt-5.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.1-codex": {
+          "id": "codex-proxy/gpt-5.1-codex",
+          "name": "codex-proxy/gpt-5.1-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.1-codex-max": {
+          "id": "codex-proxy/gpt-5.1-codex-max",
+          "name": "codex-proxy/gpt-5.1-codex-max",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.1-codex-mini": {
+          "id": "codex-proxy/gpt-5.1-codex-mini",
+          "name": "codex-proxy/gpt-5.1-codex-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.2": {
+          "id": "codex-proxy/gpt-5.2",
+          "name": "codex-proxy/gpt-5.2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.2-codex": {
+          "id": "codex-proxy/gpt-5.2-codex",
+          "name": "codex-proxy/gpt-5.2-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.2-codex-cyber": {
+          "id": "codex-proxy/gpt-5.2-codex-cyber",
+          "name": "codex-proxy/gpt-5.2-codex-cyber",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.3-codex": {
+          "id": "codex-proxy/gpt-5.3-codex",
+          "name": "codex-proxy/gpt-5.3-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gpt5.3-codex": {
+          "id": "gpt5.3-codex",
+          "name": "gpt5.3-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gpt-5.3-codex": {
+          "id": "gpt-5.3-codex",
+          "name": "gpt-5.3-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.3-codex-spark": {
+          "id": "codex-proxy/gpt-5.3-codex-spark",
+          "name": "codex-proxy/gpt-5.3-codex-spark",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.4": {
+          "id": "codex-proxy/gpt-5.4",
+          "name": "codex-proxy/gpt-5.4",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.4-mini": {
+          "id": "codex-proxy/gpt-5.4-mini",
+          "name": "codex-proxy/gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.4-pro": {
+          "id": "codex-proxy/gpt-5.4-pro",
+          "name": "codex-proxy/gpt-5.4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.4-public": {
+          "id": "codex-proxy/gpt-5.4-public",
+          "name": "codex-proxy/gpt-5.4-public",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.5": {
+          "id": "codex-proxy/gpt-5.5",
+          "name": "codex-proxy/gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-5.5-codex-prompt-testing-ev3": {
+          "id": "codex-proxy/gpt-5.5-codex-prompt-testing-ev3",
+          "name": "codex-proxy/gpt-5.5-codex-prompt-testing-ev3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-image-2": {
+          "id": "codex-proxy/gpt-image-2",
+          "name": "codex-proxy/gpt-image-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-oss-120b": {
+          "id": "codex-proxy/gpt-oss-120b",
+          "name": "codex-proxy/gpt-oss-120b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/gpt-oss-20b": {
+          "id": "codex-proxy/gpt-oss-20b",
+          "name": "codex-proxy/gpt-oss-20b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/GPT-Rosalind": {
+          "id": "codex-proxy/GPT-Rosalind",
+          "name": "codex-proxy/GPT-Rosalind",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/heisenberg": {
+          "id": "codex-proxy/heisenberg",
+          "name": "codex-proxy/heisenberg",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/o3": {
+          "id": "codex-proxy/o3",
+          "name": "codex-proxy/o3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/oai-2.1": {
+          "id": "codex-proxy/oai-2.1",
+          "name": "codex-proxy/oai-2.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "codex-proxy/research": {
+          "id": "codex-proxy/research",
+          "name": "codex-proxy/research",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/aqa": {
+          "id": "gemini/aqa",
+          "name": "gemini/aqa",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/deep-research-max-preview-04-2026": {
+          "id": "gemini/deep-research-max-preview-04-2026",
+          "name": "gemini/deep-research-max-preview-04-2026",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/deep-research-preview-04-2026": {
+          "id": "gemini/deep-research-preview-04-2026",
+          "name": "gemini/deep-research-preview-04-2026",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/deep-research-pro-preview-12-2025": {
+          "id": "gemini/deep-research-pro-preview-12-2025",
+          "name": "gemini/deep-research-pro-preview-12-2025",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.0-flash": {
+          "id": "gemini/gemini-2.0-flash",
+          "name": "gemini/gemini-2.0-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.0-flash-001": {
+          "id": "gemini/gemini-2.0-flash-001",
+          "name": "gemini/gemini-2.0-flash-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.0-flash-lite": {
+          "id": "gemini/gemini-2.0-flash-lite",
+          "name": "gemini/gemini-2.0-flash-lite",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.0-flash-lite-001": {
+          "id": "gemini/gemini-2.0-flash-lite-001",
+          "name": "gemini/gemini-2.0-flash-lite-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-computer-use-preview-10-2025": {
+          "id": "gemini/gemini-2.5-computer-use-preview-10-2025",
+          "name": "gemini/gemini-2.5-computer-use-preview-10-2025",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash": {
+          "id": "gemini/gemini-2.5-flash",
+          "name": "gemini/gemini-2.5-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-image": {
+          "id": "gemini/gemini-2.5-flash-image",
+          "name": "gemini/gemini-2.5-flash-image",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-lite": {
+          "id": "gemini/gemini-2.5-flash-lite",
+          "name": "gemini/gemini-2.5-flash-lite",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-native-audio-latest": {
+          "id": "gemini/gemini-2.5-flash-native-audio-latest",
+          "name": "gemini/gemini-2.5-flash-native-audio-latest",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-native-audio-preview-09-2025": {
+          "id": "gemini/gemini-2.5-flash-native-audio-preview-09-2025",
+          "name": "gemini/gemini-2.5-flash-native-audio-preview-09-2025",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-native-audio-preview-12-2025": {
+          "id": "gemini/gemini-2.5-flash-native-audio-preview-12-2025",
+          "name": "gemini/gemini-2.5-flash-native-audio-preview-12-2025",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-flash-preview-tts": {
+          "id": "gemini/gemini-2.5-flash-preview-tts",
+          "name": "gemini/gemini-2.5-flash-preview-tts",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-pro": {
+          "id": "gemini/gemini-2.5-pro",
+          "name": "gemini/gemini-2.5-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-2.5-pro-preview-tts": {
+          "id": "gemini/gemini-2.5-pro-preview-tts",
+          "name": "gemini/gemini-2.5-pro-preview-tts",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3-flash-preview": {
+          "id": "gemini/gemini-3-flash-preview",
+          "name": "gemini/gemini-3-flash-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3-pro-image-preview": {
+          "id": "gemini/gemini-3-pro-image-preview",
+          "name": "gemini/gemini-3-pro-image-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3-pro-preview": {
+          "id": "gemini/gemini-3-pro-preview",
+          "name": "gemini/gemini-3-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-flash-image-preview": {
+          "id": "gemini/gemini-3.1-flash-image-preview",
+          "name": "gemini/gemini-3.1-flash-image-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-flash-lite": {
+          "id": "gemini/gemini-3.1-flash-lite",
+          "name": "gemini/gemini-3.1-flash-lite",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-flash-lite-preview": {
+          "id": "gemini/gemini-3.1-flash-lite-preview",
+          "name": "gemini/gemini-3.1-flash-lite-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-flash-live-preview": {
+          "id": "gemini/gemini-3.1-flash-live-preview",
+          "name": "gemini/gemini-3.1-flash-live-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-flash-tts-preview": {
+          "id": "gemini/gemini-3.1-flash-tts-preview",
+          "name": "gemini/gemini-3.1-flash-tts-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-pro-preview": {
+          "id": "gemini/gemini-3.1-pro-preview",
+          "name": "gemini/gemini-3.1-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-3.1-pro-preview-customtools": {
+          "id": "gemini/gemini-3.1-pro-preview-customtools",
+          "name": "gemini/gemini-3.1-pro-preview-customtools",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-embedding-001": {
+          "id": "gemini/gemini-embedding-001",
+          "name": "gemini/gemini-embedding-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-embedding-2": {
+          "id": "gemini/gemini-embedding-2",
+          "name": "gemini/gemini-embedding-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-embedding-2-preview": {
+          "id": "gemini/gemini-embedding-2-preview",
+          "name": "gemini/gemini-embedding-2-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-flash-latest": {
+          "id": "gemini/gemini-flash-latest",
+          "name": "gemini/gemini-flash-latest",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-flash-lite-latest": {
+          "id": "gemini/gemini-flash-lite-latest",
+          "name": "gemini/gemini-flash-lite-latest",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-pro-latest": {
+          "id": "gemini/gemini-pro-latest",
+          "name": "gemini/gemini-pro-latest",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-robotics-er-1.5-preview": {
+          "id": "gemini/gemini-robotics-er-1.5-preview",
+          "name": "gemini/gemini-robotics-er-1.5-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemini-robotics-er-1.6-preview": {
+          "id": "gemini/gemini-robotics-er-1.6-preview",
+          "name": "gemini/gemini-robotics-er-1.6-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemma-4-26b-a4b-it": {
+          "id": "gemini/gemma-4-26b-a4b-it",
+          "name": "gemini/gemma-4-26b-a4b-it",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/gemma-4-31b-it": {
+          "id": "gemini/gemma-4-31b-it",
+          "name": "gemini/gemma-4-31b-it",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/imagen-4.0-fast-generate-001": {
+          "id": "gemini/imagen-4.0-fast-generate-001",
+          "name": "gemini/imagen-4.0-fast-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/imagen-4.0-generate-001": {
+          "id": "gemini/imagen-4.0-generate-001",
+          "name": "gemini/imagen-4.0-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/imagen-4.0-ultra-generate-001": {
+          "id": "gemini/imagen-4.0-ultra-generate-001",
+          "name": "gemini/imagen-4.0-ultra-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/lyria-3-clip-preview": {
+          "id": "gemini/lyria-3-clip-preview",
+          "name": "gemini/lyria-3-clip-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/lyria-3-pro-preview": {
+          "id": "gemini/lyria-3-pro-preview",
+          "name": "gemini/lyria-3-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/nano-banana-pro-preview": {
+          "id": "gemini/nano-banana-pro-preview",
+          "name": "gemini/nano-banana-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/text-embedding-004": {
+          "id": "gemini/text-embedding-004",
+          "name": "gemini/text-embedding-004",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-2.0-generate-001": {
+          "id": "gemini/veo-2.0-generate-001",
+          "name": "gemini/veo-2.0-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-3.0-fast-generate-001": {
+          "id": "gemini/veo-3.0-fast-generate-001",
+          "name": "gemini/veo-3.0-fast-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-3.0-generate-001": {
+          "id": "gemini/veo-3.0-generate-001",
+          "name": "gemini/veo-3.0-generate-001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-3.1-fast-generate-preview": {
+          "id": "gemini/veo-3.1-fast-generate-preview",
+          "name": "gemini/veo-3.1-fast-generate-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-3.1-generate-preview": {
+          "id": "gemini/veo-3.1-generate-preview",
+          "name": "gemini/veo-3.1-generate-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "gemini/veo-3.1-lite-generate-preview": {
+          "id": "gemini/veo-3.1-lite-generate-preview",
+          "name": "gemini/veo-3.1-lite-generate-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/anthropic/claude-haiku-4.5": {
+          "id": "kc/anthropic/claude-haiku-4.5",
+          "name": "kc/anthropic/claude-haiku-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/anthropic/claude-opus-4.7": {
+          "id": "kc/anthropic/claude-opus-4.7",
+          "name": "kc/anthropic/claude-opus-4.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/anthropic/claude-sonnet-4.6": {
+          "id": "kc/anthropic/claude-sonnet-4.6",
+          "name": "kc/anthropic/claude-sonnet-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/deepseek/deepseek-v4-flash": {
+          "id": "kc/deepseek/deepseek-v4-flash",
+          "name": "kc/deepseek/deepseek-v4-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/deepseek/deepseek-v4-pro": {
+          "id": "kc/deepseek/deepseek-v4-pro",
+          "name": "kc/deepseek/deepseek-v4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/google/gemini-3-flash-preview": {
+          "id": "kc/google/gemini-3-flash-preview",
+          "name": "kc/google/gemini-3-flash-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/google/gemini-3.1-flash-lite": {
+          "id": "kc/google/gemini-3.1-flash-lite",
+          "name": "kc/google/gemini-3.1-flash-lite",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/google/gemini-3.1-pro-preview": {
+          "id": "kc/google/gemini-3.1-pro-preview",
+          "name": "kc/google/gemini-3.1-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/moonshotai/kimi-k2.6": {
+          "id": "kc/moonshotai/kimi-k2.6",
+          "name": "kc/moonshotai/kimi-k2.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/openai/gpt-5.4-mini": {
+          "id": "kc/openai/gpt-5.4-mini",
+          "name": "kc/openai/gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/openai/gpt-5.5": {
+          "id": "kc/openai/gpt-5.5",
+          "name": "kc/openai/gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/openrouter/free": {
+          "id": "kc/openrouter/free",
+          "name": "kc/openrouter/free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/qwen/qwen3.5-397b-a17b": {
+          "id": "kc/qwen/qwen3.5-397b-a17b",
+          "name": "kc/qwen/qwen3.5-397b-a17b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kc/qwen/qwen3.6-plus": {
+          "id": "kc/qwen/qwen3.6-plus",
+          "name": "kc/qwen/qwen3.6-plus",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/anthropic/claude-haiku-4.5": {
+          "id": "kilocode/anthropic/claude-haiku-4.5",
+          "name": "kilocode/anthropic/claude-haiku-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/anthropic/claude-opus-4.7": {
+          "id": "kilocode/anthropic/claude-opus-4.7",
+          "name": "kilocode/anthropic/claude-opus-4.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/anthropic/claude-sonnet-4.6": {
+          "id": "kilocode/anthropic/claude-sonnet-4.6",
+          "name": "kilocode/anthropic/claude-sonnet-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/deepseek/deepseek-v4-flash": {
+          "id": "kilocode/deepseek/deepseek-v4-flash",
+          "name": "kilocode/deepseek/deepseek-v4-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/deepseek/deepseek-v4-pro": {
+          "id": "kilocode/deepseek/deepseek-v4-pro",
+          "name": "kilocode/deepseek/deepseek-v4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/google/gemini-3-flash-preview": {
+          "id": "kilocode/google/gemini-3-flash-preview",
+          "name": "kilocode/google/gemini-3-flash-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/google/gemini-3.1-flash-lite": {
+          "id": "kilocode/google/gemini-3.1-flash-lite",
+          "name": "kilocode/google/gemini-3.1-flash-lite",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/google/gemini-3.1-pro-preview": {
+          "id": "kilocode/google/gemini-3.1-pro-preview",
+          "name": "kilocode/google/gemini-3.1-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/moonshotai/kimi-k2.6": {
+          "id": "kilocode/moonshotai/kimi-k2.6",
+          "name": "kilocode/moonshotai/kimi-k2.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/openai/gpt-5.4-mini": {
+          "id": "kilocode/openai/gpt-5.4-mini",
+          "name": "kilocode/openai/gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/openai/gpt-5.5": {
+          "id": "kilocode/openai/gpt-5.5",
+          "name": "kilocode/openai/gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/openrouter/free": {
+          "id": "kilocode/openrouter/free",
+          "name": "kilocode/openrouter/free",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/qwen/qwen3.5-397b-a17b": {
+          "id": "kilocode/qwen/qwen3.5-397b-a17b",
+          "name": "kilocode/qwen/qwen3.5-397b-a17b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kilocode/qwen/qwen3.6-plus": {
+          "id": "kilocode/qwen/qwen3.6-plus",
+          "name": "kilocode/qwen/qwen3.6-plus",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/auto-kiro": {
+          "id": "kiro/auto-kiro",
+          "name": "kiro/auto-kiro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/claude-haiku-4.5": {
+          "id": "kiro/claude-haiku-4.5",
+          "name": "kiro/claude-haiku-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/claude-opus-4.6": {
+          "id": "kiro/claude-opus-4.6",
+          "name": "kiro/claude-opus-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/claude-opus-4.7": {
+          "id": "kiro/claude-opus-4.7",
+          "name": "kiro/claude-opus-4.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/claude-sonnet-4.5": {
+          "id": "kiro/claude-sonnet-4.5",
+          "name": "kiro/claude-sonnet-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/claude-sonnet-4.6": {
+          "id": "kiro/claude-sonnet-4.6",
+          "name": "kiro/claude-sonnet-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/deepseek-3.2": {
+          "id": "kiro/deepseek-3.2",
+          "name": "kiro/deepseek-3.2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/glm-5": {
+          "id": "kiro/glm-5",
+          "name": "kiro/glm-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/minimax-m2.1": {
+          "id": "kiro/minimax-m2.1",
+          "name": "kiro/minimax-m2.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/minimax-m2.5": {
+          "id": "kiro/minimax-m2.5",
+          "name": "kiro/minimax-m2.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kiro/qwen3-coder-next": {
+          "id": "kiro/qwen3-coder-next",
+          "name": "kiro/qwen3-coder-next",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/auto-kiro": {
+          "id": "kr/auto-kiro",
+          "name": "kr/auto-kiro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/claude-haiku-4.5": {
+          "id": "kr/claude-haiku-4.5",
+          "name": "kr/claude-haiku-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/claude-opus-4.6": {
+          "id": "kr/claude-opus-4.6",
+          "name": "kr/claude-opus-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/claude-opus-4.7": {
+          "id": "kr/claude-opus-4.7",
+          "name": "kr/claude-opus-4.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/claude-sonnet-4.5": {
+          "id": "kr/claude-sonnet-4.5",
+          "name": "kr/claude-sonnet-4.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/claude-sonnet-4.6": {
+          "id": "kr/claude-sonnet-4.6",
+          "name": "kr/claude-sonnet-4.6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/deepseek-3.2": {
+          "id": "kr/deepseek-3.2",
+          "name": "kr/deepseek-3.2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/glm-5": {
+          "id": "kr/glm-5",
+          "name": "kr/glm-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/minimax-m2.1": {
+          "id": "kr/minimax-m2.1",
+          "name": "kr/minimax-m2.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/minimax-m2.5": {
+          "id": "kr/minimax-m2.5",
+          "name": "kr/minimax-m2.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "kr/qwen3-coder-next": {
+          "id": "kr/qwen3-coder-next",
+          "name": "kr/qwen3-coder-next",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "marks": {
+          "id": "marks",
+          "name": "marks",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "MarksAI": {
+          "id": "MarksAI",
+          "name": "MarksAI",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/deepseek-ai/deepseek-v4-pro": {
+          "id": "nvidia/deepseek-ai/deepseek-v4-pro",
+          "name": "nvidia/deepseek-ai/deepseek-v4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/fastpitch": {
+          "id": "nvidia/fastpitch",
+          "name": "nvidia/fastpitch",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/google/gemma-4-31b-it": {
+          "id": "nvidia/google/gemma-4-31b-it",
+          "name": "nvidia/google/gemma-4-31b-it",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/minimaxai/minimax-m2.7": {
+          "id": "nvidia/minimaxai/minimax-m2.7",
+          "name": "nvidia/minimaxai/minimax-m2.7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/mistralai/devstral-2-123b-instruct-2512": {
+          "id": "nvidia/mistralai/devstral-2-123b-instruct-2512",
+          "name": "nvidia/mistralai/devstral-2-123b-instruct-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/mistralai/mistral-large-3-675b-instruct-2512": {
+          "id": "nvidia/mistralai/mistral-large-3-675b-instruct-2512",
+          "name": "nvidia/mistralai/mistral-large-3-675b-instruct-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/mistralai/mistral-small-4-119b-2603": {
+          "id": "nvidia/mistralai/mistral-small-4-119b-2603",
+          "name": "nvidia/mistralai/mistral-small-4-119b-2603",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/nv-embedqa-e5-v5": {
+          "id": "nvidia/nv-embedqa-e5-v5",
+          "name": "nvidia/nv-embedqa-e5-v5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/nv-rerankqa-mistral-4b-v3": {
+          "id": "nvidia/nv-rerankqa-mistral-4b-v3",
+          "name": "nvidia/nv-rerankqa-mistral-4b-v3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/nvidia/nemotron-3-super-120b-a12b": {
+          "id": "nvidia/nvidia/nemotron-3-super-120b-a12b",
+          "name": "nvidia/nvidia/nemotron-3-super-120b-a12b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/openai/gpt-oss-120b": {
+          "id": "nvidia/openai/gpt-oss-120b",
+          "name": "nvidia/openai/gpt-oss-120b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/openai/gpt-oss-20b": {
+          "id": "nvidia/openai/gpt-oss-20b",
+          "name": "nvidia/openai/gpt-oss-20b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/openai/whisper-large-v3": {
+          "id": "nvidia/openai/whisper-large-v3",
+          "name": "nvidia/openai/whisper-large-v3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/parakeet-ctc-1.1b-asr": {
+          "id": "nvidia/parakeet-ctc-1.1b-asr",
+          "name": "nvidia/parakeet-ctc-1.1b-asr",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/qwen/qwen3.5-122b-a10b": {
+          "id": "nvidia/qwen/qwen3.5-122b-a10b",
+          "name": "nvidia/qwen/qwen3.5-122b-a10b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/qwen/qwen3.5-397b-a17b": {
+          "id": "nvidia/qwen/qwen3.5-397b-a17b",
+          "name": "nvidia/qwen/qwen3.5-397b-a17b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/stepfun-ai/step-3.5-flash": {
+          "id": "nvidia/stepfun-ai/step-3.5-flash",
+          "name": "nvidia/stepfun-ai/step-3.5-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/tacotron2": {
+          "id": "nvidia/tacotron2",
+          "name": "nvidia/tacotron2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "nvidia/z-ai/glm-5.1": {
+          "id": "nvidia/z-ai/glm-5.1",
+          "name": "nvidia/z-ai/glm-5.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/auto": {
+          "id": "openrouter/auto",
+          "name": "openrouter/auto",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/black-forest-labs/flux.2-flex": {
+          "id": "openrouter/black-forest-labs/flux.2-flex",
+          "name": "openrouter/black-forest-labs/flux.2-flex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/black-forest-labs/flux.2-max": {
+          "id": "openrouter/black-forest-labs/flux.2-max",
+          "name": "openrouter/black-forest-labs/flux.2-max",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/black-forest-labs/flux.2-pro": {
+          "id": "openrouter/black-forest-labs/flux.2-pro",
+          "name": "openrouter/black-forest-labs/flux.2-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/google/gemini-3-pro-image-preview": {
+          "id": "openrouter/google/gemini-3-pro-image-preview",
+          "name": "openrouter/google/gemini-3-pro-image-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/google/gemini-3.1-flash-image-preview": {
+          "id": "openrouter/google/gemini-3.1-flash-image-preview",
+          "name": "openrouter/google/gemini-3.1-flash-image-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/openai/gpt-5-image-mini": {
+          "id": "openrouter/openai/gpt-5-image-mini",
+          "name": "openrouter/openai/gpt-5-image-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/openai/gpt-5.4-image-2": {
+          "id": "openrouter/openai/gpt-5.4-image-2",
+          "name": "openrouter/openai/gpt-5.4-image-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/openai/text-embedding-3-large": {
+          "id": "openrouter/openai/text-embedding-3-large",
+          "name": "openrouter/openai/text-embedding-3-large",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/openai/text-embedding-3-small": {
+          "id": "openrouter/openai/text-embedding-3-small",
+          "name": "openrouter/openai/text-embedding-3-small",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "openrouter/openai/text-embedding-ada-002": {
+          "id": "openrouter/openai/text-embedding-ada-002",
+          "name": "openrouter/openai/text-embedding-ada-002",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/claude-haiku-4-5": {
+          "id": "pu/claude-haiku-4-5",
+          "name": "pu/claude-haiku-4-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/claude-opus-4-7": {
+          "id": "pu/claude-opus-4-7",
+          "name": "pu/claude-opus-4-7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/claude-sonnet-4-6": {
+          "id": "pu/claude-sonnet-4-6",
+          "name": "pu/claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/codestral-2508": {
+          "id": "pu/codestral-2508",
+          "name": "pu/codestral-2508",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/deepseek/deepseek-v4-flash": {
+          "id": "pu/deepseek/deepseek-v4-flash",
+          "name": "pu/deepseek/deepseek-v4-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/deepseek/deepseek-v4-pro": {
+          "id": "pu/deepseek/deepseek-v4-pro",
+          "name": "pu/deepseek/deepseek-v4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/devstral-2512": {
+          "id": "pu/devstral-2512",
+          "name": "pu/devstral-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/google/gemini-3-flash": {
+          "id": "pu/google/gemini-3-flash",
+          "name": "pu/google/gemini-3-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/google/gemini-3.1-flash-lite-preview": {
+          "id": "pu/google/gemini-3.1-flash-lite-preview",
+          "name": "pu/google/gemini-3.1-flash-lite-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/google/gemini-3.1-pro-preview": {
+          "id": "pu/google/gemini-3.1-pro-preview",
+          "name": "pu/google/gemini-3.1-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-4o": {
+          "id": "pu/gpt-4o",
+          "name": "pu/gpt-4o",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-4o-mini": {
+          "id": "pu/gpt-4o-mini",
+          "name": "pu/gpt-4o-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-5.4": {
+          "id": "pu/gpt-5.4",
+          "name": "pu/gpt-5.4",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-5.4-mini": {
+          "id": "pu/gpt-5.4-mini",
+          "name": "pu/gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-5.4-nano": {
+          "id": "pu/gpt-5.4-nano",
+          "name": "pu/gpt-5.4-nano",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/gpt-5.5": {
+          "id": "pu/gpt-5.5",
+          "name": "pu/gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/llama-3.3-70b-instruct": {
+          "id": "pu/llama-3.3-70b-instruct",
+          "name": "pu/llama-3.3-70b-instruct",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/llama-4-maverick": {
+          "id": "pu/llama-4-maverick",
+          "name": "pu/llama-4-maverick",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/llama-4-scout": {
+          "id": "pu/llama-4-scout",
+          "name": "pu/llama-4-scout",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/mistral-large-2512": {
+          "id": "pu/mistral-large-2512",
+          "name": "pu/mistral-large-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/mistral-medium-3-5": {
+          "id": "pu/mistral-medium-3-5",
+          "name": "pu/mistral-medium-3-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/mistral-nemo": {
+          "id": "pu/mistral-nemo",
+          "name": "pu/mistral-nemo",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/mistral-small-2603": {
+          "id": "pu/mistral-small-2603",
+          "name": "pu/mistral-small-2603",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/o3": {
+          "id": "pu/o3",
+          "name": "pu/o3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/perplexity/sonar": {
+          "id": "pu/perplexity/sonar",
+          "name": "pu/perplexity/sonar",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/perplexity/sonar-deep-research": {
+          "id": "pu/perplexity/sonar-deep-research",
+          "name": "pu/perplexity/sonar-deep-research",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/perplexity/sonar-pro": {
+          "id": "pu/perplexity/sonar-pro",
+          "name": "pu/perplexity/sonar-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/perplexity/sonar-pro-search": {
+          "id": "pu/perplexity/sonar-pro-search",
+          "name": "pu/perplexity/sonar-pro-search",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/perplexity/sonar-reasoning-pro": {
+          "id": "pu/perplexity/sonar-reasoning-pro",
+          "name": "pu/perplexity/sonar-reasoning-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/qwen/qwen3.5-397b-a17b": {
+          "id": "pu/qwen/qwen3.5-397b-a17b",
+          "name": "pu/qwen/qwen3.5-397b-a17b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/qwen/qwen3.6-plus": {
+          "id": "pu/qwen/qwen3.6-plus",
+          "name": "pu/qwen/qwen3.6-plus",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/x-ai/grok-4.20": {
+          "id": "pu/x-ai/grok-4.20",
+          "name": "pu/x-ai/grok-4.20",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "pu/x-ai/grok-4.3": {
+          "id": "pu/x-ai/grok-4.3",
+          "name": "pu/x-ai/grok-4.3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/claude-haiku-4-5": {
+          "id": "puter/claude-haiku-4-5",
+          "name": "puter/claude-haiku-4-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/claude-opus-4-7": {
+          "id": "puter/claude-opus-4-7",
+          "name": "puter/claude-opus-4-7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/claude-sonnet-4-6": {
+          "id": "puter/claude-sonnet-4-6",
+          "name": "puter/claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/codestral-2508": {
+          "id": "puter/codestral-2508",
+          "name": "puter/codestral-2508",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/deepseek/deepseek-v4-flash": {
+          "id": "puter/deepseek/deepseek-v4-flash",
+          "name": "puter/deepseek/deepseek-v4-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/deepseek/deepseek-v4-pro": {
+          "id": "puter/deepseek/deepseek-v4-pro",
+          "name": "puter/deepseek/deepseek-v4-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/devstral-2512": {
+          "id": "puter/devstral-2512",
+          "name": "puter/devstral-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/google/gemini-3-flash": {
+          "id": "puter/google/gemini-3-flash",
+          "name": "puter/google/gemini-3-flash",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/google/gemini-3.1-flash-lite-preview": {
+          "id": "puter/google/gemini-3.1-flash-lite-preview",
+          "name": "puter/google/gemini-3.1-flash-lite-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/google/gemini-3.1-pro-preview": {
+          "id": "puter/google/gemini-3.1-pro-preview",
+          "name": "puter/google/gemini-3.1-pro-preview",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-4o": {
+          "id": "puter/gpt-4o",
+          "name": "puter/gpt-4o",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-4o-mini": {
+          "id": "puter/gpt-4o-mini",
+          "name": "puter/gpt-4o-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-5.4": {
+          "id": "puter/gpt-5.4",
+          "name": "puter/gpt-5.4",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-5.4-mini": {
+          "id": "puter/gpt-5.4-mini",
+          "name": "puter/gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-5.4-nano": {
+          "id": "puter/gpt-5.4-nano",
+          "name": "puter/gpt-5.4-nano",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/gpt-5.5": {
+          "id": "puter/gpt-5.5",
+          "name": "puter/gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/llama-3.3-70b-instruct": {
+          "id": "puter/llama-3.3-70b-instruct",
+          "name": "puter/llama-3.3-70b-instruct",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/llama-4-maverick": {
+          "id": "puter/llama-4-maverick",
+          "name": "puter/llama-4-maverick",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/llama-4-scout": {
+          "id": "puter/llama-4-scout",
+          "name": "puter/llama-4-scout",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/mistral-large-2512": {
+          "id": "puter/mistral-large-2512",
+          "name": "puter/mistral-large-2512",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/mistral-medium-3-5": {
+          "id": "puter/mistral-medium-3-5",
+          "name": "puter/mistral-medium-3-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/mistral-nemo": {
+          "id": "puter/mistral-nemo",
+          "name": "puter/mistral-nemo",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/mistral-small-2603": {
+          "id": "puter/mistral-small-2603",
+          "name": "puter/mistral-small-2603",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/o3": {
+          "id": "puter/o3",
+          "name": "puter/o3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/perplexity/sonar": {
+          "id": "puter/perplexity/sonar",
+          "name": "puter/perplexity/sonar",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/perplexity/sonar-deep-research": {
+          "id": "puter/perplexity/sonar-deep-research",
+          "name": "puter/perplexity/sonar-deep-research",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/perplexity/sonar-pro": {
+          "id": "puter/perplexity/sonar-pro",
+          "name": "puter/perplexity/sonar-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/perplexity/sonar-pro-search": {
+          "id": "puter/perplexity/sonar-pro-search",
+          "name": "puter/perplexity/sonar-pro-search",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/perplexity/sonar-reasoning-pro": {
+          "id": "puter/perplexity/sonar-reasoning-pro",
+          "name": "puter/perplexity/sonar-reasoning-pro",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/qwen/qwen3.5-397b-a17b": {
+          "id": "puter/qwen/qwen3.5-397b-a17b",
+          "name": "puter/qwen/qwen3.5-397b-a17b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/qwen/qwen3.6-plus": {
+          "id": "puter/qwen/qwen3.6-plus",
+          "name": "puter/qwen/qwen3.6-plus",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/x-ai/grok-4.20": {
+          "id": "puter/x-ai/grok-4.20",
+          "name": "puter/x-ai/grok-4.20",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        },
+        "puter/x-ai/grok-4.3": {
+          "id": "puter/x-ai/grok-4.3",
+          "name": "puter/x-ai/grok-4.3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": false
+        }
+      }
+    },
+    "local-proxy": {
+      "id": "local-proxy",
+      "name": "Local Proxy",
+      "api": "http://127.0.0.1:18081/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [],
+      "options": {
+        "baseURL": "http://127.0.0.1:18081/v1",
+        "apiKey": "Kenosis7!@#"
+      },
+      "models": {
+        "gpt-5.5": {
+          "id": "gpt-5.5",
+          "name": "gpt-5.5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.4": {
+          "id": "gpt-5.4",
+          "name": "gpt-5.4",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.4-mini": {
+          "id": "gpt-5.4-mini",
+          "name": "gpt-5.4-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.3-codex": {
+          "id": "gpt-5.3-codex",
+          "name": "gpt-5.3-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.2": {
+          "id": "gpt-5.2",
+          "name": "gpt-5.2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "codex-auto-review": {
+          "id": "codex-auto-review",
+          "name": "codex-auto-review",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-codex": {
+          "id": "gpt-5-codex",
+          "name": "gpt-5-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-codex-mini": {
+          "id": "gpt-5-codex-mini",
+          "name": "gpt-5-codex-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-image-2": {
+          "id": "gpt-image-2",
+          "name": "gpt-image-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-oss-120b": {
+          "id": "gpt-oss-120b",
+          "name": "gpt-oss-120b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-oss-20b": {
+          "id": "gpt-oss-20b",
+          "name": "gpt-oss-20b",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-3": {
+          "id": "gpt-5-3",
+          "name": "gpt-5-3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-3-instant": {
+          "id": "gpt-5-3-instant",
+          "name": "gpt-5-3-instant",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-4-thinking": {
+          "id": "gpt-5-4-thinking",
+          "name": "gpt-5-4-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-5-thinking": {
+          "id": "gpt-5-5-thinking",
+          "name": "gpt-5-5-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-2": {
+          "id": "gpt-5-2",
+          "name": "gpt-5-2",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-2-instant": {
+          "id": "gpt-5-2-instant",
+          "name": "gpt-5-2-instant",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-2-thinking": {
+          "id": "gpt-5-2-thinking",
+          "name": "gpt-5-2-thinking",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-1": {
+          "id": "gpt-5-1",
+          "name": "gpt-5-1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5": {
+          "id": "gpt-5",
+          "name": "gpt-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-mini": {
+          "id": "gpt-5-mini",
+          "name": "gpt-5-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-3-mini": {
+          "id": "gpt-5-3-mini",
+          "name": "gpt-5-3-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5-4-t-mini": {
+          "id": "gpt-5-4-t-mini",
+          "name": "gpt-5-4-t-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "o3": {
+          "id": "o3",
+          "name": "o3",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "research": {
+          "id": "research",
+          "name": "research",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "agent-mode": {
+          "id": "agent-mode",
+          "name": "agent-mode",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.2-codex": {
+          "id": "gpt-5.2-codex",
+          "name": "gpt-5.2-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.1-codex-max": {
+          "id": "gpt-5.1-codex-max",
+          "name": "gpt-5.1-codex-max",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.1-codex": {
+          "id": "gpt-5.1-codex",
+          "name": "gpt-5.1-codex",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.1": {
+          "id": "gpt-5.1",
+          "name": "gpt-5.1",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "gpt-5.1-codex-mini": {
+          "id": "gpt-5.1-codex-mini",
+          "name": "gpt-5.1-codex-mini",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "claude-opus-4-7": {
+          "id": "claude-opus-4-7",
+          "name": "claude-opus-4-7",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "claude-sonnet-4-6": {
+          "id": "claude-sonnet-4-6",
+          "name": "claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "claude-haiku-4-5": {
+          "id": "claude-haiku-4-5",
+          "name": "claude-haiku-4-5",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        }
+      }
+    },
+    "local-proxy2": {
+      "id": "local-proxy2",
+      "name": "Local Proxy 2",
+      "api": "http://127.0.0.1:18082/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [],
+      "options": {
+        "baseURL": "http://127.0.0.1:18082/v1"
+      },
+      "models": {
+        "claude-sonnet-4-6": {
+          "id": "claude-sonnet-4-6",
+          "name": "claude-sonnet-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "claude-opus-4-6": {
+          "id": "claude-opus-4-6",
+          "name": "claude-opus-4-6",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        },
+        "claude-haiku-4-5-20251001": {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "claude-haiku-4-5-20251001",
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          },
+          "temperature": true,
+          "tool_call": true,
+          "reasoning": false,
+          "attachment": true
+        }
+      }
+    },
+    "anthropic": {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "api": "http://localhost:18082",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [],
+      "options": {
+        "baseURL": "http://localhost:18082",
+        "apiKey": "dummy"
+      },
+      "models": {
+        "claude-sonnet-4-6": {
+          "id": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-opus-4-6": {
+          "id": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+        "claude-haiku-4-5-20251001": {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "temperature": true,
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        }
+      }
+    }
+  },
+  "model": "anthropic/claude-sonnet-4-6",
+  "$schema": "https://markscode.ai/config.json",
+  "permission": {
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "bash": "allow",
+    "external_directory": "allow"
+  },
+  "experimental": {
+    "chatMaxRetries": 2
+  }
+}
