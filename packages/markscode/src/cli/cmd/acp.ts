@@ -1,47 +1,29 @@
-import { Log } from "@/util/log"
+import * as Log from "@opencode-ai/core/util/log"
 import { bootstrap } from "../bootstrap"
 import { cmd } from "./cmd"
 import { AgentSideConnection, ndJsonStream } from "@agentclientprotocol/sdk"
 import { ACP } from "@/acp/agent"
 import { Server } from "@/server/server"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
+import { withNetworkOptions, resolveNetworkOptions } from "../network"
 
 const log = Log.create({ service: "acp-command" })
 
-process.on("unhandledRejection", (reason, promise) => {
-  log.error("Unhandled rejection", {
-    promise,
-    reason,
-  })
-})
-
 export const AcpCommand = cmd({
   command: "acp",
-  describe: "Start ACP (Agent Client Protocol) server",
+  describe: "start ACP (Agent Client Protocol) server",
   builder: (yargs) => {
-    return yargs
-      .option("cwd", {
-        describe: "working directory",
-        type: "string",
-        default: process.cwd(),
-      })
-      .option("port", {
-        type: "number",
-        describe: "port to listen on",
-        default: 0,
-      })
-      .option("hostname", {
-        type: "string",
-        describe: "hostname to listen on",
-        default: "127.0.0.1",
-      })
+    return withNetworkOptions(yargs).option("cwd", {
+      describe: "working directory",
+      type: "string",
+      default: process.cwd(),
+    })
   },
   handler: async (args) => {
+    process.env.OPENCODE_CLIENT = "acp"
     await bootstrap(process.cwd(), async () => {
-      const server = Server.listen({
-        port: args.port,
-        hostname: args.hostname,
-      })
+      const opts = await resolveNetworkOptions(args)
+      const server = await Server.listen(opts)
 
       const sdk = createOpencodeClient({
         baseUrl: `http://${server.hostname}:${server.port}`,

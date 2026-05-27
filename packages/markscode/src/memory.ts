@@ -1,6 +1,5 @@
 import path from "path"
-import os from "os"
-import fs from "fs/promises"
+import { mkdir } from "fs/promises"
 
 export interface MemoryEntry {
   palavras: string[]
@@ -13,8 +12,7 @@ export interface MemoryData {
   [assunto: string]: MemoryEntry
 }
 
-const MEMORY_DIR = path.join(os.homedir(), ".markscode")
-const MEMORY_FILE = path.join(MEMORY_DIR, "memories.json")
+const MEMORY_FILE = ".markscode/memories.json"
 
 export async function loadMemory(): Promise<MemoryData> {
   try {
@@ -26,8 +24,9 @@ export async function loadMemory(): Promise<MemoryData> {
 }
 
 export async function saveMemory(memory: MemoryData): Promise<void> {
-  await fs.mkdir(MEMORY_DIR, { recursive: true })
-  await Bun.write(MEMORY_FILE, JSON.stringify(memory, null, 2))
+  const dir = path.dirname(MEMORY_FILE)
+  await mkdir(dir, { recursive: true })
+  await Bun.write(path.join(dir, "memories.json"), JSON.stringify(memory, null, 2))
 }
 
 export async function getMemoryForAssunto(assunto: string): Promise<MemoryEntry | null> {

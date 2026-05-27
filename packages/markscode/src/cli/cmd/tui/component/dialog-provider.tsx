@@ -5,88 +5,161 @@ import { DialogSelect } from "@tui/ui/dialog-select"
 import { useDialog } from "@tui/ui/dialog"
 import { useSDK } from "../context/sdk"
 import { DialogPrompt } from "../ui/dialog-prompt"
+import { Link } from "../ui/link"
 import { useTheme } from "../context/theme"
 import { TextAttributes } from "@opentui/core"
-import type { ProviderAuthAuthorization } from "@opencode-ai/sdk"
+import type { ProviderAuthAuthorization, ProviderAuthMethod } from "@opencode-ai/sdk/v2"
 import { DialogModel } from "./dialog-model"
+import { useKeyboard } from "@opentui/solid"
+import * as Clipboard from "@tui/util/clipboard"
+import { useToast } from "../ui/toast"
+import { isConsoleManagedProvider } from "@tui/util/provider-origin"
+import { useConnected } from "./use-connected"
+
+async function promptsMethod(input: {
+  dialog: ReturnType<typeof useDialog>
+  prompts: Exclude<ProviderAuthMethod["prompts"], undefined>
+}) {
+  const out: Record<string, string> = {}
+  for (const item of input.prompts) {
+    const row = item as Record<string, unknown>
+    const key = String(row.key ?? row.id ?? row.name ?? row.label ?? "")
+    if (!key) continue
+    const label = String(row.label ?? row.name ?? key)
+    const value = await DialogPrompt.show(input.dialog, label, {
+      placeholder: String(row.placeholder ?? ""),
+    })
+    if (value == null) return null
+    if (!value.trim() && row.required !== false) return null
+    out[key] = value
+  }
+  return out
+}
 
 const PROVIDER_PRIORITY: Record<string, number> = {
-  opencode: 0,
-  anthropic: 1,
-  "github-copilot": 2,
-  openai: 3,
-  google: 4,
-  openrouter: 5,
+  markscode: 0,
+  "markscode-go": 1,
+  openai: 2,
+  "github-copilot": 3,
+  anthropic: 4,
+  google: 5,
 }
 
 export function createDialogProviderOptions() {
   const sync = useSync()
   const dialog = useDialog()
   const sdk = useSDK()
+  const toast = useToast()
+  const { theme } = useTheme()
+  const onboarded = useConnected()
   const options = createMemo(() => {
     return pipe(
       sync.data.provider_next.all,
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
-      map((provider) => ({
-         title: provider.id === "opencode" ? "MarksCode Zen" : provider.name,
-        value: provider.id,
-        description: {
-          opencode: "(Recommended)",
-          anthropic: "(Claude Max or API key)",
-        }[provider.id],
-        category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
-        async onSelect() {
-          const methods = sync.data.provider_auth[provider.id] ?? [
-            {
-              type: "api",
-              label: "API key",
-            },
-          ]
-          let index: number | null = 0
-          if (methods.length > 1) {
-            index = await new Promise<number | null>((resolve) => {
-              dialog.replace(
-                () => (
-                  <DialogSelect
-                    title="Select auth method"
-                    options={methods.map((x, index) => ({
-                      title: x.label,
-                      value: index,
-                    }))}
-                    onSelect={(option) => resolve(option.value)}
-                  />
-                ),
-                () => resolve(null),
-              )
-            })
-          }
-          if (index == null) return
-          const method = methods[index]
-          if (method.type === "oauth") {
-            const result = await sdk.client.provider.oauth.authorize({
-              path: {
-                id: provider.id,
+      map((provider) => {
+        const consoleManaged = isConsoleManagedProvider(sync.data.console_state.consoleManagedProviders, provider.id)
+        const connected = sync.data.provider_next.connected.includes(provider.id)
+
+        return {
+          title: provider.name,
+          value: provider.id,
+          description: {
+            markscode: "(Recommended)",
+            anthropic: "(API key)",
+            openai: "(ChatGPT Plus/Pro or API key)",
+            "markscode-go": "Low cost subscription for everyone",
+          }[provider.id],
+          footer: consoleManaged ? sync.data.console_state.activeOrgName : undefined,
+          category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Other",
+          gutter: connected && onboarded() ? <text fg={theme.success}>✓</text> : undefined,
+          async onSelect() {
+            if (consoleManaged) return
+
+            const methods = sync.data.provider_auth[provider.id] ?? [
+              {
+                type: "api",
+                label: "API key",
               },
-              body: {
+            ]
+            let index: number | null = 0
+            if (methods.length > 1) {
+              index = await new Promise<number | null>((resolve) => {
+                dialog.replace(
+                  () => (
+                    <DialogSelect
+                      title="Select auth method"
+                      options={methods.map((x, index) => ({
+                        title: x.label,
+                        value: index,
+                      }))}
+                      onSelect={(option) => resolve(option.value)}
+                    />
+                  ),
+                  () => resolve(null),
+                )
+              })
+            }
+            if (index == null) return
+            const method = methods[index]
+            if (method.type === "oauth") {
+              let inputs: Record<string, string> | undefined
+              if (method.prompts?.length) {
+                const value = await promptsMethod({
+                  dialog,
+                  prompts: method.prompts,
+                })
+                if (!value) return
+                inputs = value
+              }
+
+              const result = await sdk.client.provider.oauth.authorize({
+                providerID: provider.id,
                 method: index,
-              },
-            })
-            if (result.data?.method === "code") {
-              dialog.replace(() => (
-                <CodeMethod providerID={provider.id} title={method.label} index={index} authorization={result.data!} />
+                inputs,
+              })
+              if (result.error) {
+                toast.show({
+                  variant: "error",
+                  message: JSON.stringify(result.error),
+                })
+                dialog.clear()
+                return
+              }
+              if (result.data?.method === "code") {
+                dialog.replace(() => (
+                  <CodeMethod
+                    providerID={provider.id}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                  />
+                ))
+              }
+              if (result.data?.method === "auto") {
+                dialog.replace(() => (
+                  <AutoMethod
+                    providerID={provider.id}
+                    title={method.label}
+                    index={index}
+                    authorization={result.data!}
+                  />
+                ))
+              }
+            }
+            if (method.type === "api") {
+              let metadata: Record<string, string> | undefined
+              if (method.prompts?.length) {
+                const value = await promptsMethod({ dialog, prompts: method.prompts })
+                if (!value) return
+                metadata = value
+              }
+              return dialog.replace(() => (
+                <ApiMethod providerID={provider.id} title={method.label} metadata={metadata} />
               ))
             }
-            if (result.data?.method === "auto") {
-              dialog.replace(() => (
-                <AutoMethod providerID={provider.id} title={method.label} index={index} authorization={result.data!} />
-              ))
-            }
-          }
-          if (method.type === "api") {
-            return dialog.replace(() => <ApiMethod providerID={provider.id} title={method.label} />)
-          }
-        },
-      })),
+          },
+        }
+      }),
     )
   })
   return options
@@ -108,15 +181,26 @@ function AutoMethod(props: AutoMethodProps) {
   const sdk = useSDK()
   const dialog = useDialog()
   const sync = useSync()
+  const toast = useToast()
+
+  useKeyboard((evt) => {
+    const copy =
+      (evt.name === "c" && !evt.ctrl && !evt.meta) ||
+      (evt.name === "c" && evt.ctrl) ||
+      (evt.name === "y" && evt.ctrl)
+    if (!copy) return
+    evt.preventDefault()
+    evt.stopPropagation()
+    const code = props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.authorization.url
+    Clipboard.copy(code)
+      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .catch(toast.error)
+  })
 
   onMount(async () => {
     const result = await sdk.client.provider.oauth.callback({
-      path: {
-        id: props.providerID,
-      },
-      body: {
-        method: props.index,
-      },
+      providerID: props.providerID,
+      method: props.index,
     })
     if (result.error) {
       dialog.clear()
@@ -124,20 +208,27 @@ function AutoMethod(props: AutoMethodProps) {
     }
     await sdk.client.instance.dispose()
     await sync.bootstrap()
-    dialog.replace(() => <DialogModel />)
+    dialog.replace(() => <DialogModel providerID={props.providerID} />)
   })
 
   return (
     <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
       <box flexDirection="row" justifyContent="space-between">
-        <text attributes={TextAttributes.BOLD}>{props.title}</text>
-        <text fg={theme.textMuted}>esc</text>
+        <text attributes={TextAttributes.BOLD} fg={theme.text}>
+          {props.title}
+        </text>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+          esc
+        </text>
       </box>
       <box gap={1}>
-        <text fg={theme.primary}>{props.authorization.url}</text>
+        <Link href={props.authorization.url} fg={theme.primary} />
         <text fg={theme.textMuted}>{props.authorization.instructions}</text>
       </box>
       <text fg={theme.textMuted}>Waiting for authorization...</text>
+      <text fg={theme.text}>
+        c / ctrl+c / ctrl+y <span style={{ fg: theme.textMuted }}>copy</span>
+      </text>
     </box>
   )
 }
@@ -154,6 +245,20 @@ function CodeMethod(props: CodeMethodProps) {
   const sync = useSync()
   const dialog = useDialog()
   const [error, setError] = createSignal(false)
+  const toast = useToast()
+
+  useKeyboard((evt) => {
+    const copy =
+      (evt.name === "c" && !evt.ctrl && !evt.meta) ||
+      (evt.name === "c" && evt.ctrl) ||
+      (evt.name === "y" && evt.ctrl)
+    if (!copy) return
+    evt.preventDefault()
+    evt.stopPropagation()
+    Clipboard.copy(props.authorization.url)
+      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .catch(toast.error)
+  })
 
   return (
     <DialogPrompt
@@ -161,18 +266,14 @@ function CodeMethod(props: CodeMethodProps) {
       placeholder="Authorization code"
       onConfirm={async (value) => {
         const { error } = await sdk.client.provider.oauth.callback({
-          path: {
-            id: props.providerID,
-          },
-          body: {
-            method: props.index,
-            code: value,
-          },
+          providerID: props.providerID,
+          method: props.index,
+          code: value,
         })
         if (!error) {
           await sdk.client.instance.dispose()
           await sync.bootstrap()
-          dialog.replace(() => <DialogModel />)
+          dialog.replace(() => <DialogModel providerID={props.providerID} />)
           return
         }
         setError(true)
@@ -180,7 +281,10 @@ function CodeMethod(props: CodeMethodProps) {
       description={() => (
         <box gap={1}>
           <text fg={theme.textMuted}>{props.authorization.instructions}</text>
-          <text fg={theme.primary}>{props.authorization.url}</text>
+          <Link href={props.authorization.url} fg={theme.primary} />
+          <text fg={theme.text}>
+            c / ctrl+c / ctrl+y <span style={{ fg: theme.textMuted }}>copy URL</span>
+          </text>
           <Show when={error()}>
             <text fg={theme.error}>Invalid code</text>
           </Show>
@@ -193,6 +297,7 @@ function CodeMethod(props: CodeMethodProps) {
 interface ApiMethodProps {
   providerID: string
   title: string
+  metadata?: Record<string, string>
 }
 function ApiMethod(props: ApiMethodProps) {
   const dialog = useDialog()
@@ -200,36 +305,62 @@ function ApiMethod(props: ApiMethodProps) {
   const sync = useSync()
   const { theme } = useTheme()
 
+  const getDescription = () => {
+    const base = {
+      markscode: (
+        <box gap={1}>
+          <text fg={theme.textMuted}>
+            MarksCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.
+          </text>
+          <text fg={theme.text}>
+            Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
+          </text>
+        </box>
+      ),
+      "markscode-go": (
+        <box gap={1}>
+          <text fg={theme.textMuted}>
+            MarksCode Go is a $10 per month subscription that provides reliable access to popular open coding models
+            with generous usage limits.
+          </text>
+          <text fg={theme.text}>
+            Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable MarksCode Go
+          </text>
+        </box>
+      ),
+      anthropic: (
+        <box gap={1}>
+          <text fg={theme.textMuted}>
+            Anthropic provides Claude models via API or subscription. You can use an API key for direct access or
+            connect your Claude Pro/Max subscription.
+          </text>
+          <text fg={theme.text}>
+            Create a key at <span style={{ fg: theme.primary }}>https://console.anthropic.com/settings/keys</span>
+          </text>
+          <text fg={theme.textMuted}>Or subscribe to Claude Pro/Max at anthropic.com</text>
+        </box>
+      ),
+    }
+    return (base as Record<string, typeof base.markscode | undefined>)[props.providerID]
+  }
+
   return (
     <DialogPrompt
       title={props.title}
       placeholder="API key"
-      description={
-        props.providerID === "opencode" ? (
-          <box gap={1}>
-            <text fg={theme.textMuted}>
-              MarksCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.
-            </text>
-            <text>
-              Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
-            </text>
-          </box>
-        ) : undefined
-      }
+      description={getDescription()}
       onConfirm={async (value) => {
         if (!value) return
-        sdk.client.auth.set({
-          path: {
-            id: props.providerID,
-          },
-          body: {
+        await sdk.client.auth.set({
+          providerID: props.providerID,
+          auth: {
             type: "api",
             key: value,
           },
         })
         await sdk.client.instance.dispose()
         await sync.bootstrap()
-        dialog.replace(() => <DialogModel />)
+        dialog.replace(() => <DialogModel providerID={props.providerID} />)
       }}
     />
   )

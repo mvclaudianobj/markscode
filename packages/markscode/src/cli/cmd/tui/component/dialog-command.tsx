@@ -1,64 +1,135 @@
 import { useDialog } from "@tui/ui/dialog"
-import { DialogSelect, type DialogSelectOption } from "@tui/ui/dialog-select"
+import { DialogSelect, type DialogSelectOption, type DialogSelectRef } from "@tui/ui/dialog-select"
 import {
   createContext,
   createMemo,
   createSignal,
+  getOwner,
   onCleanup,
+  runWithOwner,
   useContext,
   type Accessor,
   type ParentProps,
 } from "solid-js"
 import { useKeyboard } from "@opentui/solid"
 import { useKeybind } from "@tui/context/keybind"
-import { useSDK } from "@tui/context/sdk"
-import { useToast } from "../ui/toast"
-import { Clipboard } from "@tui/util/clipboard"
-import type { KeybindsConfig } from "@opencode-ai/sdk"
-import { loadMemory, type MemoryData } from "../../../../memory"
-import { useDirectory } from "../context/directory"
-import path from "path"
-
-import os from "os"
 
 type Context = ReturnType<typeof init>
 const ctx = createContext<Context>()
 
-export type CommandOption = Omit<DialogSelectOption, "onSelect"> & {
-  onSelect?: () => void
-  keybind?: keyof KeybindsConfig
+export type Slash = {
+  name: string
+  aliases?: string[]
 }
 
-function init(toast: any) {
+export type CommandOption = DialogSelectOption<string> & {
+  keybind?: string
+  suggested?: boolean
+  slash?: Slash
+  hidden?: boolean
+  enabled?: boolean
+}
+
+function init() {
+  const root = getOwner()
   const [registrations, setRegistrations] = createSignal<Accessor<CommandOption[]>[]>([])
   const [suspendCount, setSuspendCount] = createSignal(0)
-  const options = createMemo(() => {
-    return registrations().flatMap((x) => x())
+  const dialog = useDialog()
+  const keybind = useKeybind()
+
+  const entries = createMemo(() => {
+    const all = registrations().flatMap((x) => x())
+    return all.map((x) => ({
+      ...x,
+      footer: x.keybind ? keybind.print(x.keybind) : undefined,
+    }))
   })
+
+  const isEnabled = (option: CommandOption) => option.enabled !== false
+  const isVisible = (option: CommandOption) => isEnabled(option) && !option.hidden
+
+  const visibleOptions = createMemo(() => entries().filter((option) => isVisible(option)))
+  const suggestedOptions = createMemo(() =>
+    visibleOptions()
+      .filter((option) => option.suggested)
+      .map((option) => ({
+        ...option,
+        value: `suggested:${option.value}`,
+        category: "Suggested",
+      })),
+  )
   const suspended = () => suspendCount() > 0
 
+  useKeyboard((evt) => {
+    if (suspended()) return
+    if (dialog.stack.length > 0) return
+    if (evt.defaultPrevented) return
+    for (const option of entries()) {
+      if (!isEnabled(option)) continue
+      if (option.keybind && keybind.match(option.keybind, evt)) {
+        evt.preventDefault()
+        option.onSelect?.(dialog)
+        return
+      }
+    }
+  })
+
   const result = {
-    trigger(name: string, source?: "prompt") {
-      for (const option of options()) {
+    trigger(name: string) {
+      for (const option of entries()) {
         if (option.value === name) {
-          option.onSelect?.()
+          if (!isEnabled(option)) return
+          option.onSelect?.(dialog)
           return
         }
       }
+    },
+    slashes() {
+      return visibleOptions().flatMap((option) => {
+        const slash = option.slash
+        if (!slash) return []
+        return {
+          display: "/" + slash.name,
+          description: option.description ?? option.title,
+          aliases: slash.aliases?.map((alias) => "/" + alias),
+          onSelect: () => result.trigger(option.value),
+        }
+      })
     },
     keybinds(enabled: boolean) {
       setSuspendCount((count) => count + (enabled ? -1 : 1))
     },
     suspended,
-    register(cb: () => CommandOption[]) {
-      const results = createMemo(cb)
-      setRegistrations((arr) => [results, ...arr])
-      onCleanup(() => {
-        setRegistrations((arr) => arr.filter((x) => x !== results))
-      })
+    show() {
+      dialog.replace(() => <DialogCommand options={visibleOptions()} suggestedOptions={suggestedOptions()} />)
     },
-    get options() {
-      return options()
+    register(cb: () => CommandOption[]) {
+      const owner = getOwner() ?? root
+      if (!owner) return () => {}
+
+      let list: Accessor<CommandOption[]> | undefined
+
+      // TUI plugins now register commands via an async store that runs outside an active reactive scope.
+      // runWithOwner attaches createMemo/onCleanup to this owner so plugin registrations stay reactive and dispose correctly.
+      runWithOwner(owner, () => {
+        list = createMemo(cb)
+        const ref = list
+        if (!ref) return
+        setRegistrations((arr) => [ref, ...arr])
+        onCleanup(() => {
+          setRegistrations((arr) => arr.filter((x) => x !== ref))
+        })
+      })
+
+      if (!list) return () => {}
+      let done = false
+      return () => {
+        if (done) return
+        done = true
+        const ref = list
+        if (!ref) return
+        setRegistrations((arr) => arr.filter((x) => x !== ref))
+      }
     },
   }
   return result
@@ -73,7 +144,7 @@ export function useCommandDialog() {
 }
 
 export function CommandProvider(props: ParentProps) {
-  const value = init(toast)
+  const value = init()
   const dialog = useDialog()
   const keybind = useKeybind()
 
@@ -83,228 +154,19 @@ export function CommandProvider(props: ParentProps) {
     if (evt.defaultPrevented) return
     if (keybind.match("command_list", evt)) {
       evt.preventDefault()
-      dialog.replace(() => <DialogCommand options={value.options} />)
+      value.show()
       return
-    }
-    for (const option of value.options()) {
-      if (option.keybind && keybind.match(option.keybind, evt)) {
-        evt.preventDefault()
-        option.onSelect?.()
-        return
-      }
     }
   })
 
   return <ctx.Provider value={value}>{props.children}</ctx.Provider>
 }
 
-export function DialogInsertFile(props: { command: ReturnType<typeof useCommandDialog> }) {
-  const dialog = useDialog()
-  const { event } = useSDK()
-  const toast = useToast()
-  const keybind = useKeybind()
-  const [currentDir, setCurrentDir] = createSignal("/home")
-  const [files, setFiles] = createSignal<string[]>([])
-  const [selectedFile, setSelectedFile] = createSignal<string | null>(null)
-
-  useKeyboard(async (evt) => {
-    if (keybind.match("file_copy", evt)) {
-      const file = selectedFile()
-      if (file) {
-        try {
-          const content = await Bun.file(file).text()
-          await Clipboard.copy(content)
-          toast.show({ message: `Copied ${content.length} chars to clipboard`, variant: "info" })
-        } catch (error) {
-          toast.show({ message: `Error copying file: ${error.message}`, variant: "error" })
-        }
-      }
-    }
-  })
-
-  // Load files on mount
-  createMemo(async () => {
-    try {
-      const dir = currentDir()
-      const fs = await import("fs/promises")
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      const fileList = entries
-        .filter((entry) => entry.isFile() || entry.isDirectory())
-        .map((entry) => entry.name)
-        .filter((name) => !name.startsWith("."))
-      setFiles(fileList)
-    } catch {
-      setFiles([])
-    }
-  })
-
-  const options = createMemo(() => {
-    const dir = currentDir()
-    const fileOpts = files().map((file) => ({
-      title: file,
-      value: path.join(dir, file),
-      description: "File",
-    }))
-    // Add parent directory option
-    const parent = path.dirname(dir)
-    if (parent !== dir) {
-      fileOpts.unshift({
-        title: "..",
-        value: parent,
-        description: "Parent directory",
-      })
-    }
-    return fileOpts
-  })
-
-  return (
-    <DialogSelect
-      title={`Insert File - ${currentDir()}`}
-      placeholder="Search files"
-      options={options()}
-      onSelect={async (option) => {
-        try {
-          const stat = await Bun.file(option.value).stat()
-          if (stat.isDirectory()) {
-            setCurrentDir(option.value)
-          } else {
-            const content = await Bun.file(option.value).text()
-            await Clipboard.copy(content)
-            event.emit("tui.insert_file_content", { content })
-            toast.show({ message: `Inserted ${content.length} chars into chat`, variant: "info" })
-            dialog.clear()
-          }
-        } catch (error) {
-          toast.show({
-            message: `Error reading file: ${error instanceof Error ? error.message : String(error)}`,
-            variant: "error",
-          })
-        }
-      }}
-    />
-  )
-}
-
-export function DialogInsertImage(props: { command: ReturnType<typeof useCommandDialog> }) {
-  const dialog = useDialog()
-  const { event } = useSDK()
-  const toast = useToast()
-  const [currentDir, setCurrentDir] = createSignal("/home")
-  const [files, setFiles] = createSignal<string[]>([])
-
-  // Load image files on mount or dir change
-  createMemo(async () => {
-    try {
-      const dir = currentDir()
-      const fs = await import("fs/promises")
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
-      const fileList = entries
-        .filter(
-          (entry) =>
-            (entry.isFile() && imageExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext))) ||
-            entry.isDirectory(),
-        )
-        .map((entry) => entry.name)
-        .filter((name) => !name.startsWith("."))
-      setFiles(fileList)
-    } catch {
-      setFiles([])
-    }
-  })
-
-  const options = createMemo(() => {
-    const dir = currentDir()
-    const fileOpts = files().map((file) => ({
-      title: file,
-      value: path.join(dir, file),
-      description: "Image file",
-    }))
-    // Add parent directory option
-    const parent = path.dirname(dir)
-    if (parent !== dir) {
-      fileOpts.unshift({
-        title: "..",
-        value: parent,
-        description: "Parent directory",
-      })
-    }
-    return fileOpts
-  })
-
-  return (
-    <DialogSelect
-      title={`Insert Image File - ${currentDir()}`}
-      placeholder="Search images"
-      options={options()}
-      onSelect={async (option) => {
-        try {
-          const stat = await Bun.file(option.value).stat()
-          if (stat.isDirectory()) {
-            setCurrentDir(option.value)
-          } else {
-            const content = `[Image: ${option.value}]`
-            await Clipboard.copy(content)
-            event.emit("tui.insert_file_content", { content })
-            toast.show({ message: `Inserted image reference into chat`, variant: "info" })
-            dialog.clear()
-          }
-        } catch (error) {
-          toast.show({
-            message: `Error reading image: ${error instanceof Error ? error.message : String(error)}`,
-            variant: "error",
-          })
-        }
-      }}
-    />
-  )
-}
-
-function DialogCommand(props: { options: Accessor<CommandOption[]> }) {
-  const keybind = useKeybind()
-  return (
-    <DialogSelect
-      title="Commands"
-      options={props.options().map((x) => ({
-        ...x,
-        footer: x.keybind ? keybind.print(x.keybind) : undefined,
-      }))}
-    />
-  )
-}
-
-export function DialogMemories() {
-  const dialog = useDialog()
-  const { event } = useSDK()
-  const [memories, setMemories] = createSignal<MemoryData>({})
-
-  // Load memories on mount
-  createMemo(async () => {
-    const data = await loadMemory()
-    setMemories(data)
-  })
-
-  const options = createMemo(() => {
-    const mem = memories()
-    return Object.keys(mem).map((assunto) => ({
-      title: assunto,
-      value: assunto,
-      description: mem[assunto].resumo.slice(0, 50) + "...",
-    }))
-  })
-
-  return (
-    <DialogSelect
-      title="Memories"
-      placeholder="Search memories"
-      options={options()}
-      onSelect={async (option) => {
-        const mem = memories()[option.value]
-        await Clipboard.copy(mem.resumo)
-        event.emit("tui.insert_file_content", { content: mem.resumo })
-        toast.show({ message: `Memória importada: ${mem.resumo.slice(0, 50)}...`, variant: "info" })
-        dialog.clear()
-      }}
-    />
-  )
+function DialogCommand(props: { options: CommandOption[]; suggestedOptions: CommandOption[] }) {
+  let ref: DialogSelectRef<string>
+  const list = () => {
+    if (ref?.filter) return props.options
+    return [...props.suggestedOptions, ...props.options]
+  }
+  return <DialogSelect ref={(r) => (ref = r)} title="Commands" options={list()} />
 }

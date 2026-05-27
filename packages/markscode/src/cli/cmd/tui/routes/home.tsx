@@ -1,102 +1,89 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createMemo, Match, onMount, Show, Switch, type ParentProps } from "solid-js"
-import { useTheme } from "@tui/context/theme"
-import { useKeybind } from "../context/keybind"
-import type { KeybindsConfig } from "@opencode-ai/sdk"
+import { createEffect, createSignal } from "solid-js"
 import { Logo } from "../component/logo"
-import { Locale } from "@/util/locale"
+import { useProject } from "../context/project"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
 import { useArgs } from "../context/args"
-import { Global } from "@/global"
-import { useDirectory } from "../context/directory"
-import path from "path"
-import { getMemoryForAssunto } from "../../../../memory"
+import { useRouteData } from "@tui/context/route"
+import { usePromptRef } from "../context/prompt"
+import { useLocal } from "../context/local"
+import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 
-// TODO: what is the best way to do this?
 let once = false
+const placeholder = {
+  normal: ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"],
+  shell: ["ls -la", "git status", "pwd"],
+}
 
 export function Home() {
   const sync = useSync()
-  const { theme } = useTheme()
-  const mcp = createMemo(() => Object.keys(sync.data.mcp).length > 0)
-  const mcpError = createMemo(() => {
-    return Object.values(sync.data.mcp).some((x) => x.status === "failed")
-  })
-
-  const Hint = (
-    <Show when={Object.keys(sync.data.mcp).length > 0}>
-      <box flexShrink={0} flexDirection="row" gap={1}>
-        <text fg={theme.text}>
-          <Switch>
-            <Match when={mcpError()}>
-              <span style={{ fg: theme.error }}>•</span> mcp errors{" "}
-              <span style={{ fg: theme.textMuted }}>ctrl+x s</span>
-            </Match>
-            <Match when={true}>
-              <span style={{ fg: theme.success }}>•</span>{" "}
-              {Locale.pluralize(Object.values(sync.data.mcp).length, "{} mcp server", "{} mcp servers")}
-            </Match>
-          </Switch>
-        </text>
-      </box>
-    </Show>
-  )
-
-  let prompt: PromptRef
+  const project = useProject()
+  const route = useRouteData("home")
+  const promptRef = usePromptRef()
+  const [ref, setRef] = createSignal<PromptRef | undefined>()
   const args = useArgs()
-  onMount(async () => {
-    if (once) return
-    let promptText = ""
-    if (args.prompt) {
-      promptText = args.prompt
-    } else {
-      // Only load automatic prompt in new sessions
-      if (!args.continue && !args.sessionID) {
-        // Load memory for current directory (prompt_default.txt is now system prompt)
-        const assunto = path.basename(directory())
-        const memory = await getMemoryForAssunto(assunto)
-        if (memory) {
-          const memoryText = `\n\nMemória do projeto:\nResumo: ${memory.resumo}\nPalavras-chave: ${memory.palavras.join(", ")}\nAvanços: ${memory.avancos.join("; ")}`
-          promptText = memoryText
-          console.log("Memória carregada para assunto:", assunto)
-        }
-      }
-    }
-    if (promptText) {
-      prompt.set({ input: promptText, parts: [] })
+  const local = useLocal()
+  let sent = false
+
+  const bind = (r: PromptRef | undefined) => {
+    setRef(r)
+    promptRef.set(r)
+    if (once || !r) return
+    if (route.prompt) {
+      r.set(route.prompt)
       once = true
+      return
     }
+    if (!args.prompt) return
+    r.set({ input: args.prompt, parts: [] })
+    once = true
+  }
+
+  // Wait for sync and model store to be ready before auto-submitting --prompt
+  createEffect(() => {
+    const r = ref()
+    if (sent) return
+    if (!r) return
+    if (!sync.ready || !local.model.ready) return
+    if (!args.prompt) return
+    if (r.current.input !== args.prompt) return
+    sent = true
+    r.submit()
   })
-  const directory = useDirectory()
 
   return (
     <>
-      <box flexGrow={1} justifyContent="center" alignItems="center" paddingLeft={2} paddingRight={2} gap={1}>
-        <Logo />
-        <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1}>
-          <Prompt ref={(r) => (prompt = r)} hint={Hint} />
+      <box flexGrow={1} alignItems="center" paddingLeft={2} paddingRight={2}>
+        <box flexGrow={1} minHeight={0} />
+        <box height={4} minHeight={0} flexShrink={1} />
+        <box flexShrink={0}>
+          <TuiPluginRuntime.Slot name="home_logo" mode="replace">
+            <Logo />
+          </TuiPluginRuntime.Slot>
         </box>
+        <box height={1} minHeight={0} flexShrink={1} />
+        <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1} flexShrink={0}>
+          <TuiPluginRuntime.Slot
+            name="home_prompt"
+            mode="replace"
+            workspace_id={project.workspace.current()}
+            ref={bind}
+          >
+            <Prompt
+              ref={bind}
+              workspaceID={project.workspace.current()}
+              right={<TuiPluginRuntime.Slot name="home_prompt_right" workspace_id={project.workspace.current()} />}
+              placeholders={placeholder}
+            />
+          </TuiPluginRuntime.Slot>
+        </box>
+        <TuiPluginRuntime.Slot name="home_bottom" />
+        <box flexGrow={1} minHeight={0} />
         <Toast />
       </box>
-      <box paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2} flexDirection="row" flexShrink={0} gap={2}>
-        <text fg={theme.textMuted}>{directory()}</text>
-        <box gap={1} flexDirection="row" flexShrink={0}>
-          <Show when={mcp()}>
-            <text fg={theme.text}>
-              <Switch>
-                <Match when={mcpError()}>
-                  <span style={{ fg: theme.error }}>⊙ </span>
-                </Match>
-                <Match when={true}>
-                  <span style={{ fg: theme.success }}>⊙ </span>
-                </Match>
-              </Switch>
-              {Object.keys(sync.data.mcp).length} MCP
-            </text>
-            <text fg={theme.textMuted}>/status</text>
-          </Show>
-        </box>
+      <box width="100%" flexShrink={0}>
+        <TuiPluginRuntime.Slot name="home_footer" mode="single_winner" />
       </box>
     </>
   )

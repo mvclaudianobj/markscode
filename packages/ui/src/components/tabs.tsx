@@ -1,8 +1,11 @@
 import { Tabs as Kobalte } from "@kobalte/core/tabs"
 import { Show, splitProps, type JSX } from "solid-js"
-import type { ComponentProps, ParentProps } from "solid-js"
+import type { ComponentProps, ParentProps, Component } from "solid-js"
 
-export interface TabsProps extends ComponentProps<typeof Kobalte> {}
+export interface TabsProps extends ComponentProps<typeof Kobalte> {
+  variant?: "normal" | "alt" | "pill" | "settings"
+  orientation?: "horizontal" | "vertical"
+}
 export interface TabsListProps extends ComponentProps<typeof Kobalte.List> {}
 export interface TabsTriggerProps extends ComponentProps<typeof Kobalte.Trigger> {
   classes?: {
@@ -10,17 +13,21 @@ export interface TabsTriggerProps extends ComponentProps<typeof Kobalte.Trigger>
   }
   hideCloseButton?: boolean
   closeButton?: JSX.Element
+  onMiddleClick?: () => void
 }
 export interface TabsContentProps extends ComponentProps<typeof Kobalte.Content> {}
 
 function TabsRoot(props: TabsProps) {
-  const [split, rest] = splitProps(props, ["class", "classList"])
+  const [split, rest] = splitProps(props, ["class", "classList", "variant", "orientation"])
   return (
     <Kobalte
       {...rest}
+      orientation={split.orientation}
       data-component="tabs"
+      data-variant={split.variant || "normal"}
+      data-orientation={split.orientation || "horizontal"}
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     />
@@ -32,9 +39,9 @@ function TabsList(props: TabsListProps) {
   return (
     <Kobalte.List
       {...rest}
-      data-slot="tabs-tabs-list"
+      data-slot="tabs-list"
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     />
@@ -49,25 +56,39 @@ function TabsTrigger(props: ParentProps<TabsTriggerProps>) {
     "children",
     "closeButton",
     "hideCloseButton",
+    "onMiddleClick",
   ])
   return (
     <div
-      data-slot="tabs-tabs-trigger-wrapper"
+      data-slot="tabs-trigger-wrapper"
+      data-value={props.value}
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 1 && split.onMiddleClick) {
+          e.preventDefault()
+        }
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1 && split.onMiddleClick) {
+          e.preventDefault()
+          split.onMiddleClick()
+        }
       }}
     >
       <Kobalte.Trigger
         {...rest}
-        data-slot="tabs-tabs-trigger"
-        classList={{ "group/tab": true, [split.classes?.button ?? ""]: split.classes?.button }}
+        data-slot="tabs-trigger"
+        data-value={props.value}
+        classList={{ [split.classes?.button ?? ""]: split.classes?.button }}
       >
         {split.children}
       </Kobalte.Trigger>
       <Show when={split.closeButton}>
         {(closeButton) => (
-          <div data-slot="tabs-tabs-trigger-close-button" data-hidden={split.hideCloseButton}>
+          <div data-slot="tabs-trigger-close-button" data-hidden={split.hideCloseButton}>
             {closeButton()}
           </div>
         )}
@@ -81,9 +102,9 @@ function TabsContent(props: ParentProps<TabsContentProps>) {
   return (
     <Kobalte.Content
       {...rest}
-      data-slot="tabs-tabs-content"
+      data-slot="tabs-content"
       classList={{
-        ...(split.classList ?? {}),
+        ...split.classList,
         [split.class ?? ""]: !!split.class,
       }}
     >
@@ -92,8 +113,13 @@ function TabsContent(props: ParentProps<TabsContentProps>) {
   )
 }
 
+const TabsSectionTitle: Component<ParentProps> = (props) => {
+  return <div data-slot="tabs-section-title">{props.children}</div>
+}
+
 export const Tabs = Object.assign(TabsRoot, {
   List: TabsList,
   Trigger: TabsTrigger,
   Content: TabsContent,
+  SectionTitle: TabsSectionTitle,
 })

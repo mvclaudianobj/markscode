@@ -8,6 +8,7 @@ import type { Context as GitHubContext } from "@actions/github/lib/context"
 import type { IssueCommentEvent, PullRequestReviewCommentEvent } from "@octokit/webhooks-types"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { spawn } from "node:child_process"
+import { setTimeout as sleep } from "node:timers/promises"
 
 type GitHubAuthor = {
   login: string
@@ -275,13 +276,13 @@ async function assertOpencodeConnected() {
         body: {
           service: "github-workflow",
           level: "info",
-          message: "Prepare to react to Github Workflow event",
+          message: "Prepare to react to GitHub Workflow event",
         },
       })
       connected = true
       break
-    } catch (e) {}
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    } catch {}
+    await sleep(300)
   } while (retry++ < 30)
 
   if (!connected) {
@@ -316,6 +317,10 @@ function useEnvRunUrl() {
   if (!runId) throw new Error(`Environment variable "GITHUB_RUN_ID" is not set`)
 
   return `/${repo.owner}/${repo.repo}/actions/runs/${runId}`
+}
+
+function useEnvAgent() {
+  return process.env["AGENT"] || undefined
 }
 
 function useEnvShare() {
@@ -491,7 +496,6 @@ async function subscribeSessionEvents() {
 
   const TOOL: Record<string, [string, string]> = {
     todowrite: ["Todo", "\x1b[33m\x1b[1m"],
-    todoread: ["Todo", "\x1b[33m\x1b[1m"],
     bash: ["Bash", "\x1b[31m\x1b[1m"],
     edit: ["Edit", "\x1b[32m\x1b[1m"],
     glob: ["Glob", "\x1b[34m\x1b[1m"],
@@ -509,7 +513,7 @@ async function subscribeSessionEvents() {
   const decoder = new TextDecoder()
 
   let text = ""
-  ;(async () => {
+  void (async () => {
     while (true) {
       try {
         const { done, value } = await reader.read()
@@ -538,7 +542,7 @@ async function subscribeSessionEvents() {
                     ? JSON.stringify(part.state.input)
                     : "Unknown"
                 console.log()
-                console.log(color + `|`, "\x1b[0m\x1b[2m" + ` ${tool.padEnd(7, " ")}`, "", "\x1b[0m" + title)
+                console.log(`${color}|`, `\x1b[0m\x1b[2m ${tool.padEnd(7, " ")}`, "", `\x1b[0m${title}`)
               }
 
               if (part.type === "text") {
@@ -557,7 +561,7 @@ async function subscribeSessionEvents() {
               if (evt.properties.info.id !== session.id) continue
               session = evt.properties.info
             }
-          } catch (e) {
+          } catch {
             // Ignore parse errors
           }
         }
@@ -570,24 +574,49 @@ async function subscribeSessionEvents() {
 }
 
 async function summarize(response: string) {
-  const payload = useContext().payload as IssueCommentEvent
   try {
     return await chat(`Summarize the following in less than 40 characters:\n\n${response}`)
-  } catch (e) {
+  } catch {
+    if (isScheduleEvent()) {
+      return "Scheduled task changes"
+    }
+    const payload = useContext().payload as IssueCommentEvent
     return `Fix issue: ${payload.issue.title}`
   }
+}
+
+async function resolveAgent(): Promise<string | undefined> {
+  const envAgent = useEnvAgent()
+  if (!envAgent) return undefined
+
+  // Validate the agent exists and is a primary agent
+  const agents = await client.agent.list<true>()
+  const agent = agents.data?.find((a) => a.name === envAgent)
+
+  if (!agent) {
+    console.warn(`agent "${envAgent}" not found. Falling back to default agent`)
+    return undefined
+  }
+
+  if (agent.mode === "subagent") {
+    console.warn(`agent "${envAgent}" is a subagent, not a primary agent. Falling back to default agent`)
+    return undefined
+  }
+
+  return envAgent
 }
 
 async function chat(text: string, files: PromptFiles = []) {
   console.log("Sending message to opencode...")
   const { providerID, modelID } = useEnvModel()
+  const agent = await resolveAgent()
 
   const chat = await client.session.chat<true>({
     path: session,
     body: {
       providerID,
       modelID,
-      agent: "build",
+      agent,
       parts: [
         {
           type: "text",
@@ -747,7 +776,7 @@ async function assertPermissions() {
     console.log(`  permission: ${permission}`)
   } catch (error) {
     console.error(`Failed to check permissions: ${error}`)
-    throw new Error(`Failed to check permissions for user ${actor}: ${error}`)
+    throw new Error(`Failed to check permissions for user ${actor}: ${error}`, { cause: error })
   }
 
   if (!["admin", "write"].includes(permission)) throw new Error(`User ${actor} does not have write permissions`)

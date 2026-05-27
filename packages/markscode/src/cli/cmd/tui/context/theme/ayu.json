@@ -1,5 +1,5 @@
 {
-  "$schema": "https://opencode.ai/theme.json",
+  "$schema": "https://markscode.ai/theme.json",
   "defs": {
     "darkBg": "#0B0E14",
     "darkBgAlt": "#0D1017",
@@ -50,7 +50,7 @@
     "diffAddedBg": "#20303b",
     "diffRemovedBg": "#37222c",
     "diffContextBg": "darkPanel",
-    "diffLineNumber": "darkGutter",
+    "diffLineNumber": "diffContext",
     "diffAddedLineNumberBg": "#1b2b34",
     "diffRemovedLineNumberBg": "#2d1f26",
     "markdownText": "darkFg",

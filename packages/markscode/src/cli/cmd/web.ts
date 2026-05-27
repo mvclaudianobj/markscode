@@ -1,6 +1,8 @@
 import { Server } from "../../server/server"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
+import { withNetworkOptions, resolveNetworkOptions } from "../network"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import open from "open"
 import { networkInterfaces } from "os"
 
@@ -28,32 +30,20 @@ function getNetworkIPs() {
 
 export const WebCommand = cmd({
   command: "web",
-  builder: (yargs) =>
-    yargs
-      .option("port", {
-        alias: ["p"],
-        type: "number",
-        describe: "port to listen on",
-        default: 0,
-      })
-      .option("hostname", {
-        type: "string",
-        describe: "hostname to listen on",
-        default: "127.0.0.1",
-      }),
-  describe: "starts a headless opencode server",
+  builder: (yargs) => withNetworkOptions(yargs),
+  describe: "start markscode server and open web interface",
   handler: async (args) => {
-    const hostname = args.hostname
-    const port = args.port
-    const server = Server.listen({
-      port,
-      hostname,
-    })
+    if (!Flag.OPENCODE_SERVER_PASSWORD) {
+      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  MARKSCODE_SERVER_PASSWORD is not set; server is unsecured. (compat: OPENCODE_SERVER_PASSWORD)")
+    }
+    const opts = await resolveNetworkOptions(args)
+    const server = await Server.listen(opts)
     UI.empty()
     UI.println(UI.logo("  "))
-    UI.empty()
+    UI.println(UI.Style.TEXT_INFO_BOLD + "  MarksCode Web")
+UI.empty()
 
-    if (hostname === "0.0.0.0") {
+    if (opts.hostname === "0.0.0.0") {
       // Show localhost for local access
       const localhostUrl = `http://localhost:${server.port}`
       UI.println(UI.Style.TEXT_INFO_BOLD + "  Local access:      ", UI.Style.TEXT_NORMAL, localhostUrl)
@@ -68,6 +58,14 @@ export const WebCommand = cmd({
             `http://${ip}:${server.port}`,
           )
         }
+      }
+
+      if (opts.mdns) {
+        UI.println(
+          UI.Style.TEXT_INFO_BOLD + "  mDNS:              ",
+          UI.Style.TEXT_NORMAL,
+          `${opts.mdnsDomain}:${server.port}`,
+        )
       }
 
       // Open localhost in browser

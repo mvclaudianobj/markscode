@@ -1,292 +1,522 @@
-import { Config } from "../config/config"
+import { Config } from "@/config/config"
 import z from "zod"
-import { Provider } from "../provider/provider"
-import { generateObject, type ModelMessage } from "ai"
+import { Provider } from "@/provider/provider"
+import { ModelID, ProviderID } from "../provider/schema"
+import { generateObject, streamObject, type ModelMessage } from "ai"
+import { Truncate } from "@/tool/truncate"
+import { Auth } from "../auth"
+import { ProviderTransform } from "@/provider/transform"
+
 import PROMPT_GENERATE from "./generate.txt"
-import { SystemPrompt } from "../session/system"
-import { Instance } from "../project/instance"
-import { mergeDeep } from "remeda"
+import PROMPT_COMPACTION from "./prompt/compaction.txt"
+import PROMPT_DEBUG from "./prompt/debug.txt"
+import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_ASK from "./prompt/ask.txt"
+import PROMPT_DOCS from "./prompt/docs.txt"
+import PROMPT_ORCHESTRATOR from "./prompt/orchestrator.txt"
+import PROMPT_SUMMARY from "./prompt/summary.txt"
+import PROMPT_TITLE from "./prompt/title.txt"
+import { Permission } from "@/permission"
+import { mergeDeep, pipe, sortBy, values } from "remeda"
+import { Global } from "@opencode-ai/core/global"
+import path from "path"
+import { Plugin } from "@/plugin"
+import { Skill } from "../skill"
+import { Effect, Context, Layer, Schema } from "effect"
+import { InstanceState } from "@/effect/instance-state"
+import * as Option from "effect/Option"
+import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { zod } from "@/util/effect-zod"
+import { withStatics, type DeepMutable } from "@/util/schema"
 
-export namespace Agent {
-  export const Info = z
-    .object({
-      name: z.string(),
-      description: z.string().optional(),
-      mode: z.enum(["subagent", "primary", "all"]),
-      builtIn: z.boolean(),
-      topP: z.number().optional(),
-      temperature: z.number().optional(),
-      color: z.string().optional(),
-      permission: z.object({
-        edit: Config.Permission,
-        bash: z.record(z.string(), Config.Permission),
-        webfetch: Config.Permission.optional(),
-        doom_loop: Config.Permission.optional(),
-        external_directory: Config.Permission.optional(),
-      }),
-      model: z
-        .object({
-          modelID: z.string(),
-          providerID: z.string(),
+export const Info = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  mode: Schema.Literals(["subagent", "primary", "all"]),
+  native: Schema.optional(Schema.Boolean),
+  hidden: Schema.optional(Schema.Boolean),
+  topP: Schema.optional(Schema.Number),
+  temperature: Schema.optional(Schema.Number),
+  color: Schema.optional(Schema.String),
+  permission: Permission.Ruleset,
+  model: Schema.optional(
+    Schema.Struct({
+      modelID: ModelID,
+      providerID: ProviderID,
+    }),
+  ),
+  variant: Schema.optional(Schema.String),
+  prompt: Schema.optional(Schema.String),
+  options: Schema.Record(Schema.String, Schema.Unknown),
+  steps: Schema.optional(Schema.Number),
+})
+  .annotate({ identifier: "Agent" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
+
+export interface Interface {
+  readonly get: (agent: string) => Effect.Effect<Info>
+  readonly list: () => Effect.Effect<Info[]>
+  readonly defaultAgent: () => Effect.Effect<string>
+  readonly generate: (input: {
+    description: string
+    model?: { providerID: ProviderID; modelID: ModelID }
+  }) => Effect.Effect<{
+    identifier: string
+    whenToUse: string
+    systemPrompt: string
+  }>
+}
+
+type State = Omit<Interface, "generate">
+
+export class Service extends Context.Service<Service, Interface>()("@markscode/Agent") {}
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const config = yield* Config.Service
+    const auth = yield* Auth.Service
+    const plugin = yield* Plugin.Service
+    const skill = yield* Skill.Service
+    const provider = yield* Provider.Service
+
+    const state = yield* InstanceState.make<State>(
+      Effect.fn("Agent.state")(function* (ctx) {
+        const cfg = yield* config.get()
+        const skillDirs = yield* skill.dirs()
+        const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
+
+        const defaults = Permission.fromConfig({
+          "*": "allow",
+          doom_loop: "ask",
+          external_directory: {
+            "*": "ask",
+            ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
+          },
+          question: "deny",
+          plan_enter: "deny",
+          plan_exit: "deny",
+          // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
+          read: {
+            "*": "allow",
+            "*.env": "ask",
+            "*.env.*": "ask",
+            "*.env.example": "allow",
+          },
         })
-        .optional(),
-      prompt: z.string().optional(),
-      tools: z.record(z.string(), z.boolean()),
-      options: z.record(z.string(), z.any()),
-    })
-    .meta({
-      ref: "Agent",
-    })
-  export type Info = z.infer<typeof Info>
 
-  const state = Instance.state(async () => {
-    const cfg = await Config.get()
-    const defaultTools = cfg.tools ?? {}
-    const defaultPermission: Info["permission"] = {
-      edit: "allow",
-      bash: {
-        "*": "allow",
-      },
-      webfetch: "allow",
-      doom_loop: "ask",
-      external_directory: "ask",
-    }
-    const agentPermission = mergeAgentPermissions(defaultPermission, cfg.permission ?? {})
+        const user = Permission.fromConfig(cfg.permission ?? {})
 
-    const planPermission = mergeAgentPermissions(
-      {
-        edit: "deny",
-        bash: {
-          "cut*": "allow",
-          "diff*": "allow",
-          "du*": "allow",
-          "file *": "allow",
-          "find * -delete*": "ask",
-          "find * -exec*": "ask",
-          "find * -fprint*": "ask",
-          "find * -fls*": "ask",
-          "find * -fprintf*": "ask",
-          "find * -ok*": "ask",
-          "find *": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git show*": "allow",
-          "git status*": "allow",
-          "git branch": "allow",
-          "git branch -v": "allow",
-          "grep*": "allow",
-          "head*": "allow",
-          "less*": "allow",
-          "ls*": "allow",
-          "more*": "allow",
-          "pwd*": "allow",
-          "rg*": "allow",
-          "sort --output=*": "ask",
-          "sort -o *": "ask",
-          "sort*": "allow",
-          "stat*": "allow",
-          "tail*": "allow",
-          "tree -o *": "ask",
-          "tree*": "allow",
-          "uniq*": "allow",
-          "wc*": "allow",
-          "whereis*": "allow",
-          "which*": "allow",
-          "*": "ask",
-        },
-        webfetch: "allow",
+        const agents: Record<string, Info> = {
+          build: {
+            name: "build",
+            description: "The default agent. Executes tools based on configured permissions.",
+            options: {},
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "allow",
+                plan_enter: "allow",
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
+          plan: {
+            name: "plan",
+            description: "Plan mode. Disallows all edit tools.",
+            options: {},
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                question: "allow",
+                plan_exit: "allow",
+                external_directory: {
+                  [path.join(Global.Path.data, "plans", "*")]: "allow",
+                },
+                edit: {
+                  "*": "deny",
+                  [path.join(".markscode", "plans", "*.md")]: "allow",
+                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
+                },
+              }),
+              user,
+            ),
+            mode: "primary",
+            native: true,
+          },
+          debug: {
+        name: "debug",
+        description: "Diagnose and fix software issues with systematic debugging methodology.",
+        prompt: PROMPT_DEBUG,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            question: "allow",
+            plan_enter: "allow",
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
       },
-      cfg.permission ?? {},
+      docs: {
+        name: "docs",
+        description: "Generate and improve technical documentation based on real code behavior.",
+        prompt: PROMPT_DOCS,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: {
+              "*": "allow",
+              "*.env": "ask",
+              "*.env.*": "ask",
+              "*.env.example": "allow",
+            },
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            question: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      orchestrator: {
+        name: "orchestrator",
+        description: "Coordinate complex tasks by delegating to specialized agents in parallel.",
+        prompt: PROMPT_ORCHESTRATOR,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            question: "allow",
+            task: "allow",
+            todoread: "allow",
+            todowrite: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      ask: {
+        name: "ask",
+        description: "Get answers and explanations without making changes to the codebase.",
+        prompt: PROMPT_ASK,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: {
+              "*": "allow",
+              "*.env": "ask",
+              "*.env.*": "ask",
+              "*.env.example": "allow",
+            },
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            question: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      general: {
+            name: "general",
+            description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                todowrite: "deny",
+              }),
+              user,
+            ),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          explore: {
+            name: "explore",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                bash: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                codesearch: "allow",
+                read: "allow",
+                external_directory: {
+                  "*": "ask",
+                  ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
+                },
+              }),
+              user,
+            ),
+            description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
+            prompt: PROMPT_EXPLORE,
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
+          compaction: {
+            name: "compaction",
+            mode: "primary",
+            native: true,
+            hidden: true,
+            prompt: PROMPT_COMPACTION,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+              }),
+              user,
+            ),
+            options: {},
+          },
+          title: {
+            name: "title",
+            mode: "primary",
+            options: {},
+            native: true,
+            hidden: true,
+            temperature: 0.5,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+              }),
+              user,
+            ),
+            prompt: PROMPT_TITLE,
+          },
+          summary: {
+            name: "summary",
+            mode: "primary",
+            options: {},
+            native: true,
+            hidden: true,
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+              }),
+              user,
+            ),
+            prompt: PROMPT_SUMMARY,
+          },
+        }
+
+        for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+          if (value.disable) {
+            delete agents[key]
+            continue
+          }
+          let item = agents[key]
+          if (!item)
+            item = agents[key] = {
+              name: key,
+              mode: "all",
+              permission: Permission.merge(defaults, user),
+              options: {},
+              native: false,
+            }
+          if (value.model) item.model = Provider.parseModel(value.model)
+          item.variant = value.variant ?? item.variant
+          item.prompt = value.prompt ?? item.prompt
+          item.description = value.description ?? item.description
+          item.temperature = value.temperature ?? item.temperature
+          item.topP = value.top_p ?? item.topP
+          item.mode = value.mode ?? item.mode
+          item.color = value.color ?? item.color
+          item.hidden = value.hidden ?? item.hidden
+          item.name = value.name ?? item.name
+          item.steps = value.steps ?? item.steps
+          item.options = mergeDeep(item.options, value.options ?? {})
+          item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
+        }
+
+        // Ensure Truncate.GLOB is allowed unless explicitly configured
+        for (const name in agents) {
+          const agent = agents[name]
+          const explicit = agent.permission.some((r) => {
+            if (r.permission !== "external_directory") return false
+            if (r.action !== "deny") return false
+            return r.pattern === Truncate.GLOB
+          })
+          if (explicit) continue
+
+          agents[name].permission = Permission.merge(
+            agents[name].permission,
+            Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
+          )
+        }
+
+        const get = Effect.fnUntraced(function* (agent: string) {
+          return agents[agent]
+        })
+
+        const list = Effect.fnUntraced(function* () {
+          const cfg = yield* config.get()
+          return pipe(
+            agents,
+            values(),
+            sortBy(
+              [(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "build"), "desc"],
+              [(x) => x.name, "asc"],
+            ),
+          )
+        })
+
+        const defaultAgent = Effect.fnUntraced(function* () {
+          const c = yield* config.get()
+          if (c.default_agent) {
+            const agent = agents[c.default_agent]
+            if (!agent) throw new Error(`default agent "${c.default_agent}" not found`)
+            if (agent.mode === "subagent") throw new Error(`default agent "${c.default_agent}" is a subagent`)
+            if (agent.hidden === true) throw new Error(`default agent "${c.default_agent}" is hidden`)
+            return agent.name
+          }
+          const visible = Object.values(agents).find((a) => a.mode !== "subagent" && a.hidden !== true)
+          if (!visible) throw new Error("no primary visible agent found")
+          return visible.name
+        })
+
+        return {
+          get,
+          list,
+          defaultAgent,
+        } satisfies State
+      }),
     )
 
-    const result: Record<string, Info> = {
-      general: {
-        name: "general",
-        description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
-        tools: {
-          todoread: false,
-          todowrite: false,
-          ...defaultTools,
-        },
-        options: {},
-        permission: agentPermission,
-        mode: "subagent",
-        builtIn: true,
-      },
-      explore: {
-        name: "explore",
-        tools: {
-          todoread: false,
-          todowrite: false,
-          edit: false,
-          write: false,
-          ...defaultTools,
-        },
-        description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
-        prompt: [
-          `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.`,
-          ``,
-          `Your strengths:`,
-          `- Rapidly finding files using glob patterns`,
-          `- Searching code and text with powerful regex patterns`,
-          `- Reading and analyzing file contents`,
-          ``,
-          `Guidelines:`,
-          `- Use Glob for broad file pattern matching`,
-          `- Use Grep for searching file contents with regex`,
-          `- Use Read when you know the specific file path you need to read`,
-          `- Use Bash for file operations like copying, moving, or listing directory contents`,
-          `- Adapt your search approach based on the thoroughness level specified by the caller`,
-          `- Return file paths as absolute paths in your final response`,
-          `- For clear communication, avoid using emojis`,
-          `- Do not create any files, or run bash commands that modify the user's system state in any way`,
-          ``,
-          `Complete the user's search request efficiently and report your findings clearly.`,
-        ].join("\n"),
-        options: {},
-        permission: agentPermission,
-        mode: "subagent",
-        builtIn: true,
-      },
-      build: {
-        name: "build",
-        tools: { ...defaultTools },
-        options: {},
-        permission: agentPermission,
-        mode: "primary",
-        builtIn: true,
-      },
-      plan: {
-        name: "plan",
-        options: {},
-        permission: planPermission,
-        tools: {
-          ...defaultTools,
-        },
-        mode: "primary",
-        builtIn: true,
-      },
-    }
-    for (const [key, value] of Object.entries(cfg.agent ?? {})) {
-      if (value.disable) {
-        delete result[key]
-        continue
-      }
-      let item = result[key]
-      if (!item)
-        item = result[key] = {
-          name: key,
-          mode: "all",
-          permission: agentPermission,
-          options: {},
-          tools: {},
-          builtIn: false,
-        }
-      const { name, model, prompt, tools, description, temperature, top_p, mode, permission, color, ...extra } = value
-      item.options = {
-        ...item.options,
-        ...extra,
-      }
-      if (model) item.model = Provider.parseModel(model)
-      if (prompt) item.prompt = prompt
-      if (tools)
-        item.tools = {
-          ...item.tools,
-          ...tools,
-        }
-      item.tools = {
-        ...defaultTools,
-        ...item.tools,
-      }
-      if (description) item.description = description
-      if (temperature != undefined) item.temperature = temperature
-      if (top_p != undefined) item.topP = top_p
-      if (mode) item.mode = mode
-      if (color) item.color = color
-      // just here for consistency & to prevent it from being added as an option
-      if (name) item.name = name
+    return Service.of({
+      get: Effect.fn("Agent.get")(function* (agent: string) {
+        return yield* InstanceState.useEffect(state, (s) => s.get(agent))
+      }),
+      list: Effect.fn("Agent.list")(function* () {
+        return yield* InstanceState.useEffect(state, (s) => s.list())
+      }),
+      defaultAgent: Effect.fn("Agent.defaultAgent")(function* () {
+        return yield* InstanceState.useEffect(state, (s) => s.defaultAgent())
+      }),
+      generate: Effect.fn("Agent.generate")(function* (input: {
+        description: string
+        model?: { providerID: ProviderID; modelID: ModelID }
+      }) {
+        const cfg = yield* config.get()
+        const model = input.model ?? (yield* provider.defaultModel())
+        const resolved = yield* provider.getModel(model.providerID, model.modelID)
+        const language = yield* provider.getLanguage(resolved)
+        const tracer = cfg.experimental?.openTelemetry
+          ? Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer.OtelTracer))
+          : undefined
 
-      if (permission ?? cfg.permission) {
-        item.permission = mergeAgentPermissions(cfg.permission ?? {}, permission ?? {})
-      }
-    }
-    return result
-  })
+        const system = [PROMPT_GENERATE]
+        yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
+        const existing = yield* InstanceState.useEffect(state, (s) => s.list())
 
-  export async function get(agent: string) {
-    return state().then((x) => x[agent])
-  }
+        // TODO: clean this up so provider specific logic doesnt bleed over
+        const authInfo = yield* auth.get(model.providerID).pipe(Effect.orDie)
+        const isOpenaiOauth = model.providerID === "openai" && authInfo?.type === "oauth"
 
-  export async function list() {
-    return state().then((x) => Object.values(x))
-  }
-
-  export async function generate(input: { description: string }) {
-    const defaultModel = await Provider.defaultModel()
-    const model = await Provider.getModel(defaultModel.providerID, defaultModel.modelID)
-    const system = SystemPrompt.header(defaultModel.providerID)
-    system.push(PROMPT_GENERATE)
-    const existing = await list()
-    const result = await generateObject({
-      temperature: 0.3,
-      prompt: [
-        ...system.map(
-          (item): ModelMessage => ({
-            role: "system",
-            content: item,
+        const params = {
+          experimental_telemetry: {
+            isEnabled: cfg.experimental?.openTelemetry,
+            tracer,
+            metadata: {
+              userId: cfg.username ?? "unknown",
+            },
+          },
+          temperature: 0.3,
+          messages: [
+            ...(isOpenaiOauth
+              ? []
+              : system.map(
+                  (item): ModelMessage => ({
+                    role: "system",
+                    content: item,
+                  }),
+                )),
+            {
+              role: "user",
+              content: `Create an agent configuration based on this request: "${input.description}".\n\nIMPORTANT: The following identifiers already exist and must NOT be used: ${existing.map((i) => i.name).join(", ")}\n  Return ONLY the JSON object, no other text, do not wrap in backticks`,
+            },
+          ],
+          model: language,
+          schema: z.object({
+            identifier: z.string(),
+            whenToUse: z.string(),
+            systemPrompt: z.string(),
           }),
-        ),
-        {
-          role: "user",
-          content: `Create an agent configuration based on this request: \"${input.description}\".\n\nIMPORTANT: The following identifiers already exist and must NOT be used: ${existing.map((i) => i.name).join(", ")}\n  Return ONLY the JSON object, no other text, do not wrap in backticks`,
-        },
-      ],
-      model: model.language,
-      schema: z.object({
-        identifier: z.string(),
-        whenToUse: z.string(),
-        systemPrompt: z.string(),
+        } satisfies Parameters<typeof generateObject>[0]
+
+        if (isOpenaiOauth) {
+          return yield* Effect.promise(async () => {
+            const result = streamObject({
+              ...params,
+              providerOptions: ProviderTransform.providerOptions(resolved, {
+                instructions: system.join("\n"),
+                store: false,
+              }),
+              onError: () => {},
+            })
+            for await (const part of result.fullStream) {
+              if (part.type === "error") throw part.error
+            }
+            return result.object
+          })
+        }
+
+        return yield* Effect.promise(() => generateObject(params).then((r) => r.object))
       }),
     })
-    return result.object
-  }
-}
+  }),
+)
 
-function mergeAgentPermissions(basePermission: any, overridePermission: any): Agent.Info["permission"] {
-  if (typeof basePermission.bash === "string") {
-    basePermission.bash = {
-      "*": basePermission.bash,
-    }
-  }
-  if (typeof overridePermission.bash === "string") {
-    overridePermission.bash = {
-      "*": overridePermission.bash,
-    }
-  }
-  const merged = mergeDeep(basePermission ?? {}, overridePermission ?? {}) as any
-  let mergedBash
-  if (merged.bash) {
-    if (typeof merged.bash === "string") {
-      mergedBash = {
-        "*": merged.bash,
-      }
-    } else if (typeof merged.bash === "object") {
-      mergedBash = mergeDeep(
-        {
-          "*": "allow",
-        },
-        merged.bash,
-      )
-    }
-  }
+export const defaultLayer = layer.pipe(
+  Layer.provide(Plugin.defaultLayer),
+  Layer.provide(Provider.defaultLayer),
+  Layer.provide(Auth.defaultLayer),
+  Layer.provide(Config.defaultLayer),
+  Layer.provide(Skill.defaultLayer),
+)
 
-  const result: Agent.Info["permission"] = {
-    edit: merged.edit ?? "allow",
-    webfetch: merged.webfetch ?? "allow",
-    bash: mergedBash ?? { "*": "allow" },
-    doom_loop: merged.doom_loop,
-    external_directory: merged.external_directory,
-  }
-
-  return result
-}
+export * as Agent from "./agent"

@@ -1,15 +1,18 @@
 import { Database, eq, sql } from "@opencode-ai/console-core/drizzle/index.js"
 import { IpTable } from "@opencode-ai/console-core/schema/ip.sql.js"
 import { UsageInfo } from "./provider/provider"
+import { Subscription } from "@opencode-ai/console-core/subscription.js"
 
-export function createTrialLimiter(limit: number | undefined, ip: string) {
-  if (!limit) return
+export function createTrialLimiter(trialProviders: string[] | undefined, ip: string) {
+  if (!trialProviders) return
   if (!ip) return
 
-  let trial: boolean
+  const limit = Subscription.getFreeLimits().promoTokens
+
+  let _isTrial: boolean
 
   return {
-    isTrial: async () => {
+    check: async () => {
       const data = await Database.use((tx) =>
         tx
           .select({
@@ -20,11 +23,11 @@ export function createTrialLimiter(limit: number | undefined, ip: string) {
           .then((rows) => rows[0]),
       )
 
-      trial = (data?.usage ?? 0) < limit
-      return trial
+      _isTrial = (data?.usage ?? 0) < limit
+      return _isTrial ? trialProviders : undefined
     },
     track: async (usageInfo: UsageInfo) => {
-      if (!trial) return
+      if (!_isTrial) return
       const usage =
         usageInfo.inputTokens +
         usageInfo.outputTokens +

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://opencode.ai/theme.json",
+  "$schema": "https://markscode.ai/theme.json",
   "defs": {
     "vesperBg": "#101010",
     "vesperFg": "#FFF",
@@ -111,8 +111,8 @@
       "light": "#F8F8F8"
     },
     "diffLineNumber": {
-      "dark": "#505050",
-      "light": "#808080"
+      "dark": "textMuted",
+      "light": "#6a6a6a"
     },
     "diffAddedLineNumberBg": {
       "dark": "#0d2818",

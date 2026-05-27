@@ -1,30 +1,20 @@
 import { Server } from "../../server/server"
 import { cmd } from "./cmd"
+import { withNetworkOptions, resolveNetworkOptions } from "../network"
+import { Flag } from "@opencode-ai/core/flag/flag"
 
 export const ServeCommand = cmd({
   command: "serve",
-  builder: (yargs) =>
-    yargs
-      .option("port", {
-        alias: ["p"],
-        type: "number",
-        describe: "port to listen on",
-        default: 0,
-      })
-      .option("hostname", {
-        type: "string",
-        describe: "hostname to listen on",
-        default: "127.0.0.1",
-      }),
-  describe: "starts a headless opencode server",
+  builder: (yargs) => withNetworkOptions(yargs),
+  describe: "starts a headless markscode server",
   handler: async (args) => {
-    const hostname = args.hostname
-    const port = args.port
-    const server = Server.listen({
-      port,
-      hostname,
-    })
-    console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
+    if (!Flag.OPENCODE_SERVER_PASSWORD) {
+      console.log("Warning: MARKSCODE_SERVER_PASSWORD is not set; server is unsecured. (compat: OPENCODE_SERVER_PASSWORD)")
+    }
+    const opts = await resolveNetworkOptions(args)
+    const server = await Server.listen(opts)
+    console.log(`markscode server listening on http://${server.hostname}:${server.port}`)
+
     await new Promise(() => {})
     await server.stop()
   },
