@@ -164,6 +164,34 @@ const targets = singleFlag
     })
   : allTargets
 
+const memvidBinaryName = (os: string) => os === "win32" ? "memvid.exe" : "memvid"
+
+const targetPlatformArch = (item: { os: string; arch: string }) => `${item.os}-${item.arch}`
+
+const isCurrentRuntimeTarget = (item: { os: string; arch: string; abi?: "musl" }) => item.os === process.platform && item.arch === process.arch && item.abi === undefined
+
+function memvidSidecarCandidates(item: { os: string; arch: string; abi?: "musl" }, targetName: string) {
+  return [
+    process.env.MARKSCODE_MEMVID_CLI && isCurrentRuntimeTarget(item) ? process.env.MARKSCODE_MEMVID_CLI : undefined,
+    path.join(dir, "vendor/memvid", targetPlatformArch(item), memvidBinaryName(item.os)),
+    path.join(dir, "vendor/memvid", targetName, memvidBinaryName(item.os)),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+}
+
+async function copyMemvidSidecar(item: { os: string; arch: string; abi?: "musl" }, targetName: string) {
+  const source = memvidSidecarCandidates(item, targetName).find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile())
+  if (!source) {
+    console.warn(`Memvid sidecar not bundled for ${targetName}; set MARKSCODE_MEMVID_CLI for native builds or add vendor/memvid/${targetPlatformArch(item)}/${memvidBinaryName(item.os)}`)
+    return
+  }
+
+  const destination = path.join(dir, "dist", targetName, "bin", "vendor/memvid", memvidBinaryName(item.os))
+  await fs.promises.mkdir(path.dirname(destination), { recursive: true })
+  await fs.promises.copyFile(source, destination)
+  if (item.os !== "win32") await fs.promises.chmod(destination, 0o755)
+  console.log(`Bundled Memvid sidecar for ${targetName}: ${source} -> ${destination}`)
+}
+
 await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
@@ -171,6 +199,11 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
+
+
+
+
+
 // Compat: ensure @opentui/solid re-exports Solid control-flow helpers
 {
   const localSolid = path.resolve(dir, "node_modules/@opentui/solid/index.js")
@@ -223,12 +256,12 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist/${name}/bin/opencode`,
-      execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
+      outfile: `dist/${name}/bin/markscode`,
+      execArgv: [`--user-agent=markscode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
+    files: embeddedFileMap ? { "markscode-web-ui.gen.ts": embeddedFileMap } : {},
+    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["markscode-web-ui.gen.ts"] : [])],
     define: {
       OPENCODE_VERSION: `'${Script.version}'`,
       OPENCODE_MIGRATIONS: JSON.stringify(migrations),
@@ -240,9 +273,11 @@ for (const item of targets) {
     },
   })
 
+  await copyMemvidSidecar(item, name)
+
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
-    const binaryPath = `dist/${name}/bin/opencode`
+    const binaryPath = `dist/${name}/bin/markscode`
     console.log(`Running smoke test: ${binaryPath} --version`)
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
