@@ -1,4 +1,3 @@
-import { Access } from "./access"
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
@@ -28,16 +27,9 @@ import { TuiThreadCommand } from "./cli/cmd/tui/thread"
 import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
-// MARKSCODE_WEB_LOCAL_IMPORTS_START
-import { WebLocalCommand } from "./cli/cmd/web-local"
-import { WebLocalStopCommand } from "./cli/cmd/web-local-stop"
-// MARKSCODE_WEB_LOCAL_IMPORTS_END
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
-import { MemoryCommand } from "./cli/cmd/memory"
-import { MemoriesCommand } from "./cli/cmd/memories"
 import { DbCommand } from "./cli/cmd/db"
-import { RollbackCommand } from "./cli/cmd/rollback"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { JsonMigration } from "@/storage/json-migration"
@@ -46,7 +38,8 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
-import { ensureProcessMetadata } from "@opencode-ai/core/util/markscode-process"
+import { ensureProcessMetadata } from "@opencode-ai/core/util/opencode-process"
+import { isRecord } from "@/util/record"
 
 const processMetadata = ensureProcessMetadata("main")
 
@@ -66,7 +59,7 @@ const args = hideBin(process.argv)
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("markscode ")) {
+  if (!text.startsWith("opencode ")) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text)
     return
@@ -76,7 +69,7 @@ function show(out: string) {
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("markscode")
+  .scriptName("opencode")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -116,72 +109,14 @@ const cli = yargs(args)
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
 
-    Log.Default.info("markscode", {
+    Log.Default.info("opencode", {
       version: InstallationVersion,
       args: process.argv.slice(2),
       process_role: processMetadata.processRole,
       run_id: processMetadata.runID,
     })
 
-    const args = new Set(process.argv.slice(2))
-    const isAuthCommand =
-      args.has("auth") ||
-      args.has("auth/login") ||
-      args.has("auth/logout") ||
-      args.has("auth/status") ||
-      args.has("auth/remove-key")
-    const skipAccess = args.has("--help") || args.has("-h") || args.has("--version") || args.has("-v") || isAuthCommand
-    if (!skipAccess) {
-      await Access.ensure(async () => {
-        if (!process.stdin.isTTY || !process.stderr.isTTY) return
-
-        const askHidden = async (label: string) => {
-          if (!process.stdin.isTTY || !process.stderr.isTTY) return ""
-          process.stderr.write(label)
-          process.stdin.setRawMode?.(true)
-          process.stdin.resume()
-          process.stdin.setEncoding("utf8")
-          const chars: string[] = []
-          return await new Promise<string>((resolve) => {
-            const done = (value: string) => {
-              process.stdin.setRawMode?.(false)
-              process.stdin.pause()
-              process.stdin.removeListener("data", onData)
-              process.stderr.write("\n")
-              resolve(value.trim())
-            }
-            const onData = (key: string) => {
-              if (key === "\u0003") {
-                done("")
-                return
-              }
-              if (key === "\r" || key === "\n") {
-                done(chars.join(""))
-                return
-              }
-              if (key === "\u007f" || key === "\b") {
-                if (chars.length > 0) {
-                  chars.pop()
-                  process.stderr.write("\b \b")
-                }
-                return
-              }
-              chars.push(key)
-              process.stderr.write("*")
-            }
-            process.stdin.on("data", onData)
-          })
-        }
-
-        const username = (await UI.input("Access username: ")).trim()
-        if (!username) return
-        const password = await askHidden("Access password: ")
-        if (!password) return
-        return { username, password }
-      })
-    }
-
-    const marker = path.join(Global.Path.data, "markscode.db")
+    const marker = path.join(Global.Path.data, "opencode.db")
     if (!(await Filesystem.exists(marker))) {
       const tty = process.stderr.isTTY
       process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)
@@ -230,17 +165,10 @@ const cli = yargs(args)
   .command(ConsoleCommand)
   .command(ProvidersCommand)
   .command(AgentCommand)
-  .command(MemoryCommand)
-  .command(MemoriesCommand)
   .command(UpgradeCommand)
-    .command(RollbackCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
   .command(WebCommand)
-  // MARKSCODE_WEB_LOCAL_COMMANDS_START
-  .command(WebLocalCommand)
-  .command(WebLocalStopCommand)
-  // MARKSCODE_WEB_LOCAL_COMMANDS_END
   .command(ModelsCommand)
   .command(StatsCommand)
   .command(ExportCommand)
@@ -276,13 +204,6 @@ try {
   }
 } catch (e) {
   let data: Record<string, any> = {}
-  if (e instanceof NamedError) {
-    const obj = e.toObject()
-    Object.assign(data, {
-      ...obj.data,
-    })
-  }
-
   if (e instanceof Error) {
     Object.assign(data, {
       name: e.name,
@@ -290,6 +211,16 @@ try {
       cause: e.cause?.toString(),
       stack: e.stack,
     })
+  }
+
+  if (e instanceof NamedError) {
+    const obj = e.toObject()
+    if (isRecord(obj.data)) {
+      for (const [key, value] of Object.entries(obj.data)) {
+        if (key === "name" || key === "stack" || key === "cause") continue
+        data[key] = value
+      }
+    }
   }
 
   if (e instanceof ResolveMessage) {

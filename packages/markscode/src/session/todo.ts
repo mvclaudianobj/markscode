@@ -1,10 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { SessionID } from "./schema"
-import { zod } from "@/util/effect-zod"
-import { withStatics } from "@/util/schema"
 import { Effect, Layer, Context, Schema } from "effect"
-import z from "zod"
 import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
 import { asc } from "drizzle-orm"
@@ -16,9 +13,7 @@ export const Info = Schema.Struct({
     description: "Current status of the task: pending, in_progress, completed, cancelled",
   }),
   priority: Schema.String.annotate({ description: "Priority level of the task: high, medium, low" }),
-})
-  .annotate({ identifier: "Todo" })
-  .pipe(withStatics((s) => ({ zod: zod(s) })))
+}).annotate({ identifier: "Todo" })
 export type Info = Schema.Schema.Type<typeof Info>
 
 export const Event = {
@@ -36,7 +31,7 @@ export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Info[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@markscode/SessionTodo") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/SessionTodo") {}
 
 export const layer = Layer.effect(
   Service,

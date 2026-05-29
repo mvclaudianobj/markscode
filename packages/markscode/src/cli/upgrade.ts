@@ -1,63 +1,53 @@
-import { Bus } from "@/bus"
 import { Config } from "@/config/config"
+import { AppRuntime } from "@/effect/app-runtime"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { UpdateManager } from "@/update/manager"
-import * as Log from "@opencode-ai/core/util/log"
-import { AppRuntime } from "@/effect/app-runtime"
-
-const log = Log.create({ service: "cli-upgrade" })
+import { GlobalBus } from "@/bus/global"
 
 export async function upgrade() {
-  const config = await AppRuntime.runPromise(Config.Service.use((service) => service.getGlobal())).catch(() => ({ autoupdate: true }))
+  const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
+  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
   const method = await Installation.method()
-  const latest = await Installation.latest(method).catch(() => undefined)
+  const latest = await Installation.latest(method).catch(() => {})
+  if (!latest) return
 
-  if (!latest) {
-    log.debug("no latest version found")
+  if (Flag.OPENCODE_ALWAYS_NOTIFY_UPDATE) {
+    GlobalBus.emit("event", {
+      directory: "global",
+      payload: {
+        type: Installation.Event.UpdateAvailable.type,
+        properties: { version: latest },
+      },
+    })
     return
   }
 
-  if (InstallationVersion === latest) {
-    log.debug("already on latest version")
+  if (InstallationVersion === latest) return
+
+  const kind = Installation.getReleaseType(InstallationVersion, latest)
+
+  if (config.autoupdate === "notify" || kind !== "patch") {
+    GlobalBus.emit("event", {
+      directory: "global",
+      payload: {
+        type: Installation.Event.UpdateAvailable.type,
+        properties: { version: latest },
+      },
+    })
     return
   }
 
-  if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) {
-    log.debug("autoupdate disabled")
-    return
-  }
-
-  if (config.autoupdate === "notify") {
-    await Bus.publish(Installation.Event.UpdateAvailable, { version: latest })
-    log.info("update available (notify mode)", { current: InstallationVersion, latest })
-    return
-  }
-
-  if (method === "unknown") {
-    log.warn("unknown installation method, skipping update")
-    return
-  }
-
-  log.info("starting update", { current: InstallationVersion, target: latest, method })
-
-  const result = await UpdateManager.checkAndUpdate()
-
-  if (result.updated) {
-    log.info("update successful", { version: result.version })
-    await Bus.publish(Installation.Event.Updated, { version: result.version! })
-  } else if (result.rolledBack) {
-    log.warn("update failed and rolled back", { error: result.error })
-  } else if (result.error) {
-    log.error("update failed", { error: result.error })
-  }
-}
-
-export async function rollback(): Promise<{
-  success: boolean
-  backupPath?: string
-  error?: string
-}> {
-  return await UpdateManager.rollbackToLatestBackup()
+  if (method === "unknown") return
+  await Installation.upgrade(method, latest)
+    .then(() =>
+      GlobalBus.emit("event", {
+        directory: "global",
+        payload: {
+          type: Installation.Event.Updated.type,
+          properties: { version: latest },
+        },
+      }),
+    )
+    .catch(() => {})
 }

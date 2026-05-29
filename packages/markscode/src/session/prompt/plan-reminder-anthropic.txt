@@ -3,8 +3,6 @@
 
 Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
-Planning/MAP automation: in Plan mode, you may read/list Planning/MAP projects, modules, tasks, and current bindings to inform the plan. Do NOT write external MAP state automatically and do NOT POST/PUT/PATCH task movements or statuses. Document proposed MAP updates in the plan and wait for explicit confirmation or ExitPlanMode/build before applying them.
-
 ---
 
 ## Plan File Info

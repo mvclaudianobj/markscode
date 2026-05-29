@@ -9,9 +9,11 @@ const info = {
   slug: "test-session",
   projectID: ProjectID.global,
   workspaceID: undefined,
-  directory: "/tmp/markscode",
+  directory: "/tmp/opencode",
   parentID: undefined,
   summary: undefined,
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   share: undefined,
   title: "Test session",
   version: "1.0.0",
@@ -43,7 +45,7 @@ describe("Session schema", () => {
       project: {
         id: ProjectID.global,
         name: undefined,
-        worktree: "/tmp/markscode",
+        worktree: "/tmp/opencode",
       },
     }) as Record<string, unknown>
 

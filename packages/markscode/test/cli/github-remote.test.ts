@@ -2,27 +2,37 @@ import { test, expect } from "bun:test"
 import { parseGitHubRemote } from "../../src/cli/cmd/github"
 
 test("parses https URL with .git suffix", () => {
-  expect(parseGitHubRemote("https://github.com/sst/markscode.git")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("https://github.com/sst/opencode.git")).toEqual({ owner: "sst", repo: "opencode" })
 })
 
 test("parses https URL without .git suffix", () => {
-  expect(parseGitHubRemote("https://github.com/sst/markscode")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("https://github.com/sst/opencode")).toEqual({ owner: "sst", repo: "opencode" })
 })
 
 test("parses git@ URL with .git suffix", () => {
-  expect(parseGitHubRemote("git@github.com:sst/markscode.git")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("git@github.com:sst/opencode.git")).toEqual({ owner: "sst", repo: "opencode" })
 })
 
 test("parses git@ URL without .git suffix", () => {
-  expect(parseGitHubRemote("git@github.com:sst/markscode")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("git@github.com:sst/opencode")).toEqual({ owner: "sst", repo: "opencode" })
 })
 
 test("parses ssh:// URL with .git suffix", () => {
-  expect(parseGitHubRemote("ssh://git@github.com/sst/markscode.git")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("ssh://git@github.com/sst/opencode.git")).toEqual({ owner: "sst", repo: "opencode" })
 })
 
 test("parses ssh:// URL without .git suffix", () => {
-  expect(parseGitHubRemote("ssh://git@github.com/sst/markscode")).toEqual({ owner: "sst", repo: "markscode" })
+  expect(parseGitHubRemote("ssh://git@github.com/sst/opencode")).toEqual({ owner: "sst", repo: "opencode" })
+})
+
+test("parses git protocol URLs from package metadata", () => {
+  expect(parseGitHubRemote("git://github.com/facebook/react.git")).toEqual({ owner: "facebook", repo: "react" })
+  expect(parseGitHubRemote("git+https://github.com/facebook/react.git")).toEqual({ owner: "facebook", repo: "react" })
+  expect(parseGitHubRemote("git+ssh://git@github.com/facebook/react.git")).toEqual({ owner: "facebook", repo: "react" })
+})
+
+test("parses npm-style github shorthand", () => {
+  expect(parseGitHubRemote("github:facebook/react")).toBeNull()
 })
 
 test("parses http URL", () => {

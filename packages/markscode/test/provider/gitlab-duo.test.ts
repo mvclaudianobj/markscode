@@ -7,8 +7,7 @@ export {}
 // import path from "path"
 
 // import { ProviderID, ModelID } from "../../src/provider/schema"
-// import { tmpdir } from "../fixture/fixture"
-// import { Instance } from "../../src/project/instance"
+// import { tmpdir, withTestInstance } from "../fixture/fixture"
 // import { Provider } from "@/provider/provider"
 // import { Env } from "../../src/env"
 // import { Global } from "@opencode-ai/core/global"
@@ -18,14 +17,14 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //         }),
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "test-gitlab-token")
@@ -42,9 +41,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //           provider: {
 //             gitlab: {
 //               options: {
@@ -56,7 +55,7 @@ export {}
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "test-token")
@@ -74,9 +73,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //         }),
 //       )
 //     },
@@ -95,7 +94,7 @@ export {}
 //     }),
 //   )
 
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "")
@@ -111,9 +110,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //         }),
 //       )
 //     },
@@ -130,7 +129,7 @@ export {}
 //     }),
 //   )
 
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "")
@@ -147,9 +146,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //           provider: {
 //             gitlab: {
 //               options: {
@@ -162,7 +161,7 @@ export {}
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_INSTANCE_URL", "https://gitlab.company.internal")
@@ -179,9 +178,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //           provider: {
 //             gitlab: {
 //               options: {
@@ -193,7 +192,7 @@ export {}
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "env-token")
@@ -209,14 +208,14 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //         }),
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "test-token")
@@ -235,9 +234,9 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //           provider: {
 //             gitlab: {
 //               options: {
@@ -252,7 +251,7 @@ export {}
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "test-token")
@@ -270,14 +269,14 @@ export {}
 //   await using tmp = await tmpdir({
 //     init: async (dir) => {
 //       await Bun.write(
-//         path.join(dir, "markscode.json"),
+//         path.join(dir, "opencode.json"),
 //         JSON.stringify({
-//           $schema: "https://markscode.ai/config.json",
+//           $schema: "https://opencode.ai/config.json",
 //         }),
 //       )
 //     },
 //   })
-//   await Instance.provide({
+//   await withTestInstance({
 //     directory: tmp.path,
 //     init: async () => {
 //       Env.set("GITLAB_TOKEN", "test-token")
@@ -298,10 +297,10 @@ export {}
 //   test("duo-workflow-* model routes through workflowChat", async () => {
 //     await using tmp = await tmpdir({
 //       init: async (dir) => {
-//         await Bun.write(path.join(dir, "markscode.json"), JSON.stringify({ $schema: "https://markscode.ai/config.json" }))
+//         await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json" }))
 //       },
 //     })
-//     await Instance.provide({
+//     await withTestInstance({
 //       directory: tmp.path,
 //       init: async () => {
 //         Env.set("GITLAB_TOKEN", "test-token")
@@ -346,10 +345,10 @@ export {}
 //   test("duo-chat-* model routes through agenticChat (not workflow)", async () => {
 //     await using tmp = await tmpdir({
 //       init: async (dir) => {
-//         await Bun.write(path.join(dir, "markscode.json"), JSON.stringify({ $schema: "https://markscode.ai/config.json" }))
+//         await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json" }))
 //       },
 //     })
-//     await Instance.provide({
+//     await withTestInstance({
 //       directory: tmp.path,
 //       init: async () => {
 //         Env.set("GITLAB_TOKEN", "test-token")
@@ -369,10 +368,10 @@ export {}
 //   test("model.options merged with provider.options in getLanguage", async () => {
 //     await using tmp = await tmpdir({
 //       init: async (dir) => {
-//         await Bun.write(path.join(dir, "markscode.json"), JSON.stringify({ $schema: "https://markscode.ai/config.json" }))
+//         await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json" }))
 //       },
 //     })
-//     await Instance.provide({
+//     await withTestInstance({
 //       directory: tmp.path,
 //       init: async () => {
 //         Env.set("GITLAB_TOKEN", "test-token")
@@ -393,10 +392,10 @@ export {}
 //   test("static duo-chat models always present regardless of discovery", async () => {
 //     await using tmp = await tmpdir({
 //       init: async (dir) => {
-//         await Bun.write(path.join(dir, "markscode.json"), JSON.stringify({ $schema: "https://markscode.ai/config.json" }))
+//         await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json" }))
 //       },
 //     })
-//     await Instance.provide({
+//     await withTestInstance({
 //       directory: tmp.path,
 //       init: async () => {
 //         Env.set("GITLAB_TOKEN", "test-token")

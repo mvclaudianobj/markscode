@@ -3,9 +3,20 @@ import { lazy } from "../../../../util/lazy.js"
 import { tmpdir } from "os"
 import path from "path"
 import fs from "fs/promises"
-import { Readable } from "stream"
+import { Effect } from "effect"
+import { ChildProcess } from "effect/unstable/process"
+import { AppProcess } from "@opencode-ai/core/process"
 import * as Filesystem from "../../../../util/filesystem"
 import * as Process from "../../../../util/process"
+
+const writeWithStdin = (cmd: string[], text: string): Promise<void> =>
+  Effect.runPromise(
+    AppProcess.Service.use((svc) => svc.run(ChildProcess.make(cmd[0]!, cmd.slice(1)), { stdin: text })).pipe(
+      Effect.provide(AppProcess.defaultLayer),
+      Effect.catch(() => Effect.void),
+      Effect.asVoid,
+    ),
+  ).catch(() => undefined)
 
 // Lazy load which and clipboardy to avoid expensive execa/which/isexe chain at startup
 const getWhich = lazy(async () => {
@@ -23,56 +34,13 @@ const getClipboardy = lazy(async () => {
  * This allows clipboard operations to work over SSH by having
  * the terminal emulator handle the clipboard locally.
  */
-function writeOsc52(text: string): boolean {
-  if (!process.stdout.isTTY) return false
+function writeOsc52(text: string): void {
+  if (!process.stdout.isTTY) return
   const base64 = Buffer.from(text).toString("base64")
   const osc52 = `\x1b]52;c;${base64}\x07`
   const passthrough = process.env["TMUX"] || process.env["STY"]
   const sequence = passthrough ? `\x1bPtmux;\x1b${osc52}\x1b\\` : osc52
   process.stdout.write(sequence)
-  return true
-}
-
-async function readProcessStderr(stderr: Readable | null | undefined): Promise<string> {
-  if (!stderr) return ""
-  try {
-    const chunks: Buffer[] = []
-    for await (const chunk of stderr) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
-    }
-    return Buffer.concat(chunks).toString("utf8").trim()
-  } catch {
-    return ""
-  }
-}
-
-async function writeWithCommand(command: string[], text: string): Promise<void> {
-  const proc = Process.spawn(command, { stdin: "pipe", stdout: "ignore", stderr: "pipe" })
-  if (!proc.stdin) throw new Error(`Unable to open stdin for ${command[0]}`)
-  proc.stdin.write(text)
-  proc.stdin.end()
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    const stderr = await readProcessStderr(proc.stderr)
-    throw new Error(stderr || `${command[0]} exited with code ${exitCode}`)
-  }
-}
-
-async function buildLinuxGuiCommand(command: string[]): Promise<string[]> {
-  const xauthority = process.env["XAUTHORITY"]
-  if (process.getuid?.() !== 0 || !xauthority) return command
-  try {
-    const stat = await fs.stat(xauthority)
-    const owner = stat.uid
-    if (!Number.isInteger(owner) || owner <= 0 || owner === process.getuid?.()) return command
-    const who = await Process.text(["getent", "passwd", String(owner)], { nothrow: true })
-    const line = who.text.trim()
-    const user = line.split(":")[0]?.trim()
-    if (!user) return command
-    return ["runuser", "-u", user, "--", ...command]
-  } catch {
-    return command
-  }
 }
 
 export interface Content {
@@ -92,7 +60,7 @@ export async function read(): Promise<Content | undefined> {
   const os = platform()
 
   if (os === "darwin") {
-    const tmpfile = path.join(tmpdir(), "markscode-clipboard.png")
+    const tmpfile = path.join(tmpdir(), "opencode-clipboard.png")
     try {
       await Process.run(
         [
@@ -162,59 +130,30 @@ const getCopyMethod = lazy(async () => {
     console.log("clipboard: using osascript")
     return async (text: string) => {
       const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-      await Process.run(["osascript", "-e", 'set the clipboard to "' + escaped + '"'], { nothrow: true })
+      await Process.run(["osascript", "-e", `set the clipboard to "${escaped}"`], { nothrow: true })
     }
   }
 
   if (os === "linux") {
-    const methods: Array<{ name: string; run: (text: string) => Promise<void> }> = []
     if (process.env["WAYLAND_DISPLAY"] && which("wl-copy")) {
-      methods.push({
-        name: "wl-copy",
-        run: (text: string) => writeWithCommand(["wl-copy"], text),
-      })
+      console.log("clipboard: using wl-copy")
+      return (text: string) => writeWithStdin(["wl-copy"], text)
     }
     if (which("xclip")) {
-      methods.push({
-        name: "xclip",
-        run: async (text: string) => writeWithCommand(await buildLinuxGuiCommand(["xclip", "-selection", "clipboard"]), text),
-      })
+      console.log("clipboard: using xclip")
+      return (text: string) => writeWithStdin(["xclip", "-selection", "clipboard"], text)
     }
     if (which("xsel")) {
-      methods.push({
-        name: "xsel",
-        run: async (text: string) => writeWithCommand(await buildLinuxGuiCommand(["xsel", "--clipboard", "--input"]), text),
-      })
-    }
-    if (methods.length > 0) {
-      return async (text: string) => {
-        let lastError: unknown
-        for (const method of methods) {
-          try {
-            console.log("clipboard: using " + method.name)
-            await method.run(text)
-            return
-          } catch (error) {
-            lastError = error
-          }
-        }
-        const clipboardy = await getClipboardy()
-        try {
-          await clipboardy.write(text)
-          return
-        } catch (error) {
-          const nativeMessage = lastError instanceof Error ? lastError.message : String(lastError)
-          const fallbackMessage = error instanceof Error ? error.message : String(error)
-          throw new Error((nativeMessage || "Native clipboard failed") + "; fallback failed: " + fallbackMessage)
-        }
-      }
+      console.log("clipboard: using xsel")
+      return (text: string) => writeWithStdin(["xsel", "--clipboard", "--input"], text)
     }
   }
 
   if (os === "win32") {
     console.log("clipboard: using powershell")
-    return async (text: string) => {
-      const proc = Process.spawn(
+    return (text: string) =>
+      // Pipe via stdin to avoid PowerShell string interpolation ($env:FOO, $(), etc.)
+      writeWithStdin(
         [
           "powershell.exe",
           "-NonInteractive",
@@ -222,39 +161,19 @@ const getCopyMethod = lazy(async () => {
           "-Command",
           "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())",
         ],
-        {
-          stdin: "pipe",
-          stdout: "ignore",
-          stderr: "ignore",
-        },
+        text,
       )
-
-      if (!proc.stdin) return
-      proc.stdin.write(text)
-      proc.stdin.end()
-      await proc.exited.catch(() => {})
-    }
   }
 
   console.log("clipboard: no native support")
   return async (text: string) => {
     const clipboardy = await getClipboardy()
-    await clipboardy.write(text)
+    await clipboardy.write(text).catch(() => {})
   }
 })
 
 export async function copy(text: string): Promise<void> {
-  const osc52Written = writeOsc52(text)
-  if (osc52Written) {
-    const methodPromise = getCopyMethod()
-      .then((method) => method(text))
-      .catch((error) => {
-        console.warn(`clipboard native fallback failed after OSC52: ${error instanceof Error ? error.message : String(error)}`)
-      })
-    void methodPromise
-    return
-  }
-
+  writeOsc52(text)
   const method = await getCopyMethod()
   await method(text)
 }

@@ -1,37 +1,26 @@
 import { TextAttributes } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import * as Clipboard from "@tui/util/clipboard"
 import { createSignal } from "solid-js"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { win32FlushInputBuffer } from "../win32"
 import { getScrollAcceleration } from "../util/scroll"
 
 export function ErrorComponent(props: {
   error: Error
   reset: () => void
-  onBeforeExit?: () => Promise<void>
-  onExit: () => Promise<void>
+  exit: () => Promise<void>
   mode?: "dark" | "light"
 }) {
   const term = useTerminalDimensions()
-  const renderer = useRenderer()
-
-  const handleExit = async () => {
-    await props.onBeforeExit?.()
-    renderer.setTerminalTitle("")
-    renderer.destroy()
-    win32FlushInputBuffer()
-    await props.onExit()
-  }
 
   useKeyboard((evt) => {
     if (evt.ctrl && evt.name === "c") {
-      void handleExit()
+      void props.exit()
     }
   })
   const [copied, setCopied] = createSignal(false)
 
-  const issueURL = new URL("https://github.com/anomalyco/markscode/issues/new?template=bug-report.yml")
+  const issueURL = new URL("https://github.com/anomalyco/opencode/issues/new?template=bug-report.yml")
 
   // Choose safe fallback colors per mode since theme context may not be available
   const isLight = props.mode === "light"
@@ -53,7 +42,7 @@ export function ErrorComponent(props: {
     )
   }
 
-  issueURL.searchParams.set("markscode-version", InstallationVersion)
+  issueURL.searchParams.set("opencode-version", InstallationVersion)
 
   const copyIssueURL = () => {
     void Clipboard.copy(issueURL.toString()).then(() => {
@@ -79,7 +68,7 @@ export function ErrorComponent(props: {
         <box onMouseUp={props.reset} backgroundColor={colors.primary} padding={1}>
           <text fg={colors.bg}>Reset TUI</text>
         </box>
-        <box onMouseUp={handleExit} backgroundColor={colors.primary} padding={1}>
+        <box onMouseUp={() => void props.exit()} backgroundColor={colors.primary} padding={1}>
           <text fg={colors.bg}>Exit</text>
         </box>
       </box>

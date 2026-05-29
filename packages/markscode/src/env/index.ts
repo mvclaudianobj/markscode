@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect"
+import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { InstanceState } from "@/effect/instance-state"
 
 type State = Record<string, string | undefined>
@@ -10,7 +11,9 @@ export interface Interface {
   readonly remove: (key: string) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@markscode/Env") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/Env") {}
+
+export const use = serviceUse(Service)
 
 export const layer = Layer.effect(
   Service,

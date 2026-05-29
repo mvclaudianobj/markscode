@@ -1,8 +1,8 @@
 import path from "path"
 import { type ParseError as JsoncParseError, applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 import { unique } from "remeda"
-import z from "zod"
-import { TuiInfo, TuiOptions } from "./tui-schema"
+import { Option, Schema } from "effect"
+import { DiffStyle, ScrollAcceleration, ScrollSpeed } from "./tui-schema"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Global } from "@opencode-ai/core/global"
 import { Filesystem } from "@/util/filesystem"
@@ -11,18 +11,13 @@ import * as ConfigPaths from "@/config/paths"
 
 const log = Log.create({ service: "tui.migrate" })
 
-const TUI_SCHEMA_URL = "https://markscode.ai/tui.json"
+const TUI_SCHEMA_URL = "https://opencode.ai/tui.json"
 
-const LegacyTheme = TuiInfo.shape.theme.optional()
-const LegacyRecord = z.record(z.string(), z.unknown()).optional()
-
-const TuiLegacy = z
-  .object({
-    scroll_speed: TuiOptions.shape.scroll_speed.catch(undefined),
-    scroll_acceleration: TuiOptions.shape.scroll_acceleration.catch(undefined),
-    diff_style: TuiOptions.shape.diff_style.catch(undefined),
-  })
-  .strip()
+const decodeTheme = Schema.decodeUnknownOption(Schema.String)
+const decodeRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
+const decodeScrollSpeed = Schema.decodeUnknownOption(ScrollSpeed)
+const decodeScrollAcceleration = Schema.decodeUnknownOption(ScrollAcceleration)
+const decodeDiffStyle = Schema.decodeUnknownOption(DiffStyle)
 
 interface MigrateInput {
   cwd: string
@@ -30,13 +25,13 @@ interface MigrateInput {
 }
 
 /**
- * Migrates tui-specific keys (theme, keybinds, tui) from markscode.json files
+ * Migrates tui-specific keys (theme, keybinds, tui) from opencode.json files
  * into dedicated tui.json files. Migration is performed per-directory and
  * skips only locations where a tui.json already exists.
  */
 export async function migrateTuiConfig(input: MigrateInput) {
-  const markscode = await markscodeFiles(input)
-  for (const file of markscode) {
+  const opencode = await opencodeFiles(input)
+  for (const file of opencode) {
     const source = await Filesystem.readText(file).catch((error) => {
       log.warn("failed to read config for tui migration", { path: file, error })
       return undefined
@@ -46,13 +41,13 @@ export async function migrateTuiConfig(input: MigrateInput) {
     const data = parseJsonc(source, errors, { allowTrailingComma: true })
     if (errors.length || !data || typeof data !== "object" || Array.isArray(data)) continue
 
-    const theme = LegacyTheme.safeParse("theme" in data ? data.theme : undefined)
-    const keybinds = LegacyRecord.safeParse("keybinds" in data ? data.keybinds : undefined)
-    const legacyTui = LegacyRecord.safeParse("tui" in data ? data.tui : undefined)
+    const theme = decodeTheme("theme" in data ? data.theme : undefined)
+    const keybinds = decodeRecord("keybinds" in data ? data.keybinds : undefined)
+    const legacyTui = decodeRecord("tui" in data ? data.tui : undefined)
     const extracted = {
-      theme: theme.success ? theme.data : undefined,
-      keybinds: keybinds.success ? keybinds.data : undefined,
-      tui: legacyTui.success ? legacyTui.data : undefined,
+      theme: Option.getOrUndefined(theme),
+      keybinds: Option.getOrUndefined(keybinds),
+      tui: Option.getOrUndefined(legacyTui),
     }
     const tui = extracted.tui ? normalizeTui(extracted.tui) : undefined
     if (extracted.theme === undefined && extracted.keybinds === undefined && !tui) continue
@@ -85,16 +80,23 @@ export async function migrateTuiConfig(input: MigrateInput) {
   }
 }
 
-function normalizeTui(data: Record<string, unknown>) {
-  const parsed = TuiLegacy.parse(data)
-  if (
-    parsed.scroll_speed === undefined &&
+function normalizeTui(data: Record<string, unknown>):
+  | {
+      scroll_speed: number | undefined
+      scroll_acceleration: { enabled: boolean } | undefined
+      diff_style: "auto" | "stacked" | undefined
+    }
+  | undefined {
+  const parsed = {
+    scroll_speed: Option.getOrUndefined(decodeScrollSpeed(data.scroll_speed)),
+    scroll_acceleration: Option.getOrUndefined(decodeScrollAcceleration(data.scroll_acceleration)),
+    diff_style: Option.getOrUndefined(decodeDiffStyle(data.diff_style)),
+  }
+  return parsed.scroll_speed === undefined &&
     parsed.diff_style === undefined &&
     parsed.scroll_acceleration === undefined
-  ) {
-    return
-  }
-  return parsed
+    ? undefined
+    : parsed
 }
 
 async function backupAndStripLegacy(file: string, source: string) {
@@ -132,13 +134,13 @@ async function backupAndStripLegacy(file: string, source: string) {
     })
 }
 
-async function markscodeFiles(input: { directories: string[]; cwd: string }) {
+async function opencodeFiles(input: { directories: string[]; cwd: string }) {
   const files = [
-    ...ConfigPaths.fileInDirectory(Global.Path.config, "markscode"),
-    ...(await Filesystem.findUp(["markscode.json", "markscode.jsonc"], input.cwd, undefined, { rootFirst: true })),
+    ...ConfigPaths.fileInDirectory(Global.Path.config, "opencode"),
+    ...(await Filesystem.findUp(["opencode.json", "opencode.jsonc"], input.cwd, undefined, { rootFirst: true })),
   ]
   for (const dir of unique(input.directories)) {
-    files.push(...ConfigPaths.fileInDirectory(dir, "markscode"))
+    files.push(...ConfigPaths.fileInDirectory(dir, "opencode"))
   }
   if (Flag.OPENCODE_CONFIG) files.push(Flag.OPENCODE_CONFIG)
 

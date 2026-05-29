@@ -11,7 +11,6 @@ export type SessionRoute = {
   type: "session"
   sessionID: string
   prompt?: PromptInfo
-  initialPrompt?: PromptInfo
 }
 
 export type PluginRoute = {
