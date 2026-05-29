@@ -775,7 +775,7 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
           importance: item.importance,
           tags: item.tags,
         })),
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         errors.push("cloud: " + errorMessage(err))
         return undefined
       })
@@ -1013,7 +1013,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
   const recallInput = expandedCue === input.cue ? input : { ...input, cue: expandedCue }
 
   const localMemories = provider !== "cloud"
-    ? await recallLocalMemvid(recallInput, local).catch((err) => {
+    ? await recallLocalMemvid(recallInput, local).catch((err: unknown) => {
         errors.push("local: " + errorMessage(err))
         return [] as HybridRecallItem[]
       })
@@ -1027,7 +1027,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
           limit,
         })
         .then(normalizeCloudResult)
-        .catch((err) => {
+        .catch((err: unknown) => {
           errors.push("cloud: " + errorMessage(err))
           return [] as HybridRecallItem[]
         })
