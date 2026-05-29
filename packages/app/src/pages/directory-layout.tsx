@@ -15,6 +15,13 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
   const params = useParams()
   const sync = useSync()
   const slug = createMemo(() => base64Encode(props.directory))
+  const data = createMemo(() => ({
+    ...sync.data,
+    provider: {
+      ...sync.data.provider,
+      all: new Map(sync.data.provider.all.map((provider) => [provider.id, provider])),
+    },
+  }))
 
   createEffect(() => {
     const next = sync.data.path.directory
@@ -30,7 +37,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
 
   return (
     <DataProvider
-      data={sync.data}
+      data={data()}
       directory={props.directory}
       onNavigateToSession={(sessionID: string) => navigate(`/${slug()}/session/${sessionID}`)}
       onSessionHref={(sessionID: string) => `/${slug()}/session/${sessionID}`}

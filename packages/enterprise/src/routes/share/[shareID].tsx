@@ -13,9 +13,9 @@ import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { iife } from "@opencode-ai/core/util/iife"
 import { Binary } from "@opencode-ai/core/util/binary"
 import { NamedError } from "@opencode-ai/core/util/error"
+import { Schema } from "effect"
 import { DateTime } from "luxon"
 import { createStore } from "solid-js/store"
-import z from "zod"
 import NotFound from "../[...404]"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { MessageNav } from "@opencode-ai/ui/message-nav"
@@ -35,10 +35,10 @@ const ClientOnlyWorkerPoolProvider = clientOnly(() =>
 
 const SessionDataMissingError = NamedError.create(
   "SessionDataMissingError",
-  z.object({
-    sessionID: z.string(),
-    message: z.string().optional(),
-  }),
+  {
+    sessionID: Schema.String,
+    message: Schema.optional(Schema.String),
+  },
 )
 
 const getData = query(async (shareID) => {
