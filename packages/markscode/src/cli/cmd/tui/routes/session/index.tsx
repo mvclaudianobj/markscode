@@ -91,6 +91,8 @@ import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
+import { listMapProjects, listMapTasks, startMapSession } from "@/map-api"
+import { createSessionHandoff, getSessionContextSafety } from "@/memories-api"
 
 addDefaultParsers(parsers.parsers)
 
@@ -100,6 +102,7 @@ const GO_UPSELL_ACCOUNT_RATE_LIMIT_LAST_SEEN_AT = "go_upsell_account_rate_limit_
 const GO_UPSELL_ACCOUNT_RATE_LIMIT_DONT_SHOW = "go_upsell_account_rate_limit_dont_show"
 const GO_UPSELL_WINDOW = 86_400_000 // 24 hrs
 const GO_UPSELL_PROVIDERS = new Set(["opencode", "opencode-go"])
+const MARKSCODE_DEBUG_UI = process.env.MARKSCODE_DEBUG_UI === "1"
 
 function goUpsellKeys(action: SessionRetry.Retryable["action"]) {
   if (!action) return
@@ -415,6 +418,52 @@ export function Session() {
 
   const local = useLocal()
 
+  async function recoverFromContextOverflow() {
+    const safety = await getSessionContextSafety({ session_id: route.sessionID })
+    if (!safety.should_handoff) {
+      toast.show({ message: "Context safety OK", variant: "success", duration: 2500 })
+      return
+    }
+    const handoff = await createSessionHandoff({
+      session_id: route.sessionID,
+      reason: safety.reason,
+      summary: `[AUTO-HANDOFF RESUMO]\n${safety.compact_context}`,
+      metadata: { source: "session:auto-submit:init" },
+    })
+    toast.show({
+      message: handoff.ok ? "Auto-handoff prepared" : "Auto-handoff unavailable",
+      variant: handoff.ok ? "success" : "warning",
+      duration: 3000,
+    })
+  }
+
+  async function chooseMapProject() {
+    const projects = await listMapProjects()
+    toast.show({
+      message: projects[0]?.name || projects[0]?.slug || "MAP project selection unavailable",
+      variant: projects.length ? "success" : "warning",
+      duration: 3000,
+    })
+    return projects[0]
+  }
+
+  async function startMapTaskSession() {
+    const project = await chooseMapProject()
+    const tasks = await listMapTasks({ project_id: project?.id, project_slug: project?.slug })
+    const task = tasks[0]
+    const started = await startMapSession({
+      session_id: route.sessionID,
+      project_id: project?.id,
+      task_id: task?.id,
+      task_slug: task?.slug,
+    })
+    toast.show({
+      message: started.status ? `MAP session: ${started.status}` : "MAP session start unavailable",
+      variant: started.status ? "success" : "warning",
+      duration: 3000,
+    })
+  }
+
   function enterChild(sessionID: string) {
     navigate({
       type: "session",
@@ -653,6 +702,33 @@ export function Session() {
           sessionID: route.sessionID,
           messageID: message.id,
         })
+      },
+    },
+    {
+      title: "MarksCode: Testar auto-handoff de contexto",
+      value: "session:auto-submit:init",
+      category: "MarksCode",
+      description: "Executa uma checagem fail-open de segurança de contexto e handoff.",
+      slash: {
+        name: "marks-auto-handoff-test",
+      },
+      run: async () => {
+        await recoverFromContextOverflow()
+        if (MARKSCODE_DEBUG_UI) toast.show({ message: "MARKSCODE_DEBUG_UI enabled", variant: "info", duration: 2000 })
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Vincular sessão a tarefa MAP",
+      value: "session.map.start",
+      category: "MarksCode",
+      description: "Inicia vínculo MAP fail-open para a sessão atual.",
+      slash: {
+        name: "map-start-task",
+      },
+      run: async () => {
+        await startMapTaskSession()
+        dialog.clear()
       },
     },
     {

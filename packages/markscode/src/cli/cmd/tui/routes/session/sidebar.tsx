@@ -21,6 +21,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     return project.workspace.get(workspaceID)
   }
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
+  const planningSnapshot = createMemo(() => ({
+    map_binding: session()?.id ? `map_binding:${session()!.id}` : "map_binding:",
+    last_phase: "last_phase: fail-open",
+  }))
 
   return (
     <Show when={session()}>
@@ -81,6 +85,13 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </Show>
               </box>
             </TuiPluginRuntime.Slot>
+            <box borderColor={theme.border} borderStyle="rounded" flexShrink={0} gap={0} paddingLeft={1} paddingRight={1}>
+              <text fg={theme.text}>
+                <b>Planning</b>
+              </text>
+              <text fg={theme.textMuted}>{planningSnapshot().map_binding}</text>
+              <text fg={theme.textMuted}>{planningSnapshot().last_phase}</text>
+            </box>
             <TuiPluginRuntime.Slot name="sidebar_content" session_id={props.sessionID} />
           </box>
         </scrollbox>
