@@ -5,6 +5,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
 import { Session } from "@/session/session"
+import { SessionAllDbs } from "@/session/session-all-dbs"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
@@ -151,6 +152,15 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       return yield* mcp.resources()
     })
 
+    const sessionAll = Effect.fn("ExperimentalHttpApi.sessionAll")(function* (ctx: { query: typeof SessionListQuery.Type }) {
+      return yield* Effect.promise(() =>
+        SessionAllDbs.list({
+          search: ctx.query.search,
+          limit: ctx.query.limit,
+        }),
+      )
+    })
+
     return handlers
       .handle("console", getConsole)
       .handle("consoleOrgs", listConsoleOrgs)
@@ -162,6 +172,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("worktreeRemove", worktreeRemove)
       .handle("worktreeReset", worktreeReset)
       .handle("session", session)
+      .handle("sessionAll", sessionAll)
       .handle("resource", resource)
   }),
 )

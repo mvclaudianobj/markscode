@@ -2,6 +2,7 @@ import { AccountID, OrgID } from "@/account/schema"
 import { MCP } from "@/mcp"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { Session } from "@/session/session"
+import { SessionAllDbs } from "@/session/session-all-dbs"
 import { Worktree } from "@/worktree"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
@@ -89,6 +90,7 @@ export const ExperimentalPaths = {
   worktree: "/experimental/worktree",
   worktreeReset: "/experimental/worktree/reset",
   session: "/experimental/session",
+  sessionAll: "/experimental/session/all",
   resource: "/experimental/resource",
 } as const
 
@@ -211,6 +213,17 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "List sessions",
             description:
               "Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.",
+          }),
+        ),
+        HttpApiEndpoint.get("sessionAll", ExperimentalPaths.sessionAll, {
+          query: SessionListQuery,
+          success: described(Schema.Array(SessionAllDbs.Info), "List of sessions across all known databases"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.session.listAll",
+            summary: "List all database sessions",
+            description:
+              "Get a list of MarksCode sessions from all known local database files, sorted by most recently updated.",
           }),
         ),
         HttpApiEndpoint.get("resource", ExperimentalPaths.resource, {
