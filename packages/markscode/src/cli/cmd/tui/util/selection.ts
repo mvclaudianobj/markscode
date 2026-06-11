@@ -1,7 +1,7 @@
 import * as Clipboard from "./clipboard"
 
 type Toast = {
-  show: (input: { message: string; variant: "info" | "success" | "warning" | "error" }) => void
+  show: (input: { message: string; variant: "info" | "success" | "warning" | "error"; duration?: number }) => void
   error: (err: unknown) => void
 }
 
@@ -24,21 +24,16 @@ type SelectionKeyEvent = {
 }
 
 export function copy(renderer: Renderer, toast: Toast): boolean {
-  const selection = renderer.getSelection()
-  if (!selection) return false
-
-  const text = selection.getSelectedText()
+  const text = renderer.getSelection()?.getSelectedText()
   if (!text) return false
 
-  const focus = renderer.currentFocusedRenderable
-  const clipboardText =
-    focus?.getClipboardText && selection.selectedRenderables.includes(focus) ? focus.getClipboardText(text) : text
-
-  Clipboard.copy(clipboardText)
-    .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+  Clipboard.copy(text)
+    .then(() => {
+      renderer.clearSelection()
+      toast.show({ message: "Copied to clipboard", variant: "info", duration: 3000 })
+    })
     .catch(toast.error)
 
-  renderer.clearSelection()
   return true
 }
 
@@ -71,3 +66,13 @@ export function handleSelectionKey(renderer: Renderer, toast: Toast, event: Sele
 }
 
 export * as Selection from "./selection"
+
+export function copyWithRetry(renderer: Renderer, toast: Toast, attempts = 6, delayMs = 12): void {
+  const run = (remaining: number) => {
+    if (copy(renderer, toast)) return
+    if (remaining <= 1) return
+    setTimeout(() => run(remaining - 1), delayMs)
+  }
+
+  queueMicrotask(() => run(attempts))
+}

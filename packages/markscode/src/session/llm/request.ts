@@ -55,7 +55,8 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const system = [
     [
-      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+      ...SystemPrompt.provider(input.model),
+      ...(input.agent.prompt ? [input.agent.prompt] : []),
       ...input.system,
       ...(input.user.system ? [input.user.system] : []),
     ]
@@ -190,7 +191,14 @@ function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission"
     Object.keys(input.tools),
     Permission.merge(input.agent.permission, input.permission ?? []),
   )
-  return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+  const allowed = input.user.tools
+  return Record.filter(input.tools, (_, k) => {
+    if (disabled.has(k)) return false
+    if (!allowed) return true
+    if (allowed[k] === false) return false
+    if ("*" in allowed) return allowed["*"] !== false
+    return true
+  })
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

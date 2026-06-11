@@ -1,3 +1,4 @@
+import { recallHybridMemories, formatMemoryContext } from "../memory-hybrid"
 import path from "path"
 import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
@@ -78,8 +79,24 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context does not contain enough knowledge about the subject, use the available Hybrid Memory search/capability when available to look up relevant prior context. If Hybrid Memory is unavailable or fails, proceed with clear uncertainty instead of inventing details.`
+
+
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
+
+function hybridMemoryPromptEnabled() {
+  return /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || "")
+}
+
+function extractHybridMemoryCue(messages: MessageV2.WithParts[]) {
+  return messages
+    .findLast((msg) => msg.info.role === "user")
+    ?.parts.filter((part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+    .map((part) => part.text)
+    .join("\n")
+    .trim()
+}
 
 function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
@@ -1439,6 +1456,24 @@ export const layer = Layer.effect(
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            system.push(HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT)
+            if (hybridMemoryPromptEnabled()) {
+              const memoryContext = yield* Effect.tryPromise(() =>
+                recallHybridMemories({
+                  user_id: process.env.MEMORIES_USER_ID || "marks-local",
+                  session_id: String(sessionID),
+                  cue: extractHybridMemoryCue(msgs) || "current session context",
+                }).then((result) => formatMemoryContext(result)),
+              ).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => {
+                    log.warn("hybrid-memory-context failed", { error: Cause.squash(cause) })
+                    return undefined
+                  }),
+                ),
+              )
+              if (memoryContext) system.push(memoryContext)
+            }
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({

@@ -80,6 +80,18 @@ class FakeKV {
   set(key: string, value: unknown) {
     this.store[key] = value
   }
+
+  signal<Value = unknown>(key: string, fallback: Value) {
+    return [
+      () => this.get(key, fallback),
+      (next: unknown) => {
+        this.set(
+          key,
+          typeof next === "function" ? (next as (current: Value) => Value)(this.get(key, fallback)) : next,
+        )
+      },
+    ] as const
+  }
 }
 
 function config(attention: Partial<AttentionConfig["attention"]> = {}): AttentionConfig {

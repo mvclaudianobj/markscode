@@ -1,3 +1,4 @@
+import { recallHumanMemories } from "@/memories-api"
 import {
   BoxRenderable,
   RGBA,
@@ -157,7 +158,35 @@ export function Prompt(props: PromptProps) {
   const dimensions = useTerminalDimensions()
   const { theme, syntax } = useTheme()
   const kv = useKV()
-  const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
+  // MARKSCODE_MEMORY_HINTS_HELPERS_START
+  const memoryHintsEnabled = /^(1|true|on)$/i.test(process.env.MARKSCODE_MEMORY_HINTS || "")
+  const memoryHintsScope = process.env.MARKSCODE_MEMORY_HINTS_SCOPE === "global" ? "global" : "session"
+  const memoryHintsUserID = process.env.MEMORIES_USER_ID || "marks-local"
+
+  const memoryHintsRows = async (input: string, sessionID: string) => {
+    const cue = input.slice(-240).trim()
+    if (!cue) return []
+    const result = await recallHumanMemories({
+      user_id: memoryHintsUserID,
+      session_id: memoryHintsScope === "session" ? sessionID : undefined,
+      cue,
+      limit: 3,
+    }).catch(() => ({ memories: [], scores: [] }))
+    const compact = (text: string) => text.replace(/\s+/g, " ").trim()
+    const clip = (text: string, max: number) => (text.length > max ? text.slice(0, max - 1) + "…" : text)
+    return (result.memories || [])
+      .map((m, i) => {
+        const score = result.scores?.[i]?.toFixed(2) || "0.0"
+        const text = typeof m.content === "string" ? m.content : ""
+        const body = clip(compact(text), 240)
+        if (!body) return ""
+        return "[" + score + "] " + body
+      })
+      .filter((x): x is string => Boolean(x))
+      .slice(0, 3)
+  }
+  // MARKSCODE_MEMORY_HINTS_HELPERS_END
+        const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
   const fileContextEnabled = createMemo(() => kv.get("file_context_enabled", true))
@@ -343,7 +372,8 @@ export function Prompt(props: PromptProps) {
     if (tokens <= 0) return
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    const limit = model?.limit.context
+    const pct = limit && tokens <= limit ? `${Math.round((tokens / limit) * 100)}%` : undefined
     const cost = session?.cost ?? 0
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
@@ -1181,6 +1211,15 @@ export function Prompt(props: PromptProps) {
           })),
       })
     } else {
+      // MARKSCODE_MEMORY_HINTS_PREP_START
+      let promptText = inputText
+      if (memoryHintsEnabled && props.sessionID) {
+        const rows = await memoryHintsRows(inputText, sessionID)
+        if (rows.length) {
+          promptText = ["[Memory hints]", ...rows.map((x) => "- " + x), "", inputText].join("\n")
+        }
+      }
+      // MARKSCODE_MEMORY_HINTS_PREP_END
       sdk.client.session
         .prompt({
           sessionID,
@@ -1194,7 +1233,7 @@ export function Prompt(props: PromptProps) {
             {
               id: PartID.ascending(),
               type: "text",
-              text: inputText,
+              text: promptText,
             },
             ...nonTextParts.map(assign),
           ],

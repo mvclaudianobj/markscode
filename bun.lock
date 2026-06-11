@@ -409,7 +409,7 @@
       "name": "markscode",
       "version": "1.15.12",
       "bin": {
-        "markscode": "./bin/opencode",
+        "markscode": "./bin/markscode",
       },
       "dependencies": {
         "@actions/core": "1.11.1",

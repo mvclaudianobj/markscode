@@ -16,6 +16,26 @@ import { isConsoleManagedProvider } from "@tui/util/provider-origin"
 import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
 
+async function promptsMethod(input: {
+  dialog: ReturnType<typeof useDialog>
+  prompts: Exclude<ProviderAuthMethod["prompts"], undefined>
+}) {
+  const out: Record<string, string> = {}
+  for (const item of input.prompts) {
+    const row = item as Record<string, unknown>
+    const key = String(row.key ?? row.id ?? row.name ?? row.label ?? "")
+    if (!key) continue
+    const label = String(row.label ?? row.name ?? key)
+    const value = await DialogPrompt.show(input.dialog, label, {
+      placeholder: String(row.placeholder ?? ""),
+    })
+    if (value == null) return null
+    if (!value.trim() && row.required !== false) return null
+    out[key] = value
+  }
+  return out
+}
+
 const PROVIDER_PRIORITY: Record<string, number> = {
   opencode: 0,
   "opencode-go": 1,
@@ -170,7 +190,7 @@ export function createDialogProviderOptions() {
             if (method.type === "oauth") {
               let inputs: Record<string, string> | undefined
               if (method.prompts?.length) {
-                const value = await PromptsMethod({
+                const value = await promptsMethod({
                   dialog,
                   prompts: method.prompts,
                 })
@@ -205,7 +225,7 @@ export function createDialogProviderOptions() {
             if (method.type === "api") {
               let metadata: Record<string, string> | undefined
               if (method.prompts?.length) {
-                const value = await PromptsMethod({ dialog, prompts: method.prompts })
+                const value = await promptsMethod({ dialog, prompts: method.prompts })
                 if (!value) return
                 metadata = value
               }
@@ -243,6 +263,30 @@ function AutoMethod(props: AutoMethodProps) {
     bindings: [
       {
         key: "c",
+        desc: "Copy provider code (c/ctrl+c/ctrl+y)",
+        group: "Dialog",
+        cmd: () => {
+          const code =
+            props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.authorization.url
+          Clipboard.copy(code)
+            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .catch(toast.error)
+        },
+      },
+      {
+        key: "ctrl+c",
+        desc: "Copy provider code",
+        group: "Dialog",
+        cmd: () => {
+          const code =
+            props.authorization.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.authorization.url
+          Clipboard.copy(code)
+            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .catch(toast.error)
+        },
+      },
+      {
+        key: "ctrl+y",
         desc: "Copy provider code",
         group: "Dialog",
         cmd: () => {
@@ -293,7 +337,7 @@ function AutoMethod(props: AutoMethodProps) {
       </box>
       <text fg={theme.textMuted}>Waiting for authorization...</text>
       <text fg={theme.text}>
-        c <span style={{ fg: theme.textMuted }}>copy</span>
+        c / ctrl+c / ctrl+y <span style={{ fg: theme.textMuted }}>copy</span>
       </text>
     </box>
   )
@@ -310,7 +354,43 @@ function CodeMethod(props: CodeMethodProps) {
   const sdk = useSDK()
   const sync = useSync()
   const dialog = useDialog()
+  const toast = useToast()
   const [error, setError] = createSignal(false)
+
+  useBindings(() => ({
+    bindings: [
+      {
+        key: "c",
+        desc: "Copy authorization URL",
+        group: "Dialog",
+        cmd: () => {
+          Clipboard.copy(props.authorization.url)
+            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .catch(toast.error)
+        },
+      },
+      {
+        key: "ctrl+c",
+        desc: "Copy authorization URL",
+        group: "Dialog",
+        cmd: () => {
+          Clipboard.copy(props.authorization.url)
+            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .catch(toast.error)
+        },
+      },
+      {
+        key: "ctrl+y",
+        desc: "Copy authorization URL",
+        group: "Dialog",
+        cmd: () => {
+          Clipboard.copy(props.authorization.url)
+            .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+            .catch(toast.error)
+        },
+      },
+    ],
+  }))
 
   return (
     <DialogPrompt
@@ -334,6 +414,9 @@ function CodeMethod(props: CodeMethodProps) {
         <box gap={1}>
           <text fg={theme.textMuted}>{props.authorization.instructions}</text>
           <Link href={props.authorization.url} fg={theme.primary} />
+          <text fg={theme.text}>
+            c / ctrl+c / ctrl+y <span style={{ fg: theme.textMuted }}>copy URL</span>
+          </text>
           <Show when={error()}>
             <text fg={theme.error}>Invalid code</text>
           </Show>

@@ -7,6 +7,72 @@ import { Plugin } from "../plugin"
 import { ProviderID } from "./schema"
 import { Array as Arr, Effect, Layer, Record, Result, Context, Schema } from "effect"
 
+const fixAnthropicOAuth = (providerID: ProviderID, url: string) => {
+  if (providerID !== "anthropic") return url
+
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+
+  const isClaudeOauth =
+    (parsed.hostname === "claude.ai" && parsed.pathname === "/oauth/authorize") ||
+    (parsed.hostname === "claude.com" && parsed.pathname === "/cai/oauth/authorize")
+
+  if (!isClaudeOauth) return url
+
+  parsed.hostname = "claude.com"
+  parsed.pathname = "/cai/oauth/authorize"
+  parsed.searchParams.set("redirect_uri", "https://platform.claude.com/oauth/code/callback")
+
+  const required = [
+    "org:create_api_key",
+    "user:profile",
+    "user:inference",
+    "user:sessions:claude_code",
+    "user:mcp_servers",
+    "user:file_upload",
+  ]
+
+  const current = (parsed.searchParams.get("scope") || "")
+    .split(" ")
+    .map((x) => x.trim())
+    .filter(Boolean)
+
+  const merged = Array.from(new Set([...current, ...required]))
+  parsed.searchParams.set("scope", merged.join(" "))
+  return parsed.toString()
+}
+
+const normalizeAuthCode = (providerID: ProviderID, code?: string) => {
+  if (!code) return code
+  const raw = code.trim()
+  if (!raw) return raw
+  if (providerID !== "anthropic") return raw
+
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    try {
+      const parsed = new URL(raw)
+      const fromQuery = parsed.searchParams.get("code")
+      if (fromQuery) return fromQuery
+
+      const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash
+      if (hash.includes("code=")) {
+        const params = new URLSearchParams(hash)
+        const fromHash = params.get("code")
+        if (fromHash) return fromHash
+      }
+    } catch {
+      return raw
+    }
+  }
+
+  if (raw.includes("#")) return raw.split("#")[0]
+  return raw
+}
+
 const When = Schema.Struct({
   key: Schema.String,
   op: Schema.Literals(["eq", "neq"]),

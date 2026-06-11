@@ -184,6 +184,15 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
     return value
   }
 
+  function kvSignal<Value = unknown>(name: string, fallback: Value) {
+    return [
+      () => kvGet(name, fallback),
+      (next: unknown) => {
+        kv[name] = typeof next === "function" ? (next as (current: Value) => Value)(kvGet(name, fallback)) : next
+      },
+    ] as const
+  }
+
   return {
     app: {
       get version() {
@@ -292,6 +301,7 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       set(name, value) {
         kv[name] = value
       },
+      signal: kvSignal,
       get ready() {
         return true
       },

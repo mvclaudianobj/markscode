@@ -413,17 +413,17 @@ function AssistantReasoning(props: {
             toggleable={inMinimal()}
             open={!inMinimal() || expanded()}
             done={isDone()}
-            title={summary().title}
+            title={summary()?.title ?? null}
           />
         </box>
-        <Show when={(!inMinimal() || expanded()) && summary().body}>
+        <Show when={(!inMinimal() || expanded()) && summary()?.body}>
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
             <code
               filetype="markdown"
               drawUnstyledText={false}
               streaming={true}
               syntaxStyle={props.subtleSyntax}
-              content={summary().body}
+              content={summary()?.body}
               conceal={true}
               fg={theme.textMuted}
             />
@@ -710,7 +710,7 @@ function BlockTool(props: {
           </text>
         }
       >
-        <Spinner color={theme.textMuted}>{props.title.replace(/^# /, "")}</Spinner>
+        <Spinner color={theme.textMuted}>{String(props.title || "").replace(/^# /, "")}</Spinner>
       </Show>
       {props.children}
       <Show when={error()}>

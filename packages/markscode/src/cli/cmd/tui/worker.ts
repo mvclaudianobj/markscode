@@ -13,6 +13,7 @@ import { AppRuntime } from "@/effect/app-runtime"
 import { ensureProcessMetadata } from "@opencode-ai/core/util/opencode-process"
 import { Effect } from "effect"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { MarkspanelStartupGate } from "@/markspanel/startup-gate"
 
 ensureProcessMetadata("worker")
 
@@ -78,6 +79,9 @@ export const rpc = {
   async checkUpgrade(input: { directory: string }) {
     await InstanceRuntime.load({ directory: input.directory })
     await upgrade().catch(() => {})
+  },
+  async startupGate(input: { directory: string; model?: string }) {
+    await AppRuntime.runPromise(MarkspanelStartupGate.ensureWorkerGate(input))
   },
   async reload() {
     await AppRuntime.runPromise(

@@ -2,12 +2,26 @@ import { cmd } from "./cmd"
 import { Duration, Effect, Match, Option } from "effect"
 import { UI } from "../ui"
 import { Account } from "@/account/account"
-import { AccountID, OrgID, PollExpired, type PollResult, type AccountError } from "@/account/schema"
+import { AccountID, OrgID, PollExpired, PollSuccess, type PollResult, type AccountError } from "@/account/schema"
 import { effectCmd } from "../effect-cmd"
 import * as Prompt from "../effect/prompt"
 import open from "open"
 
-const openBrowser = (url: string) => Effect.promise(() => open(url).catch(() => undefined))
+const openBrowser = Effect.fnUntraced(function* (url: string) {
+  const opened = yield* Effect.promise(async () => {
+    try {
+      await open(url)
+      return true
+    } catch {
+      return false
+    }
+  })
+  if (!opened) {
+    yield* println("Não foi possível abrir o navegador automaticamente.")
+    yield* println("Abra manualmente: " + url)
+  }
+  return opened
+})
 
 const println = (msg: string) => Effect.sync(() => UI.println(msg))
 
@@ -16,6 +30,7 @@ const dim = (value: string) => UI.Style.TEXT_DIM + value + UI.Style.TEXT_NORMAL
 const activeSuffix = (isActive: boolean) => (isActive ? dim(" (active)") : "")
 
 export const defaultConsoleUrl = "https://console.opencode.ai"
+export const defaultMarkspanelUrl = "https://marks.ia.br"
 
 export const formatAccountLabel = (account: { email: string; url: string }, isActive: boolean) =>
   `${account.email} ${dim(account.url)}${activeSuffix(isActive)}`
@@ -77,6 +92,147 @@ const loginEffect = Effect.fn("login")(function* (url: string) {
     PollPending: () => s.stop("Unexpected state", 1),
     PollSlow: () => s.stop("Unexpected state", 1),
   })
+})
+
+const verifyMarkspanelConfig = Effect.fn("markspanel.config.verify")(function* (
+  service: Account.Interface,
+  accountID: AccountID,
+  orgID: OrgID,
+) {
+  const config = yield* service.config(accountID, orgID).pipe(
+    Effect.catch(() =>
+      Effect.gen(function* () {
+        yield* println("/api/config Markspanel não retornou configuração")
+        return Option.none<Record<string, unknown>>()
+      }),
+    ),
+  )
+  if (Option.isSome(config)) {
+    yield* println("/api/config Markspanel carregado")
+    return
+  }
+  yield* println("/api/config Markspanel não retornou configuração")
+})
+
+const passwordLoginAttempt = (
+  service: Account.Interface,
+  url: string,
+  email: string,
+): Effect.Effect<void, never> =>
+  Effect.gen(function* () {
+    const passwordResult = yield* Prompt.password({
+      message: "Digite sua senha:",
+      validate: (v) => (!v ? "A senha não pode ser vazia." : undefined),
+    })
+    if (Option.isNone(passwordResult)) {
+      yield* println("Login cancelado.")
+      return
+    }
+    const password = passwordResult.value
+
+    const s = Prompt.spinner()
+    yield* s.start("Autenticando...")
+
+    const loginOk = yield* service.loginWithPassword({ url, email, password }).pipe(
+      Effect.map((r) => Option.some(r)),
+      Effect.catch((err) =>
+        Effect.gen(function* () {
+          yield* s.stop("Falha na autenticação.", 1)
+          yield* println(
+            "Erro: " + (err instanceof Error ? err.message : String((err as { message?: string }).message ?? err)),
+          )
+          yield* println("Verifique seu e-mail e senha.")
+          return Option.none<PollSuccess>()
+        }),
+      ),
+    )
+
+    if (Option.isSome(loginOk)) {
+      yield* s.stop("Autenticado como " + loginOk.value.email)
+      yield* Prompt.outro("Login concluído")
+      return
+    }
+
+    const retryResult = yield* Prompt.select({
+      message: "O que deseja fazer?",
+      options: [
+        { value: "retry" as const, label: "Tentar novamente com outra senha" },
+        { value: "exit" as const, label: "Cancelar e sair" },
+      ],
+    })
+    if (Option.isNone(retryResult) || retryResult.value === "exit") {
+      yield* println("Login cancelado.")
+      return
+    }
+    return yield* passwordLoginAttempt(service, url, email)
+  }).pipe(Effect.orDie)
+
+const loginEffectWithPassword = Effect.fn("markspanel.login.password")(function* (url: string) {
+  const service = yield* Account.Service
+
+  yield* Prompt.intro("Login Markspanel")
+
+  const emailResult = yield* Prompt.text({
+    message: "Digite seu e-mail:",
+    placeholder: "usuario@exemplo.com",
+    validate: (v) => (!v || !v.includes("@") ? "Informe um e-mail válido." : undefined),
+  })
+  if (Option.isNone(emailResult)) {
+    yield* println("Login cancelado.")
+    return
+  }
+
+  yield* passwordLoginAttempt(service, url, emailResult.value)
+})
+
+export const markspanelLoginEffect = Effect.fn("markspanel.login")(function* (url = defaultMarkspanelUrl) {
+  const authMethodResult = yield* Prompt.select({
+    message: "Escolha o método de autenticação Markspanel:",
+    options: [
+      { value: "device" as const, label: "Entrar com código de dispositivo (abre navegador)" },
+      { value: "password" as const, label: "Entrar com usuário e senha" },
+    ],
+  })
+
+  if (Option.isNone(authMethodResult)) {
+    yield* println("Autenticação cancelada.")
+    return
+  }
+
+  if (authMethodResult.value === "password") {
+    yield* loginEffectWithPassword(url)
+  } else {
+    yield* loginEffect(url)
+  }
+
+  const service = yield* Account.Service
+  const groups = yield* service.orgsByAccount()
+  const active = yield* service.active()
+  const choices = groups.flatMap((group) => group.orgs.map((org) => ({ accountID: group.account.id, orgID: org.id, label: formatOrgChoiceLabel(group.account, org, false) })))
+  if (choices.length === 0) {
+    yield* println("Aviso: nenhuma organização ativa/encontrada no Markspanel; /api/config não carregará modelos sem active_org_id.")
+    return
+  }
+  if (Option.isSome(active) && active.value.active_org_id) {
+    yield* println("Organização ativa detectada; /api/config poderá carregar modelos Markspanel.")
+    yield* verifyMarkspanelConfig(service, active.value.id, active.value.active_org_id)
+    return
+  }
+  if (choices.length === 1) {
+    const choice = choices[0]!
+    yield* service.use(choice.accountID, Option.some(choice.orgID))
+    yield* println("Organização Markspanel ativada automaticamente: " + choice.label)
+    yield* verifyMarkspanelConfig(service, choice.accountID, choice.orgID)
+    return
+  }
+  const selected = yield* Prompt.select({ message: "Selecione a organização Markspanel para carregar modelos", options: choices.map((choice) => ({ value: choice, label: choice.label })) })
+  if (Option.isNone(selected)) {
+    yield* println("Aviso: nenhuma organização Markspanel selecionada; /api/config não carregará modelos sem active_org_id.")
+    return
+  }
+  yield* service.use(selected.value.accountID, Option.some(selected.value.orgID))
+  yield* println("Organização Markspanel ativada: " + selected.value.label)
+  yield* verifyMarkspanelConfig(service, selected.value.accountID, selected.value.orgID)
 })
 
 const logoutEffect = Effect.fn("logout")(function* (email?: string) {

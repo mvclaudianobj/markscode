@@ -1,158 +1,302 @@
-export interface MapProject {
-  id?: string
-  slug?: string
-  name?: string
-  status?: string
-}
 
-export interface MapModule {
-  id?: string
+
+/* MARKSCODE_MAP_API_START */
+
+export interface MapProjectRefInput {
   project_id?: string
   project_slug?: string
-  slug?: string
-  name?: string
-  status?: string
 }
 
-export interface MapTask {
-  id?: string
-  project_id?: string
-  project_slug?: string
+export interface MapModuleRefInput extends MapProjectRefInput {
   module_id?: string
   module_slug?: string
-  slug?: string
+}
+
+export interface MapTaskRefInput extends MapModuleRefInput {
+  task_id?: string
   title?: string
+}
+
+export interface MapProjectItem {
+  id: string
+  slug: string
+  name: string
+  description?: string | null
+}
+
+export interface MapModuleItem {
+  id: string
+  project_id: string
+  slug: string
+  name: string
+  description?: string | null
+}
+
+export interface MapTaskItem {
+  id: string
+  project_id: string
+  module_id?: string | null
+  title: string
+  description?: string | null
+  status?: string | null
+  priority?: string | null
+  assignee?: string | null
+}
+
+export interface MapBootstrapInput extends MapModuleRefInput {
+  host?: string
+  include_tasks?: boolean
+}
+
+export interface MapBootstrapResult {
+  contract?: string
+  project?: MapProjectItem | null
+  module?: MapModuleItem | null
+  modules?: MapModuleItem[]
+  tasks?: MapTaskItem[]
+  host_state?: Record<string, unknown> | null
+  context?: Record<string, unknown> | null
+}
+
+export interface MapTaskUpsertInput extends MapModuleRefInput {
+  title: string
+  description?: string
   status?: string
   priority?: string
-  last_phase?: string
-  map_binding?: string
+  assignee?: string
+  actor?: string
 }
 
-export interface MapBootstrap {
-  projects: MapProject[]
-  modules: MapModule[]
-  tasks: MapTask[]
+export interface MapTaskUpsertResult {
+  contract?: string
+  action?: string
+  project?: MapProjectItem | null
+  module?: MapModuleItem | null
+  task?: MapTaskItem | null
 }
 
-export interface MapSession {
-  id?: string
-  session_id?: string
-  project_id?: string
-  task_id?: string
-  status?: string
-  last_phase?: string
+export interface MapSessionLifecycleInput extends MapTaskRefInput {
+  host: string
+  actor?: string
+  note?: string
+  task_status?: string
+  progress?: string
+  event_type?: string
+  task_update?: {
+    description?: string
+    status?: string
+    priority?: string
+    assignee?: string
+  }
+  host_state?: Record<string, unknown>
 }
 
-const baseURL = () => (process.env.MARKSCODE_MAP_URL || process.env.MAP_API_URL || "").replace(/\/$/, "")
-
-async function request(path: string, init?: RequestInit) {
-  const base = baseURL()
-  if (!base) return undefined
-  const headers = new Headers(init?.headers || {})
-  const apiKey = process.env.MARKSCODE_MAP_API_KEY || process.env.MAP_API_KEY || process.env.MARKSCODE_API_KEY || ""
-  if (!headers.has("X-API-Key") && apiKey.trim()) headers.set("X-API-Key", apiKey)
-  if (!headers.has("Authorization") && apiKey.trim()) headers.set("Authorization", `Bearer ${apiKey}`)
-  if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json")
-
-  return fetch(`${base}${path}`, {
-    ...init,
-    headers,
-    signal: AbortSignal.timeout(8000),
-  })
-    .then(async (response) => {
-      if (!response.ok) return undefined
-      const text = await response.text().catch(() => "")
-      return text.trim() ? (JSON.parse(text) as unknown) : undefined
-    })
-    .catch(() => undefined)
+export interface MapSessionLifecycleResult {
+  contract?: string
+  session?: { phase?: string }
+  task?: MapTaskItem | null
+  host_state?: Record<string, unknown> | null
+  recent_events?: Array<Record<string, unknown>>
 }
 
-function listFromBody<T>(body: unknown): T[] {
-  if (Array.isArray(body)) return body as T[]
-  if (!body || typeof body !== "object") return []
-  const record = body as Record<string, unknown>
-  if (Array.isArray(record.items)) return record.items as T[]
-  if (Array.isArray(record.data)) return record.data as T[]
-  if (Array.isArray(record.projects)) return record.projects as T[]
-  if (Array.isArray(record.modules)) return record.modules as T[]
-  if (Array.isArray(record.tasks)) return record.tasks as T[]
-  return []
+const mapBase = String(process.env.MAP_API_BASE_URL || process.env.MARKSCODE_MAP_API_URL || "https://map.marks.ia.br/")
+
+const normalizeMapBase = (value: string) => {
+  const raw = value.trim() || "https://map.marks.ia.br/"
+  const url = new URL(raw)
+  const cleanPath = url.pathname.replace(/\/+$/, "")
+  if (!cleanPath || cleanPath === "/") {
+    url.pathname = "/api/map/v1"
+  } else if (!cleanPath.endsWith("/api/map/v1")) {
+    url.pathname = cleanPath + "/api/map/v1"
+  } else {
+    url.pathname = cleanPath
+  }
+  url.search = ""
+  url.hash = ""
+  return url.toString().replace(/\/$/, "")
 }
 
-function objectFromBody<T extends object>(body: unknown, fallback: T): T {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return fallback
-  const record = body as Record<string, unknown>
-  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) return record.data as T
-  return body as T
-}
-
-export async function listMapProjects() {
-  return listFromBody<MapProject>(await request("/projects"))
-}
-
-export async function listMapModules(input?: { project_id?: string; project_slug?: string }) {
-  const query = new URLSearchParams()
-  if (input?.project_id) query.set("project_id", input.project_id)
-  if (input?.project_slug) query.set("project_slug", input.project_slug)
-  return listFromBody<MapModule>(await request(`/modules${query.size ? `?${query}` : ""}`))
-}
-
-export async function listMapTasks(input?: { project_id?: string; project_slug?: string; module_id?: string; module_slug?: string }) {
-  const query = new URLSearchParams()
-  if (input?.project_id) query.set("project_id", input.project_id)
-  if (input?.project_slug) query.set("project_slug", input.project_slug)
-  if (input?.module_id) query.set("module_id", input.module_id)
-  if (input?.module_slug) query.set("module_slug", input.module_slug)
-  return listFromBody<MapTask>(await request(`/tasks${query.size ? `?${query}` : ""}`))
-}
-
-export async function getMapBootstrap(input?: { project_slug?: string }) {
-  const query = new URLSearchParams()
-  if (input?.project_slug) query.set("project_slug", input.project_slug)
-  const body = objectFromBody<Partial<MapBootstrap>>(await request(`/bootstrap${query.size ? `?${query}` : ""}`), {})
+const mapHeaders = () => {
+  const key = String(
+    process.env.MAP_API_KEY ||
+      process.env.MARKSCODE_MAP_API_KEY ||
+      process.env.MARKSCODE_API_KEY ||
+      process.env.MEMORIES_API_KEY ||
+      process.env.MARKSCODE_ACCESS_API_KEY ||
+      process.env.MAP_WEB_SECRET ||
+      "",
+  ).trim()
   return {
-    projects: Array.isArray(body.projects) ? body.projects : [],
-    modules: Array.isArray(body.modules) ? body.modules : [],
-    tasks: Array.isArray(body.tasks) ? body.tasks : [],
+    "Content-Type": "application/json",
+    ...(key ? { "X-API-Key": key, Authorization: "Bearer " + key } : {}),
   }
 }
 
-export async function upsertMapTask(input: MapTask) {
-  return objectFromBody<MapTask>(
-    await request("/tasks", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-    input,
-  )
+type MapQueryInput = Record<string, unknown> | object
+
+const mapUrl = (path: string, query?: MapQueryInput) => {
+  const base = normalizeMapBase(mapBase)
+  const url = new URL(base + path)
+  Object.entries((query || {}) as Record<string, unknown>).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item === undefined || item === null || item === "") return
+        url.searchParams.append(key, String(item))
+      })
+      return
+    }
+    url.searchParams.set(key, String(value))
+  })
+  return url.toString()
 }
 
-export async function startMapSession(input: { session_id?: string; project_id?: string; task_id?: string; task_slug?: string }) {
-  return objectFromBody<MapSession>(
-    await request("/sessions/start", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-    { ...input, status: "started" },
-  )
+const mapRequest = async <T>(path: string, init?: RequestInit, query?: MapQueryInput): Promise<T> => {
+  const url = mapUrl(path, query)
+  let res: Response
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        ...mapHeaders(),
+        ...(init?.headers || {}),
+      },
+    })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error("Unable to connect to MAP API at " + url + ". " + reason)
+  }
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : null
+  if (!res.ok) {
+    const msg = data?.error || data?.message || res.statusText || "MAP request failed"
+    throw new Error(String(msg))
+  }
+  return data as T
 }
 
-export async function progressMapSession(input: { session_id?: string; phase?: string; status?: string; task_id?: string }) {
-  return objectFromBody<MapSession>(
-    await request("/sessions/progress", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-    { session_id: input.session_id, task_id: input.task_id, status: input.status ?? "progress", last_phase: input.phase },
-  )
+const normalizeMapTaskStatus = (value?: string) => {
+  const raw = String(value || "open").trim().toLowerCase()
+  if (!raw || raw === "todo" || raw === "pending" || raw === "backlog") return "open"
+  if (raw === "doing") return "in_progress"
+  if (raw === "completed") return "done"
+  if (raw === "cancelled" || raw === "canceled") return "blocked"
+  return raw
 }
 
-export async function endMapSession(input: { session_id?: string; status?: string; task_id?: string }) {
-  return objectFromBody<MapSession>(
-    await request("/sessions/end", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-    { session_id: input.session_id, task_id: input.task_id, status: input.status ?? "ended" },
-  )
+const normalizeMapTaskPriority = (value?: string) => {
+  const raw = String(value || "normal").trim().toLowerCase()
+  if (!raw || raw === "medium") return "normal"
+  return raw
 }
+
+export async function listMapProjects(): Promise<{ projects: MapProjectItem[] }> {
+  const data = await mapRequest<{ projects?: MapProjectItem[]; items?: MapProjectItem[] }>("/projects")
+  return { projects: data.projects || data.items || [] }
+}
+
+export async function listMapModules(input: MapProjectRefInput = {}): Promise<{ modules: MapModuleItem[] }> {
+  const data = await mapRequest<{ modules?: MapModuleItem[]; items?: MapModuleItem[] }>("/modules", undefined, input)
+  return { modules: data.modules || data.items || [] }
+}
+
+export async function listMapTasks(input: MapTaskRefInput = {}): Promise<{ tasks: MapTaskItem[] }> {
+  const data = await mapRequest<{ tasks?: MapTaskItem[]; items?: MapTaskItem[] }>("/tasks", undefined, input)
+  return { tasks: data.tasks || data.items || [] }
+}
+
+export async function getMapBootstrap(input: MapBootstrapInput): Promise<MapBootstrapResult> {
+  return mapRequest("/integration/bootstrap", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: input.project_id,
+      project_slug: input.project_slug,
+      module_id: input.module_id,
+      module_slug: input.module_slug,
+      host: input.host,
+      include_tasks: input.include_tasks ?? true,
+    }),
+  })
+}
+
+export async function upsertMapTask(input: MapTaskUpsertInput): Promise<MapTaskUpsertResult> {
+  return mapRequest("/integration/task/upsert", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: input.project_id,
+      project_slug: input.project_slug,
+      module_id: input.module_id,
+      module_slug: input.module_slug,
+      actor: input.actor,
+      task: {
+        title: input.title,
+        description: input.description,
+        status: normalizeMapTaskStatus(input.status),
+        priority: normalizeMapTaskPriority(input.priority),
+        assignee: input.assignee,
+      },
+    }),
+  })
+}
+
+export async function startMapSession(input: MapSessionLifecycleInput): Promise<MapSessionLifecycleResult> {
+  return mapRequest("/integration/session/start", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: input.project_id,
+      project_slug: input.project_slug,
+      module_id: input.module_id,
+      module_slug: input.module_slug,
+      task_id: input.task_id,
+      title: input.title,
+      host: input.host,
+      actor: input.actor,
+      note: input.note,
+      task_status: input.task_status,
+    }),
+  })
+}
+
+export async function progressMapSession(input: MapSessionLifecycleInput): Promise<MapSessionLifecycleResult> {
+  return mapRequest("/integration/session/progress", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: input.project_id,
+      project_slug: input.project_slug,
+      module_id: input.module_id,
+      module_slug: input.module_slug,
+      task_id: input.task_id,
+      title: input.title,
+      host: input.host,
+      actor: input.actor,
+      note: input.note,
+      progress: input.progress,
+      event_type: input.event_type,
+      task_update: input.task_update,
+      host_state: input.host_state,
+    }),
+  })
+}
+
+export async function endMapSession(input: MapSessionLifecycleInput): Promise<MapSessionLifecycleResult> {
+  return mapRequest("/integration/session/end", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: input.project_id,
+      project_slug: input.project_slug,
+      module_id: input.module_id,
+      module_slug: input.module_slug,
+      task_id: input.task_id,
+      title: input.title,
+      host: input.host,
+      actor: input.actor,
+      note: input.note,
+      task_status: input.task_status,
+      host_state: input.host_state,
+    }),
+  })
+}
+
+/* MARKSCODE_MAP_API_END */
+

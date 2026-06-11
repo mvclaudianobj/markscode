@@ -49,6 +49,30 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const [agentStore, setAgentStore] = createStore({
         current: undefined as string | undefined,
       })
+      const filePath = path.join(Global.Path.state, "agent.json")
+      const state = {
+        pending: false,
+        ready: false,
+      }
+      function save() {
+        if (!state.ready) {
+          state.pending = true
+          return
+        }
+        state.pending = false
+        void Filesystem.writeJson(filePath, {
+          current: agentStore.current,
+        })
+      }
+      Filesystem.readJson(filePath)
+        .then((x: any) => {
+          if (typeof x.current === "string") setAgentStore("current", x.current)
+        })
+        .catch(() => {})
+        .finally(() => {
+          state.ready = true
+          if (state.pending) save()
+        })
       const { theme } = useTheme()
       const colors = createMemo(() => [
         theme.secondary,
@@ -74,6 +98,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               duration: 3000,
             })
           setAgentStore("current", name)
+          save()
         },
         move(direction: 1 | -1) {
           batch(() => {
@@ -83,7 +108,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (next < 0) next = agents().length - 1
             if (next >= agents().length) next = 0
             const value = agents()[next]
+            if (!value) return
             setAgentStore("current", value.name)
+            save()
           })
         },
         color(name: string) {
@@ -141,6 +168,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
         state.pending = false
         void Filesystem.writeJson(filePath, {
+          model: modelStore.model,
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           variant: modelStore.variant,
@@ -149,6 +177,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       Filesystem.readJson(filePath)
         .then((x: any) => {
+          if (typeof x.model === "object" && x.model !== null) setModelStore("model", x.model)
           if (Array.isArray(x.recent)) setModelStore("recent", x.recent)
           if (Array.isArray(x.favorite)) setModelStore("favorite", x.favorite)
           if (typeof x.variant === "object" && x.variant !== null) setModelStore("variant", x.variant)
@@ -252,6 +281,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const a = agent.current()
           if (!a) return
           setModelStore("model", a.name, { ...val })
+          save()
         },
         cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
@@ -301,6 +331,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             const a = agent.current()
             if (!a) return
             setModelStore("model", a.name, model)
+            save()
             if (options?.recent) {
               const uniq = uniqueBy([model, ...modelStore.recent], (x) => `${x.providerID}/${x.modelID}`)
               if (uniq.length > 10) uniq.pop()

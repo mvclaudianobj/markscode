@@ -15,6 +15,92 @@ import { NpmConfig } from "@opencode-ai/core/npm-config"
 
 const log = Log.create({ service: "installation" })
 
+// MARKSCODE_MARKS_UPDATER_START
+const INSTALL_URLS = [
+  process.env.MARKSCODE_INSTALL_URL || "https://code.marks.ia.br/install",
+  process.env.MARKSCODE_INSTALL_FALLBACK_URL || "https://marks.fenixsol.com.br/install",
+].filter(Boolean)
+
+const INSTALL_WINDOWS_URLS = [
+  process.env.MARKSCODE_INSTALL_WINDOWS_URL || "https://code.marks.ia.br/install-windows.ps1",
+  process.env.MARKSCODE_INSTALL_WINDOWS_FALLBACK_URL || "https://marks.fenixsol.com.br/install-windows.ps1",
+].filter(Boolean)
+
+const LATEST_URLS = [
+  process.env.MARKSCODE_LATEST_URL || "https://code.marks.ia.br/bin/latest.json",
+  "https://code.marks.ia.br/bin/latest.txt",
+  "https://marks.fenixsol.com.br/bin/latest.json",
+  "https://marks.fenixsol.com.br/bin/latest.txt",
+].filter(Boolean)
+
+const PROVIDERS_SYNC_URL = process.env.MARKS_PROVIDERS_URL || "https://marks.fenixsol.com.br/providers"
+const PROVIDERS_SYNC_ARGS =
+  process.env.MARKS_PROVIDERS_ARGS || "--preset main"
+const MARKSCODE_GITHUB_REPO = process.env.MARKSCODE_GITHUB_REPO || "mvclaudianobj/markscode"
+
+function normalizeMarksVersion(input: string) {
+  return input.trim().replace(/^v/, "")
+}
+
+async function latestFromMarks() {
+  for (const url of LATEST_URLS) {
+    const res = await fetch(url).catch(() => undefined)
+    if (!res || !res.ok) continue
+    const text = await res.text().catch(() => "")
+    if (!text.trim()) continue
+    let value = ""
+    const contentType = (res.headers.get("content-type") || "").toLowerCase()
+    if (contentType.includes("json") || text.trim().startsWith("{")) {
+      try {
+        const body = JSON.parse(text) as { version?: string; latest?: string; tag?: string; tag_name?: string }
+        value = body.version || body.latest || body.tag || body.tag_name || ""
+      } catch {}
+    } else {
+      value = text.split(/\s+/)[0] || ""
+    }
+    const normalized = normalizeMarksVersion(value)
+    if (normalized) return normalized
+  }
+
+  const token = process.env.MARKSCODE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ""
+  if (token) {
+    const res = await fetch("https://api.github.com/repos/" + MARKSCODE_GITHUB_REPO + "/releases/latest", {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: "Bearer " + token,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    }).catch(() => undefined)
+    if (res?.ok) {
+      const body = (await res.json().catch(() => undefined)) as { tag_name?: string; name?: string } | undefined
+      const normalized = normalizeMarksVersion(body?.tag_name || body?.name || "")
+      if (normalized) return normalized
+    }
+  }
+
+  throw new Error(
+    "Could not determine latest MarksCode version from code.marks.ia.br/fallback. " +
+      "Private GitHub fallback requires MARKSCODE_GITHUB_TOKEN, GITHUB_TOKEN or GH_TOKEN.",
+  )
+}
+
+async function syncProvidersAfterUpgrade() {
+  const disabled = process.env.MARKS_PROVIDERS_SYNC === "0" || process.env.MARKS_PROVIDERS_SYNC === "false"
+  if (disabled || process.platform === "win32") return
+  await Bun.spawn(["bash", "-lc", "curl -fsSL " + PROVIDERS_SYNC_URL + " | bash -s -- " + PROVIDERS_SYNC_ARGS], {
+    stdout: "ignore",
+    stderr: "ignore",
+  }).exited
+}
+// MARKSCODE_MARKS_UPDATER_END
+
+
+
+
+
+
+
+
 export type Method = "curl" | "npm" | "yarn" | "pnpm" | "bun" | "brew" | "scoop" | "choco" | "unknown"
 
 export type ReleaseType = "patch" | "minor" | "major"
@@ -151,23 +237,27 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
 
     const upgradeCurl = Effect.fnUntraced(
       function* (target: string) {
-        const response = yield* httpOk.execute(HttpClientRequest.get("https://opencode.ai/install"))
-        const body = yield* response.text
-        const bodyBytes = new TextEncoder().encode(body)
-        const result = yield* appProcess.run(
-          ChildProcess.make("bash", [], {
-            stdin: Stream.make(bodyBytes),
-            env: { VERSION: target },
-            extendEnv: true,
-          }),
-        )
-        return {
-          code: result.exitCode,
-          stdout: result.stdout.toString("utf8"),
-          stderr: result.stderr.toString("utf8"),
+        let last: { code: number; stdout: string; stderr: string } | undefined
+        if (process.platform === "win32") {
+          for (const url of INSTALL_WINDOWS_URLS) {
+            const cmd = "irm " + url + " | iex; install-windows.ps1 -Version " + target
+            const result = yield* run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd])
+            last = result
+            if (result.code === 0) return result
+          }
+          return last || { code: 1, stdout: "", stderr: "No MarksCode Windows install URL available" }
         }
+
+        for (const url of INSTALL_URLS) {
+          const cmd = "curl -fsSL " + url + " | bash -s -- --version " + target + " --preset main"
+          const result = yield* run(["bash", "-lc", cmd])
+          last = result
+          if (result.code === 0) return result
+        }
+        return last || { code: 1, stdout: "", stderr: "No MarksCode install URL available" }
       },
-      Effect.mapError(() => new UpgradeFailedError({ stderr: upgradeFailure("curl") })),
+      Effect.scoped,
+      Effect.orDie,
     )
 
     const result: Interface = {
@@ -213,6 +303,10 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
       }),
       latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
         const detectedMethod = installMethod || (yield* result.method())
+
+        if (detectedMethod === "curl" || detectedMethod === "unknown") {
+          return yield* Effect.tryPromise(() => latestFromMarks())
+        }
 
         if (detectedMethod === "brew") {
           const formula = yield* getBrewFormula()
@@ -317,6 +411,13 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         if (!upgradeResult || upgradeResult.code !== 0) {
           return yield* new UpgradeFailedError({ stderr: upgradeFailure(m, upgradeResult) })
         }
+        yield* Effect.tryPromise(() => syncProvidersAfterUpgrade()).pipe(
+          Effect.catch((error: unknown) =>
+            Effect.sync(() => {
+              log.warn("providers sync failed", { error: error instanceof Error ? error.message : String(error) })
+            }),
+          ),
+        )
         log.info("upgraded", {
           method: m,
           target,
@@ -335,8 +436,21 @@ export const defaultLayer = layer.pipe(Layer.provide(FetchHttpClient.layer), Lay
 
 const { runPromise } = makeRuntime(Service, defaultLayer)
 
-export const latest = (...args: Parameters<Interface["latest"]>) => runPromise((s) => s.latest(...args))
-export const method = () => runPromise((s) => s.method())
-export const upgrade = (...args: Parameters<Interface["upgrade"]>) => runPromise((s) => s.upgrade(...args))
+export async function info() {
+  return runPromise((svc) => svc.info())
+}
+
+export async function method() {
+  return runPromise((svc) => svc.method())
+}
+
+export async function latest(m?: Method) {
+  return runPromise((svc) => svc.latest(m))
+}
+
+export async function upgrade(m: Method, target: string) {
+  return runPromise((svc) => svc.upgrade(m, target))
+}
+
 
 export * as Installation from "."

@@ -12,6 +12,18 @@ import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
 
 const files = (disableClaudeCodePrompt: boolean) => [
+  "Project.MD",
+  "PROJECT.MD",
+  "Claude.MD",
+  "CLAUDE.MD",
+  "Marks.MD",
+  "MARKS.MD",
+  "Markscode.MD",
+  "MARKSCODE.MD",
+  "Info.MD",
+  "INFO.MD",
+  "Readme.MD",
+  "README.MD",
   "AGENTS.md",
   ...(disableClaudeCodePrompt ? [] : ["CLAUDE.md"]),
   "CONTEXT.md", // deprecated

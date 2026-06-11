@@ -29,7 +29,9 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+import { MemoryCommand } from "./cli/cmd/memory"
 import { DbCommand } from "./cli/cmd/db"
+import { MarkspanelCommand } from "./cli/cmd/markspanel"
 import { MemoriesCommand } from "./cli/cmd/memories"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
@@ -60,7 +62,7 @@ const args = hideBin(process.argv)
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ")) {
+  if (!text.startsWith("markscode ")) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text)
     return
@@ -70,7 +72,7 @@ function show(out: string) {
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName("markscode")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -108,9 +110,11 @@ const cli = yargs(args)
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
+    process.env.MARKSCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
+    process.env.MARKSCODE_PID = String(process.pid)
 
-    Log.Default.info("opencode", {
+    Log.Default.info("markscode", {
       version: InstallationVersion,
       args: process.argv.slice(2),
       process_role: processMetadata.processRole,
@@ -166,6 +170,7 @@ const cli = yargs(args)
   .command(ConsoleCommand)
   .command(ProvidersCommand)
   .command(AgentCommand)
+  .command(MemoryCommand)
   .command(UpgradeCommand)
   .command(UninstallCommand)
   .command(ServeCommand)
@@ -180,6 +185,7 @@ const cli = yargs(args)
   .command(MemoriesCommand)
   .command(PluginCommand)
   .command(DbCommand)
+  .command(MarkspanelCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

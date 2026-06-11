@@ -38,13 +38,14 @@ export const WebCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.web")(function* (args) {
     if (!Flag.OPENCODE_SERVER_PASSWORD) {
-      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
+      UI.println(UI.Style.TEXT_WARNING_BOLD + "!  MARKSCODE_SERVER_PASSWORD is not set; server is unsecured. (compat: OPENCODE_SERVER_PASSWORD)")
     }
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
     UI.empty()
     UI.println(UI.logo("  "))
-    UI.empty()
+    UI.println(UI.Style.TEXT_INFO_BOLD + "  MarksCode Web")
+UI.empty()
 
     if (opts.hostname === "0.0.0.0") {
       // Show localhost for local access

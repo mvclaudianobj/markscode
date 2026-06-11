@@ -132,6 +132,18 @@ class TokenRefreshRequest extends Schema.Class<TokenRefreshRequest>("TokenRefres
   client_id: Schema.String,
 }) {}
 
+class PasswordLoginRequest extends Schema.Class<PasswordLoginRequest>("PasswordLoginRequest")({
+  email: Schema.String,
+  password: Schema.String,
+}) {}
+
+class PasswordLoginResponse extends Schema.Class<PasswordLoginResponse>("PasswordLoginResponse")({
+  access_token: AccessToken,
+  refresh_token: RefreshToken,
+  token_type: Schema.String,
+  expires_in: DurationFromSeconds,
+}) {}
+
 const clientId = "opencode-cli"
 const eagerRefreshThreshold = Duration.minutes(5)
 const eagerRefreshThresholdMs = Duration.toMillis(eagerRefreshThreshold)
@@ -178,6 +190,36 @@ export interface Interface {
   readonly token: (accountID: AccountID) => Effect.Effect<Option.Option<AccessToken>, AccountError>
   readonly login: (url: string) => Effect.Effect<Login, AccountError>
   readonly poll: (input: Login) => Effect.Effect<PollResult, AccountError>
+  readonly loginWithPassword: (input: {
+    url: string
+    email: string
+    password: string
+  }) => Effect.Effect<PollSuccess, AccountError>
+
+  readonly reportUsage: (input: {
+    url: string
+    accountID: AccountID
+    provider: string
+    model: string
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    reasoningTokens?: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    costUsd?: number
+    sessionId?: string
+    messageId?: string
+  }) => Effect.Effect<void, never>
+
+  readonly quota: (
+    accountID: AccountID,
+  ) => Effect.Effect<{
+    tier: string
+    hard_limit: boolean
+    monthly: { limit: number; used: number; remaining: number; pct: number; warning: boolean; exhausted: boolean }
+    daily: { limit: number; used: number; remaining: number; pct: number; warning: boolean; exhausted: boolean }
+  } | null, never>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Account") {}
@@ -385,7 +427,7 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       return new Login({
         code: parsed.device_code,
         user: parsed.user_code,
-        url: `${normalizedServer}${parsed.verification_uri_complete}`,
+        url: new URL(parsed.verification_uri_complete, normalizedServer).toString(),
         server: normalizedServer,
         expiry: parsed.expires_in,
         interval: parsed.interval,
@@ -438,6 +480,129 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       return new PollSuccess({ email: account.email })
     })
 
+    const loginWithPassword = Effect.fn("Account.loginWithPassword")(function* (input: {
+      url: string
+      email: string
+      password: string
+    }) {
+      const normalizedServer = normalizeServerUrl(input.url)
+
+      const response = yield* executeEffect(
+        HttpClientRequest.post(`${normalizedServer}/auth/device/login`).pipe(
+          HttpClientRequest.acceptJson,
+          HttpClientRequest.schemaBodyJson(PasswordLoginRequest)(
+            new PasswordLoginRequest({
+              email: input.email,
+              password: input.password,
+            }),
+          ),
+        ),
+      )
+
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new AccountServiceError({ message: "Credenciais inválidas: e-mail ou senha incorretos." }),
+        )
+      }
+
+      const ok = yield* HttpClientResponse.filterStatusOk(response).pipe(
+        mapAccountServiceError("Falha no login com usuário e senha"),
+      )
+
+      const parsed = yield* HttpClientResponse.schemaBodyJson(PasswordLoginResponse)(ok).pipe(
+        mapAccountServiceError("Falha ao decodificar resposta do login"),
+      )
+
+      const accessToken = parsed.access_token
+
+      const user = fetchUser(normalizedServer, accessToken)
+      const orgsResult = fetchOrgs(normalizedServer, accessToken)
+
+      const [account, remoteOrgs] = yield* Effect.all([user, orgsResult], { concurrency: 2 })
+
+      const firstOrgID = remoteOrgs.length > 0 ? Option.some(remoteOrgs[0].id) : Option.none<OrgID>()
+
+      const now = yield* Clock.currentTimeMillis
+      const expiry = now + Duration.toMillis(parsed.expires_in)
+
+      yield* repo.persistAccount({
+        id: account.id,
+        email: account.email,
+        url: normalizedServer,
+        accessToken,
+        refreshToken: parsed.refresh_token,
+        expiry,
+        orgID: firstOrgID,
+      })
+
+      return new PollSuccess({ email: account.email })
+    })
+
+    const reportUsage = Effect.fn("Account.reportUsage")(function* (input: {
+      url: string
+      accountID: AccountID
+      provider: string
+      model: string
+      inputTokens: number
+      outputTokens: number
+      totalTokens: number
+      reasoningTokens?: number
+      cacheReadTokens?: number
+      cacheWriteTokens?: number
+      costUsd?: number
+      sessionId?: string
+      messageId?: string
+    }) {
+      const resolved = yield* resolveAccess(input.accountID).pipe(
+        Effect.catch(() => Effect.succeed(Option.none())),
+      )
+      if (Option.isNone(resolved)) return
+
+      const { account, accessToken } = resolved.value
+
+      yield* executeEffect(
+        HttpClientRequest.post(`${account.url}/api/markscode/ai/usage/event`).pipe(
+          HttpClientRequest.acceptJson,
+          HttpClientRequest.bearerToken(accessToken),
+          HttpClientRequest.bodyJson({
+            provider: input.provider,
+            model: input.model,
+            input_tokens: input.inputTokens,
+            output_tokens: input.outputTokens,
+            total_tokens: input.totalTokens,
+            reasoning_tokens: input.reasoningTokens ?? 0,
+            cache_read_tokens: input.cacheReadTokens ?? 0,
+            cache_write_tokens: input.cacheWriteTokens ?? 0,
+            cost_usd: input.costUsd ?? 0,
+            session_id: input.sessionId ?? "",
+            message_id: input.messageId ?? "",
+          }),
+        ),
+      ).pipe(Effect.ignore)
+    })
+
+    const quota = Effect.fn("Account.quota")(function* (accountID: AccountID) {
+      const resolved = yield* resolveAccess(accountID).pipe(
+        Effect.catch(() => Effect.succeed(Option.none())),
+      )
+      if (Option.isNone(resolved)) return null
+
+      const { account, accessToken } = resolved.value
+
+      const response = yield* executeRead(
+        HttpClientRequest.get(`${account.url}/api/markscode/ai/quota`).pipe(
+          HttpClientRequest.acceptJson,
+          HttpClientRequest.bearerToken(accessToken),
+        ),
+      ).pipe(Effect.catch(() => Effect.succeed(null)))
+
+      if (!response) return null
+      if (response.status !== 200) return null
+
+      const json = yield* response.json.pipe(Effect.catch(() => Effect.succeed(null)))
+      return (json as any) ?? null
+    })
+
     return Service.of({
       active: repo.active,
       activeOrg,
@@ -450,6 +615,9 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       token,
       login,
       poll,
+      loginWithPassword,
+      reportUsage,
+      quota,
     })
   }),
 )

@@ -1,4 +1,14 @@
 import { render, TimeToFirstDraw, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { AppRuntime } from "@/effect/app-runtime"
+import { MessageV2 } from "@/session/message-v2"
+import path from "path"
+import { readdir } from "fs/promises"
+import { ModelID, ProviderID } from "@/provider/schema"
+import { MessageID, PartID, SessionID } from "@/session/schema"
+import { getSessionContext, searchSessionMemories } from "@/memories-api"
+import { DialogPrompt } from "./ui/dialog-prompt"
+import { DialogSelect, type DialogSelectOption } from "./ui/dialog-select"
+import { createResource } from "solid-js"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import * as Clipboard from "@tui/util/clipboard"
 import * as Selection from "@tui/util/selection"
@@ -367,6 +377,90 @@ async function waitUntilDone(ready: Promise<void>, exited: Promise<void>) {
   await exited
 }
 
+
+// MARKSCODE_FILE_PICKER_START
+type PickerMode = "any" | "text" | "image"
+
+function pathAllowed(p: string, mode: PickerMode) {
+  if (mode === "any") return true
+  const ext = path.extname(p).toLowerCase()
+  if (mode === "text") {
+    return [".txt", ".md", ".json", ".yaml", ".yml", ".log", ".csv", ".ts", ".tsx", ".js", ".py"].includes(ext)
+  }
+  return [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"].includes(ext)
+}
+
+function pickFile(dialog: ReturnType<typeof useDialog>, start: string, mode: PickerMode) {
+  return new Promise<string | null>((resolve) => {
+    const root = path.resolve(start)
+
+    function Browser() {
+      const [cwd, setCwd] = createSignal(root)
+      const [rows] = createResource(cwd, async (dir) => {
+        const list = await readdir(dir, { withFileTypes: true }).catch(() => [])
+        const out = [] as DialogSelectOption<string>[]
+        const parent = path.dirname(dir)
+        if (parent !== dir) {
+          out.push({
+            title: "../",
+            value: parent,
+            description: parent,
+            category: "Directories",
+            onSelect: () => setCwd(parent),
+          })
+        }
+
+        const dirs = list
+          .filter((x) => x.isDirectory())
+          .map((x) => x.name)
+          .sort((a, b) => a.localeCompare(b))
+        dirs.forEach((name) => {
+          const full = path.join(dir, name)
+          out.push({
+            title: name + "/",
+            value: full,
+            description: full,
+            category: "Directories",
+            onSelect: () => setCwd(full),
+          })
+        })
+
+        const files = list
+          .filter((x) => x.isFile())
+          .map((x) => x.name)
+          .sort((a, b) => a.localeCompare(b))
+        files.forEach((name) => {
+          const full = path.join(dir, name)
+          if (!pathAllowed(full, mode)) return
+          out.push({
+            title: name,
+            value: full,
+            description: full,
+            category: "Files",
+            onSelect: () => {
+              resolve(full)
+              dialog.clear()
+            },
+          })
+        })
+
+        return out
+      })
+
+      return <DialogSelect title={"Selecionar arquivo: " + cwd()} options={rows() ?? []} placeholder="Filtrar..." />
+    }
+
+    setTimeout(() => {
+      dialog.setSize("large")
+      dialog.replace(
+        () => <Browser />,
+        () => resolve(null),
+      )
+    }, 0)
+  })
+}
+// MARKSCODE_FILE_PICKER_END
+
 function App(props: { onSnapshot?: () => Promise<string[]> }) {
   const tuiConfig = useTuiConfig()
   const route = useRoute()
@@ -441,7 +535,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     if (!text || text.length === 0) return
 
     await Clipboard.copy(text)
-      .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
+      .then(() => toast.show({ message: "Copied to clipboard", variant: "info", duration: 3000 }))
       .catch(toast.error)
 
     renderer.clearSelection()
@@ -456,24 +550,24 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
 
     if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
+      renderer.setTerminalTitle("MarksCode")
       return
     }
 
     if (route.data.type === "session") {
       const session = sync.session.get(route.data.sessionID)
       if (!session || SessionApi.isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
+        renderer.setTerminalTitle("MarksCode")
         return
       }
 
       const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
+      renderer.setTerminalTitle(`MarksCode | ${title}`)
       return
     }
 
     if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
+      renderer.setTerminalTitle(`MarksCode | ${route.data.id}`)
     }
   })
 
@@ -807,6 +901,215 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         },
         category: "System",
       },
+    // MARKSCODE_IMPORT_COMMANDS_START
+    {
+      title: "MarksCode: Import memory session",
+      name: "markscode.import.memory-session",
+      category: "MarksCode",
+      slashName: "memory-session",
+      run: async () => {
+        const entered = (await DialogPrompt.show(dialog, "Import memory session", {
+          placeholder: "Session ID",
+        }))?.trim()
+        if (!entered?.trim()) {
+          toast.show({ message: "No session ID provided", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        const id = entered.trim()
+        const userID = process.env.MEMORIES_USER_ID || "marks-local"
+        const cwd = process.cwd()
+        const hit = sync.data.session.find((x) => x.id === id || x.id.startsWith(id))
+        if (hit) {
+          route.navigate({ type: "session", sessionID: hit.id })
+          toast.show({ message: "Session loaded (local)", variant: "success" })
+          dialog.clear()
+          return
+        }
+
+        try {
+          const fromContext = await getSessionContext({ user_id: userID, session_id: id, limit: 100 }).catch(() => ({ messages: [], items: [], memories: [] }))
+          const contextSource = [
+            ...(Array.isArray(fromContext?.messages) ? fromContext.messages : []),
+            ...(Array.isArray(fromContext?.items) ? fromContext.items : []),
+            ...(Array.isArray(fromContext?.memories) ? fromContext.memories : []),
+          ]
+          const contextRows = contextSource
+            .map((m) => {
+              if (!m || typeof m !== "object") return undefined
+              const raw = typeof m.content === "string" ? m.content : typeof m.text === "string" ? m.text : ""
+              const content = raw.trim()
+              if (!content) return undefined
+              const roleText = typeof m.role === "string" ? m.role.toLowerCase() : ""
+              const low = content.toLowerCase()
+              const role = roleText === "assistant" || low.startsWith("ai:") || low.startsWith("assistant:") ? "assistant" : "user"
+              return { role, content: content.replace(/^(user|ai|assistant):\s*/i, "") }
+            })
+            .filter((x): x is { role: "assistant" | "user"; content: string } => Boolean(x))
+
+          const searchBody = await searchSessionMemories({ user_id: userID, session_id: id, limit: 200 }).catch(() => ({ memories: [], items: [] }))
+          const searchSource = [
+            ...(Array.isArray(searchBody?.memories) ? searchBody.memories : []),
+            ...(Array.isArray(searchBody?.items) ? searchBody.items : []),
+          ]
+          const fromSearch = searchSource
+            .map((m) => {
+              if (!m || typeof m !== "object") return undefined
+              const text = typeof m.content === "string" ? m.content.trim() : ""
+              if (!text) return undefined
+              const low = text.toLowerCase()
+              const role = low.startsWith("ai:") || low.startsWith("assistant:") ? "assistant" : "user"
+              return { role, content: text.replace(/^(user|ai|assistant):\s*/i, "") }
+            })
+            .filter((x): x is { role: "assistant" | "user"; content: string } => Boolean(x))
+
+          const rows = contextRows.length > 0 ? contextRows : fromSearch
+          if (!rows.length) {
+            toast.show({ message: "Session not found (local or API)", variant: "warning" })
+            dialog.clear()
+            return
+          }
+
+          const created = await sdk.client.session.create({ title: "Imported " + id }).then((x) => x.data)
+          if (!created?.id) {
+            toast.show({ message: "Failed to create local session", variant: "error" })
+            dialog.clear()
+            return
+          }
+
+          const selected = local.model.current()
+          const sessionID = SessionID.make(created.id)
+          const providerID = ProviderID.make(selected?.providerID || "markscode")
+          const modelID = ModelID.make(selected?.modelID || "glm-5-free")
+          const agent = local.agent.current()?.name || "default"
+          const baseTime = Date.now()
+          let parentID: ReturnType<typeof MessageID.ascending> | undefined
+
+          for (const [i, item] of rows.entries()) {
+            const messageID = MessageID.ascending()
+            const createdAt = baseTime + i
+            if (item.role === "assistant") {
+              await AppRuntime.runPromise(SessionApi.Service.use((svc) => svc.updateMessage({
+                id: messageID,
+                sessionID,
+                role: "assistant",
+                time: { created: createdAt, completed: createdAt },
+                parentID: parentID || messageID,
+                modelID,
+                providerID,
+                mode: "normal",
+                agent,
+                path: { cwd, root: cwd },
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              } as MessageV2.Assistant)))
+              await AppRuntime.runPromise(SessionApi.Service.use((svc) => svc.updatePart({
+                id: PartID.ascending(),
+                sessionID,
+                messageID,
+                type: "text",
+                text: item.content,
+                synthetic: false,
+              } as MessageV2.TextPart)))
+              continue
+            }
+
+            await AppRuntime.runPromise(SessionApi.Service.use((svc) => svc.updateMessage({
+              id: messageID,
+              sessionID,
+              role: "user",
+              time: { created: createdAt },
+              agent,
+              model: { providerID, modelID },
+              format: { type: "text" },
+            } as MessageV2.User)))
+            await AppRuntime.runPromise(SessionApi.Service.use((svc) => svc.updatePart({
+              id: PartID.ascending(),
+              sessionID,
+              messageID,
+              type: "text",
+              text: item.content,
+              synthetic: false,
+            } as MessageV2.TextPart)))
+            parentID = messageID
+          }
+
+          route.navigate({ type: "session", sessionID: created.id })
+          toast.show({ message: "Session restored from API", variant: "success" })
+        } catch {
+          toast.show({ message: "Failed to restore session from API", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Import text",
+      name: "markscode.import.text",
+      category: "MarksCode",
+      slashName: "import-text",
+      run: async () => {
+        const file = await pickFile(dialog, process.cwd(), "text")
+        if (!file) {
+          dialog.clear()
+          return
+        }
+        const ref = promptRef.current
+        if (!ref) {
+          toast.show({ message: "Prompt indisponivel na tela atual", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        await Bun.file(file)
+          .text()
+          .then((text) => {
+            const block = "[Imported text: " + file + "]\n" + text
+            const next = ref.current.input ? ref.current.input + "\n\n" + block : block
+            ref.set({ input: next, parts: ref.current.parts })
+            toast.show({ message: "Texto importado", variant: "success" })
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : "Falha ao importar texto"
+            toast.show({ message, variant: "error" })
+          })
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Import image",
+      name: "markscode.import.image",
+      category: "MarksCode",
+      slashName: "import-image",
+      run: async () => {
+        const file = await pickFile(dialog, process.cwd(), "image")
+        if (!file) {
+          dialog.clear()
+          return
+        }
+        const ref = promptRef.current
+        if (!ref) {
+          toast.show({ message: "Prompt indisponivel na tela atual", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        await Bun.file(file)
+          .exists()
+          .then((ok) => {
+            if (!ok) throw new Error("Arquivo nao encontrado: " + file)
+            const block = "[Imported image: " + file + "]"
+            const next = ref.current.input ? ref.current.input + "\n\n" + block : block
+            ref.set({ input: next, parts: ref.current.parts })
+            toast.show({ message: "Imagem importada", variant: "success" })
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : "Falha ao importar imagem"
+            toast.show({ message, variant: "error" })
+          })
+        dialog.clear()
+      },
+    },
+    // MARKSCODE_IMPORT_COMMANDS_END
+
+    
       {
         name: "app.exit",
         title: "Exit the app",

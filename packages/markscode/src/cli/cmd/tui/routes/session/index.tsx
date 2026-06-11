@@ -7,6 +7,7 @@ import {
   For,
   Match,
   on,
+  onCleanup,
   onMount,
   Show,
   Switch,
@@ -16,44 +17,37 @@ import {
 import { Dynamic } from "solid-js/web"
 import path from "path"
 import { useRoute, useRouteData } from "@tui/context/route"
-import { useProject } from "@tui/context/project"
 import { useSync } from "@tui/context/sync"
-import { useEvent } from "@tui/context/event"
+import { useEditorContext } from "@tui/context/editor"
+import { reasoningSummary, nextThinkingMode, type ThinkingMode, useThinkingMode } from "@tui/context/thinking"
 import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
-import { generateSubtleSyntax, selectedForeground, useTheme } from "@tui/context/theme"
-import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
+import { selectedForeground, useTheme } from "@tui/context/theme"
+import { BoxRenderable, ScrollBoxRenderable, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import type {
-  AssistantMessage,
-  Part,
-  Provider,
-  ToolPart,
-  UserMessage,
-  TextPart,
-  ReasoningPart,
-} from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Part, Provider, ReasoningPart, TextPart, ToolPart, UserMessage } from "@opencode-ai/sdk/v2"
 import { useLocal } from "@tui/context/local"
-import { Locale } from "@/util/locale"
-import type { Tool } from "@/tool/tool"
+import * as Locale from "@/util/locale"
+import type * as Tool from "@/tool/tool"
 import type { ReadTool } from "@/tool/read"
 import type { WriteTool } from "@/tool/write"
-import { ShellTool } from "@/tool/shell"
-import { ShellID } from "@/tool/shell/id"
 import type { GlobTool } from "@/tool/glob"
-import { TodoWriteTool } from "@/tool/todo"
 import type { GrepTool } from "@/tool/grep"
 import type { EditTool } from "@/tool/edit"
 import type { ApplyPatchTool } from "@/tool/apply_patch"
 import type { WebFetchTool } from "@/tool/webfetch"
-import { webSearchProviderLabel, type WebSearchTool } from "@/tool/websearch"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
 import type { SkillTool } from "@/tool/skill"
-import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
+import type { WebSearchTool } from "@/tool/websearch"
+import { webSearchProviderLabel } from "@/tool/websearch"
+import type { TodoWriteTool } from "@/tool/todo"
+import { ShellTool } from "@/tool/shell"
+import { ShellID } from "@/tool/shell/id"
+import { useKeyboard, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "@tui/context/sdk"
-import { useEditorContext } from "@tui/context/editor"
-import { useDialog } from "../../ui/dialog"
+import { parsePatch } from "diff"
+import { useDialog, type DialogContext } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
@@ -61,41 +55,69 @@ import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
+import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
-import { SubagentFooter } from "./subagent-footer.tsx"
+import { SubagentFooter } from "./subagent-footer"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
-import parsers from "../../../../../../parsers-config.ts"
 import * as Clipboard from "../../util/clipboard"
-import { errorMessage } from "@/util/error"
 import { Toast, useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv.tsx"
 import * as Editor from "../../util/editor"
 import stripAnsi from "strip-ansi"
+import { Footer } from "./footer.tsx"
 import { usePromptRef } from "../../context/prompt"
 import { useExit } from "../../context/exit"
-import { Filesystem } from "@/util/filesystem"
+import * as Filesystem from "@/util/filesystem"
+import { Global } from "@opencode-ai/core/global"
 import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
+import { DialogPrompt } from "../../ui/dialog-prompt"
+import { DialogSelect, type DialogSelectOption } from "../../ui/dialog-select"
 import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
+import {
+  listMapProjects,
+  listMapModules,
+  listMapTasks,
+  getMapBootstrap,
+  upsertMapTask,
+  startMapSession,
+  progressMapSession,
+  endMapSession,
+} from "@/map-api"
+import {
+  getHumanContext,
+  getSessionCompactContext,
+  saveHumanMemory,
+  getSessionContextSafety,
+  createSessionHandoff,
+  continueSessionFromHandoff,
+  getGlobalContext,
+  searchAdvancedMemories,
+} from "@/memories-api"
+import { useEvent } from "../../context/event"
+import { useProject } from "../../context/project"
 import { useTuiConfig } from "../../context/tui-config"
-import { nextThinkingMode, reasoningSummary, useThinkingMode, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
-import { collapseToolOutput } from "../../util/collapse-tool-output"
-import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
-import { DialogRetryAction } from "../../component/dialog-retry-action"
-import { DialogAllSessionList } from "../../component/dialog-all-session-list"
+import { TuiPluginRuntime } from "../../plugin/runtime"
 import { SessionRetry } from "@/session/retry"
+import { hybridMemoryStatus, listHybridRecentTopics } from "@/memory-hybrid"
+import { DialogRecentTopics } from "../../component/dialog-recent-topics"
+import { DialogAllSessionList } from "../../component/dialog-all-session-list"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
+import { errorMessage } from "@/util/error"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
-import { listMapProjects, listMapTasks, startMapSession } from "@/map-api"
-import { createSessionHandoff, getSessionContextSafety } from "@/memories-api"
-
-addDefaultParsers(parsers.parsers)
+import { collapseToolOutput } from "../../util/collapse-tool-output"
+import {
+  OPENCODE_BASE_MODE,
+  useBindings,
+  useCommandShortcut,
+  useOpencodeKeymap,
+} from "../../keymap"
 
 const GO_UPSELL_FREE_TIER_LAST_SEEN_AT = "go_upsell_last_seen_at"
 const GO_UPSELL_FREE_TIER_DONT_SHOW = "go_upsell_dont_show"
@@ -235,7 +257,720 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  // MARKSCODE_MEMORIES_HELPERS_START
+  const memoriesUserID = process.env.MEMORIES_USER_ID || "marks-local"
+  const [lastMemorySaveAt, setLastMemorySaveAt] = createSignal(0)
+  const [lastMemoryChars, setLastMemoryChars] = createSignal(0)
+  const [lastMemoryHash, setLastMemoryHash] = createSignal("")
+  const [activeMemorySessionID, setActiveMemorySessionID] = createSignal<string | undefined>(undefined)
+  const [overflowRecovering, setOverflowRecovering] = createSignal(false)
+  const [autoSubmitDone, setAutoSubmitDone] = createSignal<string | undefined>(undefined)
+  const [lastOverflowRecoveredMessageID, setLastOverflowRecoveredMessageID] = createSignal<string | number | undefined>(undefined)
+  const snapshotCache = new Map<string, string>()
+  const autoHandoffEnabled = /^(1|true|yes|on)$/i.test(String(process.env.MEMORIES_AUTO_HANDOFF_ENABLED || "1"))
+  const autoHandoffDryRun = /^(1|true|yes|on)$/i.test(String(process.env.MEMORIES_AUTO_HANDOFF_DRY_RUN || "0"))
+  const autoHandoffProjectKey = String(process.env.MEMORIES_PROJECT_KEY || process.env.MARKSCODE_PROJECT_KEY || "markscode")
 
+  const memorySnapshotFor = (sessionID: string) =>
+    (sync.data.message[sessionID] ?? [])
+      .map((msg) => {
+        const role = msg.role === "user" ? "User" : "AI"
+        const parts = (sync.data.part[msg.id] ?? [])
+          .flatMap((x) => {
+            if (x.type !== "text" || !("text" in x)) return []
+            return [x.text.trim()]
+          })
+          .filter((x): x is string => Boolean(x))
+        if (!parts.length) return ""
+        return role + ": " + parts.join("\n")
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim()
+
+  const cachedMemorySnapshotFor = (sessionID: string) => {
+    const text = memorySnapshotFor(sessionID)
+    if (text) {
+      snapshotCache.set(sessionID, text)
+      return text
+    }
+    return snapshotCache.get(sessionID) || ""
+  }
+
+  const memorySnapshot = () => {
+    if (!route.sessionID) return ""
+    return cachedMemorySnapshotFor(route.sessionID)
+  }
+
+  const memoryHash = (value: string) => value.length + ":" + value.slice(0, 256)
+
+  const normalizeMemoryText = (value: unknown) =>
+    typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+
+  const compactRowsFrom = (body: any): string[] => {
+    const rows: string[] = []
+    const push = (value: unknown) => {
+      const normalized = normalizeMemoryText(value)
+      if (normalized) rows.push(normalized)
+    }
+    const fromArray = (list: any[]) => {
+      list.forEach((item) => {
+        if (typeof item === "string") {
+          push(item)
+          return
+        }
+        if (!item || typeof item !== "object") return
+        push(item.content)
+        push(item.text)
+        push(item.summary)
+        push(item.compact)
+      })
+    }
+
+    if (!body || typeof body !== "object") return rows
+    push(body.compact)
+    push(body.summary)
+    push(body.text)
+    if (Array.isArray(body.items)) fromArray(body.items)
+    if (Array.isArray(body.memories)) fromArray(body.memories)
+    if (Array.isArray(body.chunks)) fromArray(body.chunks)
+    return [...new Set(rows)]
+  }
+
+  const shortHandoffPromptFrom = (handoff: any, sourceSessionID: string) => {
+    const asArray = (...values: any[]) => {
+      const out: string[] = []
+      const push = (value: any) => {
+        if (Array.isArray(value)) return value.forEach(push)
+        if (!value) return
+        if (typeof value === "object") {
+          push(value.content || value.text || value.summary || value.title || value.path || value.file || value.command || value.name)
+          return
+        }
+        const cleaned = normalizeMemoryText(String(value))
+          .replace(/^(?:[-*•]\s*)+/g, "")
+          .replace(/^(?:\d+[.)]\s*)+/g, "")
+          .replace(/^[-\s]+/, "")
+          .trim()
+        if (!cleaned) return
+        const key = cleaned.toLowerCase().replace(/\s+/g, " ")
+        if (out.some((x) => x.toLowerCase().replace(/\s+/g, " ") === key)) return
+        out.push(cleaned)
+      }
+      values.forEach(push)
+      return out
+    }
+
+    const firstText = (...values: any[]) => asArray(...values)[0] || ""
+    const clip = (value: string, max = 420) => (value.length > max ? value.slice(0, max).trimEnd() + "…" : value)
+
+    const title = firstText(handoff?.title, handoff?.session_title, handoff?.name) || "Continuação de contexto"
+    const whereStopped = firstText(
+      handoff?.where_stopped,
+      handoff?.stopped_at,
+      handoff?.current_state,
+      handoff?.last_state,
+      handoff?.status,
+    )
+    const summary = firstText(handoff?.summary, handoff?.compact_summary, handoff?.resume, handoff?.overview)
+    const done = asArray(
+      handoff?.what_was_done,
+      handoff?.completed,
+      handoff?.done,
+      handoff?.accomplishments,
+      handoff?.changes,
+      handoff?.work_completed,
+    ).slice(0, 5)
+    const decisions = asArray(handoff?.key_decisions, handoff?.decisions, handoff?.technical_decisions).slice(0, 5)
+    const files = asArray(handoff?.files, handoff?.affected_files, handoff?.paths, handoff?.artifacts).slice(0, 8)
+    const validations = asArray(handoff?.validations, handoff?.checks, handoff?.tests, handoff?.commands, handoff?.evidence).slice(0, 6)
+    const nextActions = asArray(handoff?.next_actions, handoff?.next_steps, handoff?.todo, handoff?.todos).slice(0, 6)
+    const openIssues = asArray(handoff?.open_issues, handoff?.pending, handoff?.risks, handoff?.blockers, handoff?.warnings).slice(0, 6)
+
+    const lines = [
+      "[AUTO-HANDOFF RESUMO]",
+      "- sessão_origem: " + sourceSessionID,
+      "- título: " + clip(title, 160),
+    ]
+
+    if (whereStopped) lines.push("- onde_parou: " + clip(whereStopped, 360))
+    if (summary) lines.push("- resumo_operacional: " + clip(summary, 520))
+
+    const section = (label: string, items: string[]) => {
+      if (!items.length) return
+      lines.push("- " + label + ":")
+      items.forEach((item) => lines.push("  - " + clip(item, 260)))
+    }
+
+    section("o_que_foi_feito", done)
+    section("decisões", decisions)
+    section("arquivos_ou_áreas", files)
+    section("validações", validations)
+    section("próximos_passos", nextActions)
+    section("pendências_ou_riscos", openIssues)
+
+    lines.push("", "Use este resumo para continuar exatamente de onde parou, preservando decisões, validações e pendências sem depender do histórico anterior completo.")
+    return lines.join("\n").trim()
+  }
+
+  const loadHumanContextRows = async (sessionID: string) => {
+    const ctx = await getHumanContext({ user_id: memoriesUserID, session_id: sessionID })
+    return [...(ctx.short_term || []), ...(ctx.long_term || []), ...(ctx.visual || [])]
+      .filter((m) => m.session_id === sessionID)
+      .map((m) => normalizeMemoryText(m.content))
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+
+  const loadCompactContextRows = async (sessionID: string, limit = 5) => {
+    const compact = await getSessionCompactContext({
+      user_id: memoriesUserID,
+      session_id: sessionID,
+      limit,
+      include_content: true,
+      content_preview: 500,
+    })
+    return compactRowsFrom(compact).slice(0, limit)
+  }
+
+  const injectContext = (title: string, rows: string[]) => {
+    if (!prompt) return
+    const cur = prompt.current
+    prompt.set({
+      input:
+        (cur.input ? cur.input + "\n\n" : "") +
+        [title, ...rows.map((x) => "- " + x), ""].join("\n"),
+      parts: cur.parts,
+    })
+  }
+
+  const isContextOverflowError = (value: string) =>
+    /(context length|maximum context|context window|token limit|too many tokens|prompt is too long|input is too long|max context)/i.test(
+      value,
+    )
+
+  const debugMemoryLog = async (label: string, payload?: unknown) => {
+    try {
+      const fs = await import("node:fs/promises")
+      const line = [
+        new Date().toISOString(),
+        label,
+        payload === undefined ? "" : JSON.stringify(payload),
+      ].join(" | ") + "\n"
+      await fs.appendFile("/tmp/markscode-memories-debug.log", line)
+    } catch {}
+  }
+
+  const errorTextFromMessage = (message: any) => {
+    const error = message?.error
+    if (!error) return ""
+    if (typeof error === "string") return error
+    if (typeof error?.data?.message === "string") return error.data.message
+    if (typeof error?.message === "string") return error.message
+    return ""
+  }
+
+
+
+  const showMarkspanelLoginDialog = async () => {
+    const sanitizeMarkspanelLoginUrl = (rawUrl: string) => {
+      try {
+        const parsed = new URL(rawUrl)
+        parsed.username = ""
+        parsed.password = ""
+        parsed.search = ""
+        parsed.hash = ""
+        return parsed.toString()
+      } catch {
+        return "https://marks.ia.br/"
+      }
+    }
+    const rawUrl = ((await DialogPrompt.show(dialog, [
+      "Login Markspanel — dois métodos disponíveis:",
+      "1) Código de dispositivo: abre navegador, informe código exibido no terminal.",
+      "2) Usuário/senha: execute com flag --password (ou selecione no prompt interativo).",
+      "e-mail/senha somente na página de verificação do Markspanel; o CLI não solicita nem salva credenciais em modo device.",
+      "Execute no terminal local/integrado: markscode markspanel-login <url>.",
+      "Após concluir, use a opção de atualizar abaixo para recarregar providers/modelos da conta.",
+      "Aviso: /api/config só carrega modelos quando a conta possui organização ativa.",
+    ].join("\n"), {
+      placeholder: "https://marks.ia.br",
+      value: String(kv.get("markspanel_login_url") || "https://marks.ia.br"),
+    })) || "").trim()
+    if (!rawUrl) { dialog.clear(); return }
+    const safeUrl = sanitizeMarkspanelLoginUrl(rawUrl)
+    kv.set("markspanel_login_url", safeUrl)
+    const refresh = await DialogPrompt.show(dialog, [
+      "Login Markspanel preparado sem inserir texto no chat.",
+      "1) Execute: markscode markspanel-login " + safeUrl,
+      "2) Escolha o método: código de dispositivo (abre navegador) ou usuário/senha (digitado no terminal).",
+      "3) Confirme abaixo para recarregar providers/modelos nesta TUI.",
+      "Se nenhum modelo aparecer, rode /console orgs ou /console switch para ativar uma organização.",
+    ].join("\n"), { placeholder: "digite atualizar para recarregar", value: "" })
+    if (String(refresh || "").trim().toLowerCase() === "atualizar") {
+      await sdk.client.instance.dispose()
+      await sync.bootstrap()
+      toast.show({ message: "Providers/modelos recarregados; verifique organização ativa se Markspanel não aparecer", variant: "success" })
+      dialog.clear()
+      return
+    }
+    toast.show({ message: "Login Markspanel orientado por diálogo; nenhuma credencial foi salva", variant: "success" })
+    dialog.clear()
+  }
+
+  // --- MARKSCODE REMOTE SSH PROFILES INFRASTRUCTURE (auto-generated) ---
+  type RemoteSSHConfig = {
+    type?: "ssh" | "winrm"
+    host: string
+    user: string
+    port: number
+    transport?: "http" | "https"
+    identity_file?: string
+    key_name?: string
+    host_alias?: string
+    credential_ref?: string
+  }
+
+  const MARKSCODE_MASTER_KEY_NAME = "marks-key-mestra"
+  const MARKSCODE_MASTER_IDENTITY_FILE = "~/.ssh/marks-key-mestra"
+
+  const normalizeRemotePort = (value: string) => {
+    const raw = Number.parseInt(value.trim(), 10)
+    if (!Number.isFinite(raw) || raw <= 0 || raw > 65535) return 22
+    return raw
+  }
+
+  type RemoteSSHProfile = {
+    id: string
+    name: string
+    type?: "ssh" | "winrm"
+    host: string
+    user: string
+    port: number
+    transport?: "http" | "https"
+    identity_file?: string
+    key_name?: string
+    host_alias?: string
+    credential_ref?: string
+    created_at: string
+    updated_at: string
+  }
+
+  type RemoteSSHProfileAction = "list" | "use" | "save" | "master" | "registry" | "edit" | "delete" | "import"
+
+  const readRemoteSSHProfiles = () => {
+    const raw = kv.get("remote_ssh_profiles")
+    if (!Array.isArray(raw)) return [] as RemoteSSHProfile[]
+    return raw as RemoteSSHProfile[]
+  }
+
+  const remoteSSHProfileAliases = (profile: RemoteSSHProfile) => [profile.name, profile.host_alias, profile.host]
+    .filter((value): value is string => Boolean(value && value.trim()))
+
+  const updateRemoteSSHProfilesRegistry = (profiles = readRemoteSSHProfiles()) => {
+    const names = profiles.map((profile) => profile.name).filter(Boolean)
+    const aliases = profiles.flatMap(remoteSSHProfileAliases)
+    kv.set("remote_ssh_profile_names", names)
+    kv.set("remote_ssh_profile_aliases", aliases)
+    kv.set("remote_ssh_profiles_registry", profiles.map((profile) => ({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, credential_ref: profile.credential_ref })))
+    return { names, aliases }
+  }
+
+  const writeRemoteSSHProfiles = (profiles: RemoteSSHProfile[]) => {
+    const sorted = profiles.toSorted((a, b) => a.name.localeCompare(b.name))
+    kv.set("remote_ssh_profiles", sorted)
+    updateRemoteSSHProfilesRegistry(sorted)
+  }
+
+  const MARKSCODE_VISIBLE_REMOTE_PROFILES_ACTIONS = [
+    "Listar perfis",
+    "Usar perfil",
+    "Salvar perfil atual",
+    "Criar acesso com chave mestra",
+    "Injetar registry de perfis no contexto",
+    "Editar perfil",
+    "Excluir perfil",
+    "Importar perfil JSON",
+  ] as const
+
+  const pickRemoteSSHProfileSimple = async () => {
+    const list = readRemoteSSHProfiles()
+    if (!list.length) {
+      toast.show({ message: "No saved remote profile", variant: "warning" })
+      dialog.clear()
+      return undefined
+    }
+    const currentID = kv.get("remote_ssh_active_profile") as string | undefined
+    const rows = list.slice(0, 80).map((x, i) => String(i + 1) + ") " + (x.id === currentID ? "* " : "") + x.name + " | " + (x.type || "ssh") + " | " + x.user + "@" + x.host + ":" + x.port + " | key=" + (x.key_name || x.identity_file || x.credential_ref || "-"))
+    const input = ((await DialogPrompt.show(dialog, ["Remote profiles", ...rows, "", "Actions: number=use | d<num>=details | (Enter)=close"].join("\n"), {
+      placeholder: "",
+      value: "",
+    })) || "").trim().toLowerCase()
+    if (!input) return undefined
+    const num = parseInt(input.replace(/[^0-9]/g, ""))
+    if (!isNaN(num) && num > 0 && num <= list.length) return list[num - 1]
+    if (input === "d" || input.startsWith("d ")) {
+      const profileNum = parseInt(input.replace(/[^0-9]/g, ""))
+      const profile = !isNaN(profileNum) && profileNum > 0 && profileNum <= list.length ? list[profileNum - 1] : list[0]
+      await DialogPrompt.show(dialog, JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport, identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref }, null, 2), { placeholder: "Enter para fechar", value: "" })
+      toast.show({ message: "Detalhes exibidos em diálogo", variant: "success" })
+      return undefined
+    }
+    return undefined
+  }
+
+  const createMasterRemoteAccessProfile = async () => {
+    const raw = ((await DialogPrompt.show(dialog, [
+      "Criar acesso remoto com chave mestra MarksCode",
+      "Informe JSON sem senha. Para SSH, key_name/identity_file serão preenchidos por padrão.",
+      "Campos mínimos: name, host, user. Opcional: type ssh|winrm, port, host_alias, credential_ref.",
+    ].join("\n"), {
+      placeholder: '{"name":"server1","host":"1.2.3.4","user":"marcos","type":"ssh"}',
+      value: JSON.stringify({ name: "", host: "", user: "", type: "ssh", port: 22, key_name: MARKSCODE_MASTER_KEY_NAME, identity_file: MARKSCODE_MASTER_IDENTITY_FILE, host_alias: "" }, null, 2),
+    })) || "").trim()
+    if (!raw) { dialog.clear(); return }
+    const data = JSON.parse(raw) as Partial<RemoteSSHProfile>
+    if (!data.name || !data.host || !data.user) throw new Error("Acesso remoto requer name, host e user")
+    const now = new Date().toISOString()
+    writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), { id: data.id || data.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || (data.type === "winrm" ? 5986 : 22))), transport: data.transport || (data.type === "winrm" ? "https" : undefined), identity_file: data.type === "winrm" ? data.identity_file : data.identity_file || MARKSCODE_MASTER_IDENTITY_FILE, key_name: data.type === "winrm" ? data.key_name : data.key_name || MARKSCODE_MASTER_KEY_NAME, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || now, updated_at: now }])
+    toast.show({ message: "Perfil remoto com chave mestra salvo sem senha", variant: "success" })
+    dialog.clear()
+  }
+
+  const showRemoteSSHProfilesDialog = async (presetAction?: RemoteSSHProfileAction) => {
+    const actionInput = presetAction || ((await DialogPrompt.show(dialog, [
+      "Gerenciador de perfis remotos MarksCode",
+      ...MARKSCODE_VISIBLE_REMOTE_PROFILES_ACTIONS.map((label, index) => String(index + 1) + ") " + label),
+      "",
+      "Digite número ou nome da ação.",
+    ].join("\n"), { placeholder: "Listar perfis", value: "" })) || "").trim().toLowerCase()
+    if (!actionInput) { dialog.clear(); return }
+    const actionMap: Record<string, RemoteSSHProfileAction> = {
+      "1": "list", listar: "list", "listar perfis": "list",
+      "2": "use", usar: "use", "usar perfil": "use",
+      "3": "save", salvar: "save", "salvar perfil atual": "save",
+      "4": "master", mestre: "master", "criar acesso com chave mestra": "master",
+      "5": "registry", registry: "registry", "injetar registry de perfis no contexto": "registry",
+      "6": "edit", editar: "edit", "editar perfil": "edit",
+      "7": "delete", excluir: "delete", "excluir perfil": "delete",
+      "8": "import", importar: "import", "importar perfil json": "import",
+    }
+    const action = actionMap[actionInput]
+    if (!action) {
+      toast.show({ message: "Ação de perfil remoto não reconhecida", variant: "warning" })
+      dialog.clear()
+      return
+    }
+    if (action === "master") { await createMasterRemoteAccessProfile(); return }
+    if (action === "registry") {
+      const registry = updateRemoteSSHProfilesRegistry()
+      toast.show({ message: "Registry remoto atualizado: " + registry.names.length + " perfis / " + registry.aliases.length + " aliases", variant: "success" })
+      dialog.clear()
+      return
+    }
+    if (action === "list") {
+      const profiles = readRemoteSSHProfiles()
+      await DialogPrompt.show(dialog, profiles.length ? profiles.map((profile, index) => String(index + 1) + ") " + JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, identity_file: profile.identity_file, credential_ref: profile.credential_ref })).join("\n") : "Nenhum perfil salvo. Use Criar acesso com chave mestra ou Importar perfil JSON.", { placeholder: "Enter para fechar", value: "" })
+      toast.show({ message: "Lista de perfis exibida em diálogo", variant: "success" })
+      dialog.clear()
+      return
+    }
+    if (action === "save") {
+      const cfg = kv.get("remote_ssh_config") as RemoteSSHConfig | undefined
+      if (!cfg?.host || !cfg?.user) { toast.show({ message: "Ative/crie um perfil pelo gerenciador antes de salvar", variant: "warning" }); dialog.clear(); return }
+      const name = ((await DialogPrompt.show(dialog, "Salvar perfil atual", { placeholder: "nome do perfil", value: String(cfg.host_alias || cfg.host || "") })) || "").trim()
+      if (!name) { dialog.clear(); return }
+      const now = new Date().toISOString()
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== name), { id: name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name, type: cfg.type || "ssh", host: cfg.host, user: cfg.user, port: normalizeRemotePort(String(cfg.port || 22)), transport: cfg.transport, identity_file: cfg.identity_file, key_name: cfg.key_name, host_alias: cfg.host_alias, credential_ref: cfg.credential_ref, created_at: now, updated_at: now }])
+      toast.show({ message: "Perfil remoto salvo sem senha em texto puro", variant: "success" })
+      dialog.clear()
+      return
+    }
+    if (action === "import") {
+      const raw = ((await DialogPrompt.show(dialog, "Importar perfil JSON", { placeholder: '{"name":"server1","host":"...","user":"..."}', value: "" })) || "").trim()
+      if (!raw) { dialog.clear(); return }
+      const data = JSON.parse(raw) as Partial<RemoteSSHProfile> & { password?: string; senha?: string }
+      if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
+      if (!data.name || !data.host || !data.user) throw new Error("Perfil JSON requer name, host e user")
+      const now = new Date().toISOString()
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), { id: data.id || data.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || 22)), transport: data.transport, identity_file: data.identity_file, key_name: data.key_name, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || now, updated_at: now }])
+      toast.show({ message: "Perfil remoto importado sem senha em texto puro", variant: "success" })
+      dialog.clear()
+      return
+    }
+    const profile = await pickRemoteSSHProfileSimple()
+    if (!profile) { dialog.clear(); return }
+    if (action === "delete") { writeRemoteSSHProfiles(readRemoteSSHProfiles().filter((item) => item.id !== profile.id)); toast.show({ message: "Perfil remoto excluído", variant: "success" }); dialog.clear(); return }
+    if (action === "edit") {
+      const raw = ((await DialogPrompt.show(dialog, "Editar perfil remoto JSON seguro (não inclua password/senha)", { placeholder: JSON.stringify(profile), value: JSON.stringify(profile, null, 2) })) || "").trim()
+      if (!raw) { dialog.clear(); return }
+      const data = JSON.parse(raw) as Partial<RemoteSSHProfile> & { password?: string; senha?: string }
+      if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
+      if (!data.name || !data.host || !data.user) throw new Error("Perfil editado requer name, host e user")
+      const now = new Date().toISOString()
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((item) => item.id !== profile.id && item.name !== data.name), { id: data.id || profile.id, name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || profile.port || 22)), transport: data.transport, identity_file: data.identity_file, key_name: data.key_name, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || profile.created_at || now, updated_at: now }])
+      toast.show({ message: "Perfil remoto editado e salvo sem senha", variant: "success" })
+      dialog.clear()
+      return
+    }
+    const cfg: RemoteSSHConfig = { type: profile.type || "ssh", host: profile.host, user: profile.user, port: normalizeRemotePort(String(profile.port)), transport: profile.transport || "https", identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref }
+    kv.set("remote_ssh_config", cfg)
+    kv.set("remote_ssh_active_profile", profile.id)
+    toast.show({ message: "Remote profile active in this chat", variant: "success" })
+    dialog.clear()
+  }
+  // --- END REMOTE SSH PROFILES INFRASTRUCTURE ---
+  createEffect(() => {
+    const initial = route.initialPrompt
+    const sid = route.sessionID
+    if (!initial || !prompt || !sid) return
+    const promptHandle = prompt
+    if (!String(initial.input || "").includes("[AUTO-HANDOFF RESUMO]")) return
+    if (autoSubmitDone() === sid) return
+    setAutoSubmitDone(sid)
+    queueMicrotask(async () => {
+      try {
+        await debugMemoryLog("session:auto-submit:init", { sessionID: sid, prompt_length: String(initial.input || "").length })
+        promptHandle.set(initial)
+        await new Promise((resolve) => setTimeout(resolve, 350))
+        await debugMemoryLog("session:auto-submit:before-submit", { sessionID: sid })
+        promptHandle.submit()
+        await debugMemoryLog("session:auto-submit:submit-called", { sessionID: sid })
+      } catch (error) {
+        await debugMemoryLog("session:auto-submit:error", { sessionID: sid, message: error instanceof Error ? error.message : String(error) })
+      }
+    })
+  })
+
+  const recoverFromContextOverflow = async (sessionID: string, options: { force?: boolean } = {}) => {
+    if (overflowRecovering()) return
+    setOverflowRecovering(true)
+    try {
+      await debugMemoryLog("recover:start", {
+        sessionID,
+        autoHandoffEnabled,
+        autoHandoffDryRun,
+        projectKey: autoHandoffProjectKey,
+        force: Boolean(options.force),
+      })
+
+      if (!autoHandoffEnabled) {
+        toast.show({ message: "Auto-handoff disabled (MEMORIES_AUTO_HANDOFF_ENABLED=0)", variant: "warning", duration: 8000 })
+        return
+      }
+
+      const memoriesApi = await import("@/memories-api")
+      await debugMemoryLog("recover:before-safety", { sessionID, userID: memoriesUserID })
+      const safety = await memoriesApi.getSessionContextSafety({
+        user_id: memoriesUserID,
+        session_id: sessionID,
+      })
+
+      await debugMemoryLog("recover:safety", safety)
+
+      if (!options.force && (!safety || (safety.safe && safety.reason !== "context_limit_near"))) {
+        const reason = safety?.reason ? " (" + safety.reason + ")" : ""
+        toast.show({ message: "Contexto seguro/chat novo; handoff não necessário" + reason, variant: "success", duration: 6500 })
+        return
+      }
+
+      await debugMemoryLog("recover:before-handoff", { sessionID })
+      const handoff = await memoriesApi.createSessionHandoff({
+        user_id: memoriesUserID,
+        session_id: sessionID,
+        project_key: autoHandoffProjectKey,
+        target_tokens: 1200,
+        store_memory: true,
+      })
+
+      await debugMemoryLog("recover:handoff", {
+        handoff_id: handoff?.handoff_id,
+        has_prompt: Boolean(handoff?.handoff?.bootstrap_prompt || handoff?.handoff?.compact_markdown),
+      })
+
+      const handoffPrompt = shortHandoffPromptFrom(handoff?.handoff, sessionID)
+
+      if (!handoffPrompt) {
+        throw new Error("Handoff generated without bootstrap prompt")
+      }
+
+      if (autoHandoffDryRun) {
+        injectContext("[AUTO-HANDOFF DRY-RUN]", [
+          "- sessão atual: " + sessionID,
+          "- estimated_tokens: " + String(safety.estimated_tokens || 0),
+          "- recommendation: " + String(safety.recommendation || "n/a"),
+          "- handoff_id: " + String(handoff?.handoff_id || "n/a"),
+          "- novo chat NÃO criado (dry-run ativo)",
+        ])
+        toast.show({ message: "Auto-handoff dry-run executado", variant: "success", duration: 9000 })
+        return
+      }
+
+      const currentSession = session()
+      const sourceTitle = String(currentSession?.title || "").trim()
+      const nextTitle = sourceTitle ? "Continuação - " + sourceTitle : "Continuação"
+
+      await debugMemoryLog("recover:before-create-session", {
+        parentID: currentSession?.parentID,
+        sourceTitle,
+        nextTitle,
+      })
+      const created = await sdk.client.session.create({
+        parentID: currentSession?.parentID,
+        title: nextTitle,
+      })
+      await debugMemoryLog("recover:create-session-result", {
+        result_type: typeof created,
+        has_id: Boolean((created as any)?.id),
+        has_data_id: Boolean((created as any)?.data?.id),
+        keys: created && typeof created === "object" ? Object.keys(created as Record<string, unknown>) : [],
+      })
+      const newSessionID = (created as any)?.id || (created as any)?.data?.id
+      await debugMemoryLog("recover:new-session-id", { newSessionID: newSessionID || null })
+      if (!newSessionID) {
+        throw new Error("Failed to create new session for auto-handoff")
+      }
+
+      await debugMemoryLog("recover:before-continue", {
+        source_session_id: sessionID,
+        new_session_id: newSessionID,
+      })
+      await memoriesApi.continueSessionFromHandoff({
+        user_id: memoriesUserID,
+        source_session_id: sessionID,
+        new_session_id: newSessionID,
+        target_tokens: 1200,
+        handoff: handoff?.handoff,
+      })
+      await debugMemoryLog("recover:continue-ok", { newSessionID })
+
+      await debugMemoryLog("recover:before-delay", { newSessionID, delay_ms: 300, prompt_length: handoffPrompt.length })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await debugMemoryLog("recover:after-delay", { newSessionID })
+      await debugMemoryLog("recover:before-navigate", { newSessionID })
+      navigate({
+        type: "session",
+        sessionID: newSessionID,
+        initialPrompt: {
+          input: handoffPrompt,
+          parts: [],
+        },
+      })
+      await debugMemoryLog("recover:navigate-called", { newSessionID })
+      toast.show({ message: "New session started from compressed handoff", variant: "success", duration: 9000 })
+    } catch (error) {
+      await debugMemoryLog("recover:error", {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    } finally {
+      setOverflowRecovering(false)
+    }
+  }
+
+  const saveSessionMemoryFor = async (sessionID: string, origin: "manual" | "auto") => {
+    const text = cachedMemorySnapshotFor(sessionID)
+    if (!text || !sessionID) return false
+    const title = (sync.session.get(sessionID)?.title || "").trim()
+    const selected = local.model.current()
+    const lastAssistant = [...messages()].reverse().find((x) => x.role === "assistant") as
+      | { modelID?: string; providerID?: string }
+      | undefined
+    const sourceName = [selected?.providerID || lastAssistant?.providerID, selected?.modelID || lastAssistant?.modelID]
+      .filter(Boolean)
+      .join(":")
+    const words = text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 4)
+      .slice(0, 8)
+    await saveHumanMemory({
+      user_id: memoriesUserID,
+      session_id: sessionID,
+      type: "episodic",
+      memory_mode: "short_term",
+      title: title || undefined,
+      subject: "Session " + sessionID,
+      content: text,
+      importance: 0.7,
+      tags: ["tui", "conversation", "short_term", origin],
+      triggers: words,
+      retrieval_cues: words,
+      mnemonic_techniques: ["association"],
+      visual_refs: [],
+      source_name: sourceName || undefined,
+    })
+    setLastMemorySaveAt(Date.now())
+    setLastMemoryChars(text.length)
+    setLastMemoryHash(memoryHash(text))
+    return true
+  }
+
+  const saveSessionMemory = async (origin: "manual" | "auto") => {
+    if (!route.sessionID) return false
+    return saveSessionMemoryFor(route.sessionID, origin)
+  }
+
+  const saveCurrentTopicMemory = async () => {
+    const text = memorySnapshot()
+    if (!text || !route.sessionID) return false
+    const title = (sync.session.get(route.sessionID)?.title || "Assunto atual BrainSystem").trim()
+    await saveHumanMemory({
+      user_id: memoriesUserID,
+      session_id: route.sessionID,
+      type: "semantic",
+      memory_mode: "long_term",
+      title,
+      subject: title || "Assunto atual BrainSystem",
+      content: text.length > 2400 ? text.slice(-2400).trim() : text,
+      importance: 0.85,
+      tags: ["brainsystem", "topic", "manual", "markscode"],
+      triggers: ["brainsystem", "assunto atual", title].filter(Boolean),
+      retrieval_cues: ["brainsystem", "sessão atual", "assunto recente", title].filter(Boolean),
+      mnemonic_techniques: ["topic-summary"],
+      visual_refs: [],
+      source_name: "markscode-tui-topic",
+    })
+    return true
+  }
+
+  const recentTopicRows = async () => {
+    const result = await listHybridRecentTopics({ user_id: memoriesUserID, session_id: route.sessionID || undefined, limit: 12, provider: "hybrid" })
+    const rows = result.topics.map((topic, index) => String(index + 1) + ". [" + topic.source + "] " + topic.topic + (topic.content_preview ? " — " + topic.content_preview : ""))
+    return rows.length ? rows : ["Nenhum assunto recente retornado. Status: " + JSON.stringify(result.sources)]
+  }
+
+
+  const refreshHybridMemoryStatus = async () => {
+    const status = (await hybridMemoryStatus()) as Record<string, unknown>
+    const local = status.local && typeof status.local === "object" ? status.local as Record<string, unknown> : {}
+    kv.set("memories_hybrid_local_available", status.local_available ? "1" : "0")
+    kv.set("memories_hybrid_cloud_available", status.cloud_available ? "1" : "0")
+    kv.set("memories_hybrid_provider", String(status.provider || "hybrid"))
+    kv.set("memories_hybrid_capsule", String(local.capsule || status.capsule || local.path || ""))
+  }
+
+  const refreshCloudMemories = async (sessionID: string) => {
+    try {
+      const body = await getGlobalContext({
+        session_id: sessionID,
+        limit: 5,
+      })
+      const list = Array.isArray(body?.memories) ? body.memories : []
+      kv.set("memories_cloud_last_sync_at", new Date().toISOString())
+      kv.set("memories_cloud_last_sync_ok", "1")
+      kv.set("memories_cloud_last_sync_count", String(list.length))
+      kv.set("memories_cloud_last_sync_error", "")
+    } catch (err) {
+      kv.set("memories_cloud_last_sync_at", new Date().toISOString())
+      kv.set("memories_cloud_last_sync_ok", "0")
+      kv.set("memories_cloud_last_sync_error", errorMessage(err) || "sync_failed")
+    } finally {
+      await refreshHybridMemoryStatus().catch(() => undefined)
+    }
+  }
+  // MARKSCODE_MEMORIES_HELPERS_END
+      
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
     if (session()?.parentID) return false
@@ -322,7 +1057,386 @@ export function Session() {
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
+  // MARKSCODE_MAP_HELPERS_START
+  const mapHost = String(process.env.MARKSCODE_MAP_HOST || process.env.HOSTNAME || "markscode")
+  const mapActor = String(process.env.MARKSCODE_MAP_ACTOR || process.env.USER || "markscode")
+  const mapDebugEnabled = /^(1|true|yes|on)$/i.test(String(process.env.MARKSCODE_DEBUG_UI || "0"))
 
+  const debugUiLog = async (label: string, payload?: unknown) => {
+    if (!mapDebugEnabled) return
+    try {
+      const fs = await import("node:fs/promises")
+      const line = [
+        new Date().toISOString(),
+        label,
+        payload === undefined ? "" : JSON.stringify(payload),
+      ].join(" | ") + "\n"
+      await fs.appendFile("/tmp/markscode-debug-ui.log", line)
+    } catch {}
+  }
+
+  const mapKeyFor = (sessionID: string) => "map_binding:" + sessionID
+
+  const getMapBinding = (sessionID?: string) => {
+    if (!sessionID) return {}
+    try {
+      const raw = kv.get(mapKeyFor(sessionID))
+      if (!raw) return {}
+      const data = JSON.parse(String(raw))
+      return data && typeof data === "object" ? data : {}
+    } catch {
+      return {}
+    }
+  }
+
+  const setMapBinding = (sessionID: string, patch: Record<string, unknown>) => {
+    const next = {
+      ...getMapBinding(sessionID),
+      ...patch,
+      session_id: sessionID,
+      host: mapHost,
+      actor: mapActor,
+      updated_at: new Date().toISOString(),
+    }
+    kv.set(mapKeyFor(sessionID), JSON.stringify(next))
+    return next
+  }
+
+  const clearMapModuleTask = (sessionID: string, patch: Record<string, unknown>) =>
+    setMapBinding(sessionID, {
+      ...patch,
+      module_id: undefined,
+      module_slug: undefined,
+      module_name: undefined,
+      task_id: undefined,
+      task_title: undefined,
+      task_status: undefined,
+    })
+
+  const requireMapSessionID = () => {
+    if (!route.sessionID) throw new Error("Set a session first")
+    return route.sessionID
+  }
+
+  const selectMapOption = <T,>(
+    dialog: any,
+    title: string,
+    options: DialogSelectOption<T>[],
+    placeholder = "Filtrar...",
+  ) => {
+    return new Promise<T | null>((resolve) => {
+      const rows = options.map((option) => ({
+        ...option,
+        onSelect: (ctx: any) => {
+          option.onSelect?.(ctx)
+          resolve(option.value)
+          ctx.clear()
+        },
+      }))
+      setTimeout(() => {
+        dialog.setSize("large")
+        dialog.replace(
+          () => <DialogSelect title={title} options={rows} placeholder={placeholder} flat />,
+          () => resolve(null),
+        )
+      }, 0)
+    })
+  }
+
+  const chooseMapProject = async (dialog: any) => {
+    const sessionID = requireMapSessionID()
+    await debugUiLog("map:choose-project:start", { sessionID })
+    const result = await listMapProjects()
+    const projects = Array.isArray(result?.projects) ? result.projects : []
+    if (!projects.length) throw new Error("No MAP projects found")
+    const picked = await selectMapOption<any>(
+      dialog,
+      "Vincular projeto MAP",
+      projects.map((item: any) => ({
+        title: String(item.name || item.slug || item.id || "Projeto MAP"),
+        value: item,
+        description: String(item.slug || item.id || ""),
+        category: "Projetos",
+      })),
+      "Buscar projeto por nome ou slug...",
+    )
+    if (!picked) return null
+    const next = clearMapModuleTask(sessionID, {
+      project_id: picked.id,
+      project_slug: picked.slug,
+      project_name: picked.name,
+    })
+    await debugUiLog("map:choose-project:ok", { sessionID, project_id: picked.id, project_slug: picked.slug })
+    return next
+  }
+
+  const chooseMapModule = async (dialog: any) => {
+    const sessionID = requireMapSessionID()
+    const binding: any = getMapBinding(sessionID)
+    await debugUiLog("map:choose-module:start", { sessionID, project_id: binding.project_id, project_slug: binding.project_slug })
+    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    const result = await listMapModules({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+    })
+    const modules = Array.isArray(result?.modules) ? result.modules : []
+    if (!modules.length) throw new Error("No MAP modules found for project")
+    const picked = await selectMapOption<any>(
+      dialog,
+      "Vincular módulo MAP",
+      modules.map((item: any) => ({
+        title: String(item.name || item.slug || item.id || "Módulo MAP"),
+        value: item,
+        description: String(item.slug || item.id || ""),
+        category: "Módulos",
+      })),
+      "Buscar módulo por nome ou slug...",
+    )
+    if (!picked) return null
+    const next = setMapBinding(sessionID, {
+      module_id: picked.id,
+      module_slug: picked.slug,
+      module_name: picked.name,
+      task_id: undefined,
+      task_title: undefined,
+      task_status: undefined,
+    })
+    await debugUiLog("map:choose-module:ok", { sessionID, module_id: picked.id, module_slug: picked.slug })
+    return next
+  }
+
+  const chooseOrCreateMapTask = async (dialog: any) => {
+    const sessionID = requireMapSessionID()
+    const binding: any = getMapBinding(sessionID)
+    await debugUiLog("map:choose-task:start", { sessionID, project_id: binding.project_id, module_id: binding.module_id })
+    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    const listed = await listMapTasks({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+    }).catch(() => ({ tasks: [] }))
+    const tasks = Array.isArray((listed as any)?.tasks) ? (listed as any).tasks : []
+    const selected = await selectMapOption<any>(
+      dialog,
+      "Vincular task MAP",
+      [
+        ...tasks.map((item: any) => ({
+          title: String(item.title || item.name || item.id || "Task MAP"),
+          value: { kind: "existing", task: item },
+          description: "#" + String(item.id || "") + " " + String(item.status || "open"),
+          category: "Tasks existentes",
+        })),
+        {
+          title: "Criar nova / digitar título ou ID...",
+          value: { kind: "manual" },
+          description: "abre entrada manual",
+          category: "Manual",
+        },
+      ],
+      "Buscar task por título, status ou ID...",
+    )
+    if (!selected) return null
+    if (selected.kind === "existing") {
+      const taskResult: any = selected.task
+      if (!taskResult?.id) throw new Error("MAP task not returned")
+      const next = setMapBinding(sessionID, {
+        task_id: taskResult.id,
+        task_title: taskResult.title,
+        task_status: taskResult.status,
+      })
+      await debugUiLog("map:choose-task:ok", { sessionID, task_id: taskResult.id, task_title: taskResult.title, mode: "linked" })
+      return next
+    }
+    const answer = await DialogPrompt.show(dialog, "Criar/vincular task MAP", {
+      placeholder: binding.task_title || "Digite o título da task",
+    })
+    if (!answer) return null
+    const title = answer.trim()
+    if (!title) return null
+
+    const existing = await listMapTasks({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      title,
+    }).catch(() => ({ tasks: [] }))
+    const value = title.toLowerCase()
+    const task: any = (existing.tasks || []).find((item: any) => String(item.id || "") === title) ||
+      (existing.tasks || []).find((item: any) => String(item.title || "").toLowerCase() === value) ||
+      (existing.tasks || []).find((item: any) => String(item.title || "").toLowerCase().includes(value))
+
+    const createdTask = task || (await upsertMapTask({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      title,
+      status: binding.task_status || "open",
+      priority: "normal",
+      assignee: mapActor,
+      actor: mapActor,
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/authentication_required|unauthorized|401/i.test(message)) {
+        throw new Error("MAP recusou a criação da task no endpoint público atual (authentication_required). Por enquanto, digite o ID/título de uma task existente para vincular sem criar, ou verifique se a escrita pública do MAP foi liberada no backend.")
+      }
+      throw error
+    })).task
+    const taskResult: any = createdTask
+    if (!taskResult?.id) throw new Error("MAP task not returned")
+    const next = setMapBinding(sessionID, {
+      task_id: taskResult.id,
+      task_title: taskResult.title,
+      task_status: taskResult.status,
+    })
+    await debugUiLog("map:choose-task:ok", { sessionID, task_id: taskResult.id, task_title: taskResult.title, mode: task ? "linked" : "created" })
+    return next
+  }
+
+  const reloadMapContext = async () => {
+    const sessionID = requireMapSessionID()
+    const binding: any = getMapBinding(sessionID)
+    await debugUiLog("map:context-reload:start", { sessionID, project_id: binding.project_id, module_id: binding.module_id, task_id: binding.task_id })
+    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    const data = await getMapBootstrap({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      host: mapHost,
+      include_tasks: true,
+    })
+    const project = data?.project as any
+    const module = data?.module as any
+    const tasks = Array.isArray(data?.tasks) ? data.tasks.slice(0, 8) : []
+    const rows = [
+      "[Planning / MAP]",
+      "- host: " + mapHost,
+      "- actor: " + mapActor,
+      "- project: " + (project?.name || binding.project_name || binding.project_slug || binding.project_id || "(none)"),
+      "- module: " + (module?.name || binding.module_name || binding.module_slug || binding.module_id || "(none)"),
+      "- linked_task: " + (binding.task_title || binding.task_id || "(none)"),
+      "",
+      "Tasks:",
+      ...tasks.map((item: any) => "- [" + String(item.status || "todo") + "] " + String(item.title || item.id || "sem titulo")),
+    ]
+    injectContext("Planning", rows)
+    await debugUiLog("map:context-reload:ok", { sessionID, tasks: tasks.length })
+    return data
+  }
+
+  const ensureMapTaskBinding = (binding: any) => {
+    if (!binding?.task_id && !binding?.task_title) throw new Error("Link a MAP task first")
+    return binding
+  }
+
+  const startMapTaskSession = async () => {
+    const sessionID = requireMapSessionID()
+    const binding: any = ensureMapTaskBinding(getMapBinding(sessionID))
+    await debugUiLog("map:session-start:start", { sessionID, task_id: binding.task_id, task_title: binding.task_title })
+    const result = await startMapSession({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      task_id: binding.task_id,
+      title: binding.task_title,
+      host: mapHost,
+      actor: mapActor,
+      task_status: "in_progress",
+      note: "Session started from MarksCode",
+    })
+    const task: any = result?.task
+    const next = setMapBinding(sessionID, {
+      task_id: task?.id || binding.task_id,
+      task_title: task?.title || binding.task_title,
+      task_status: task?.status || "in_progress",
+      last_phase: result?.session?.phase || "started",
+    })
+    await debugUiLog("map:session-start:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "started" })
+    return next
+  }
+
+  const progressMapTaskSession = async (dialog: any) => {
+    const sessionID = requireMapSessionID()
+    const binding: any = ensureMapTaskBinding(getMapBinding(sessionID))
+    await debugUiLog("map:session-progress:start", { sessionID, task_id: binding.task_id, task_title: binding.task_title })
+    const note = await DialogPrompt.show(dialog, "Registrar progresso MAP", {
+      placeholder: "Descreva o progresso/checkpoint",
+    })
+    if (!note) return null
+    const result = await progressMapSession({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      task_id: binding.task_id,
+      title: binding.task_title,
+      host: mapHost,
+      actor: mapActor,
+      note,
+      progress: note,
+      event_type: "markscode_manual_progress",
+      task_update: {
+        status: binding.task_status || "in_progress",
+        assignee: mapActor,
+      },
+      host_state: {
+        state: "busy",
+        note,
+      },
+    })
+    const task: any = result?.task
+    const next = setMapBinding(sessionID, {
+      task_id: task?.id || binding.task_id,
+      task_title: task?.title || binding.task_title,
+      task_status: task?.status || binding.task_status || "in_progress",
+      last_phase: result?.session?.phase || "progress",
+      last_progress_note: note,
+    })
+    await debugUiLog("map:session-progress:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "progress" })
+    return next
+  }
+
+  const endMapTaskSession = async (dialog: any) => {
+    const sessionID = requireMapSessionID()
+    const binding: any = ensureMapTaskBinding(getMapBinding(sessionID))
+    await debugUiLog("map:session-end:start", { sessionID, task_id: binding.task_id, task_title: binding.task_title })
+    const note = await DialogPrompt.show(dialog, "Encerrar sessão MAP", {
+      placeholder: "Resumo final / checkout",
+    })
+    if (!note) return null
+    const result = await endMapSession({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      task_id: binding.task_id,
+      title: binding.task_title,
+      host: mapHost,
+      actor: mapActor,
+      note,
+      task_status: "done",
+      host_state: {
+        state: "idle",
+        note,
+      },
+    })
+    const task: any = result?.task
+    const next = setMapBinding(sessionID, {
+      task_id: task?.id || binding.task_id,
+      task_title: task?.title || binding.task_title,
+      task_status: task?.status || "done",
+      last_phase: result?.session?.phase || "ended",
+      last_checkout_note: note,
+    })
+    await debugUiLog("map:session-end:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "ended" })
+    return next
+  }
+  // MARKSCODE_MAP_HELPERS_END
+      
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
     if (evt.properties.status.type !== "retry") return
@@ -358,7 +1472,7 @@ export function Session() {
         `${logo[3] ?? ""}`,
         ``,
         `  ${weak("Session")}${UI.Style.TEXT_NORMAL_BOLD}${title}${UI.Style.TEXT_NORMAL}`,
-        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}opencode -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
+        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}markscode -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
         ``,
       ].join("\n"),
     )
@@ -418,52 +1532,6 @@ export function Session() {
   }
 
   const local = useLocal()
-
-  async function recoverFromContextOverflow() {
-    const safety = await getSessionContextSafety({ session_id: route.sessionID })
-    if (!safety.should_handoff) {
-      toast.show({ message: "Context safety OK", variant: "success", duration: 2500 })
-      return
-    }
-    const handoff = await createSessionHandoff({
-      session_id: route.sessionID,
-      reason: safety.reason,
-      summary: `[AUTO-HANDOFF RESUMO]\n${safety.compact_context}`,
-      metadata: { source: "session:auto-submit:init" },
-    })
-    toast.show({
-      message: handoff.ok ? "Auto-handoff prepared" : "Auto-handoff unavailable",
-      variant: handoff.ok ? "success" : "warning",
-      duration: 3000,
-    })
-  }
-
-  async function chooseMapProject() {
-    const projects = await listMapProjects()
-    toast.show({
-      message: projects[0]?.name || projects[0]?.slug || "MAP project selection unavailable",
-      variant: projects.length ? "success" : "warning",
-      duration: 3000,
-    })
-    return projects[0]
-  }
-
-  async function startMapTaskSession() {
-    const project = await chooseMapProject()
-    const tasks = await listMapTasks({ project_id: project?.id, project_slug: project?.slug })
-    const task = tasks[0]
-    const started = await startMapSession({
-      session_id: route.sessionID,
-      project_id: project?.id,
-      task_id: task?.id,
-      task_slug: task?.slug,
-    })
-    toast.show({
-      message: started.status ? `MAP session: ${started.status}` : "MAP session start unavailable",
-      variant: started.status ? "success" : "warning",
-      duration: 3000,
-    })
-  }
 
   function enterChild(sessionID: string) {
     navigate({
@@ -716,21 +1784,7 @@ export function Session() {
         })
       },
     },
-    {
-      title: "MarksCode: Testar auto-handoff de contexto",
-      value: "session:auto-submit:init",
-      category: "MarksCode",
-      description: "Executa uma checagem fail-open de segurança de contexto e handoff.",
-      slash: {
-        name: "marks-auto-handoff-test",
-      },
-      run: async () => {
-        await recoverFromContextOverflow()
-        if (MARKSCODE_DEBUG_UI) toast.show({ message: "MARKSCODE_DEBUG_UI enabled", variant: "info", duration: 2000 })
-        dialog.clear()
-      },
-    },
-    {
+{
       title: "MarksCode: Vincular sessão a tarefa MAP",
       value: "session.map.start",
       category: "MarksCode",
@@ -744,7 +1798,7 @@ export function Session() {
       },
     },
     {
-      title: sidebarVisible() ? "Hide sidebar" : "Show sidebar",
+      title: sidebarVisible() ? "Hide MarksCode sidebar" : "Show MarksCode sidebar",
       value: "session.sidebar.toggle",
       category: "Session",
       run: () => {
@@ -1143,6 +2197,286 @@ export function Session() {
         moveChild(-1)
       }),
     },
+    {
+      title: "MarksCode: Testar auto-handoff de contexto",
+      name: "markscode.memories.test-auto-handoff",
+      category: "MarksCode",
+      slashName: "memory-test-auto-handoff",
+      run: async () => {
+        const targetSessionID = route.sessionID
+        if (!targetSessionID) {
+          toast.show({ message: "Set a session first", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        try {
+          await recoverFromContextOverflow(targetSessionID, { force: true })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to test auto-handoff"
+          await debugMemoryLog("recover:test-command:error", { sessionID: targetSessionID, message })
+          toast.show({ message: "Auto-handoff falhou: " + message, variant: "error", duration: 15000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Buscar na Memória (todos os endpoints)",
+      name: "markscode.memories.search",
+      category: "MarksCode",
+      slashName: "memory-search",
+      run: async () => {
+        const searchQuery = await DialogPrompt.show(dialog, "Buscar na Memória", {
+          placeholder: "Digite o contexto/prompt de busca...",
+        })
+        if (!searchQuery) {
+          dialog.clear()
+          return
+        }
+        try {
+          const targetSessionID = route.sessionID
+          const user = memoriesUserID
+          const search = await searchAdvancedMemories({
+            user_id: user,
+            session_id: targetSessionID || undefined,
+            query: searchQuery,
+            fuzzy: true,
+            limit: 10,
+          })
+          const fromSearch = Array.isArray(search?.memories) ? search.memories : []
+
+          let ctxRows = fromSearch
+          if (!ctxRows.length) {
+            const global = await getGlobalContext({
+              user_id: user,
+              session_id: targetSessionID || undefined,
+              query: searchQuery,
+              limit: 10,
+            })
+            ctxRows = Array.isArray(global?.memories) ? global.memories : []
+          }
+
+          if (!ctxRows.length) {
+            toast.show({ message: "Nenhuma memória encontrada", variant: "warning" })
+            dialog.clear()
+            return
+          }
+
+          const rows = ctxRows
+            .slice(0, 10)
+            .map((x) => {
+              const head = x.title || x.subject || "sem titulo"
+              const body = String(x.content || "").replace(/\s+/g, " ").trim().slice(0, 180)
+              return "- " + head + ": " + body
+            })
+
+          injectContext(
+            "[Memórias - Contexto de busca API]",
+            [
+              "- query: " + searchQuery,
+              "- user_id: " + user,
+              "- session_id: " + (targetSessionID || "(global)"),
+              "- total: " + String(rows.length),
+              "",
+              ...rows,
+            ],
+          )
+          toast.show({ message: String(rows.length) + " memórias carregadas no contexto", variant: "success" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memórias", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
+      name: "markscode.memories.recent-topics",
+      category: "MarksCode",
+      slashName: "memory-recent-topics",
+      run: () => {
+        dialog.replace(() => (
+          <DialogRecentTopics
+            userID={memoriesUserID}
+            sessionID={route.sessionID || undefined}
+            onSelect={(topic) => {
+              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
+              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
+              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "MarksCode: Inserir assuntos recentes no prompt",
+      name: "markscode.memories.recent-topics-insert",
+      category: "MarksCode",
+      slashName: "memory-recent-topics-insert",
+      run: async () => {
+        try {
+          const result = await listHybridRecentTopics({ user_id: memoriesUserID, session_id: route.sessionID || undefined, limit: 12, provider: "hybrid" })
+          const rows = result.topics.map((topic, index) => String(index + 1) + ". [" + topic.source + "] " + topic.topic + (topic.content_preview ? " — " + topic.content_preview : ""))
+          injectContext("[Assuntos recentes - Memvid/BrainSystem]", rows.length ? rows : ["Nenhum assunto recente retornado. Status: " + JSON.stringify(result.sources)])
+          toast.show({ message: "Assuntos recentes carregados no prompt", variant: "success" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao listar assuntos recentes", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    // MARKSCODE_MAP_COMMANDS_START
+    {
+      title: "MarksCode: Vincular projeto MAP",
+      name: "markscode.map.bind-project",
+      category: "MarksCode",
+      slashName: "map-bind-project",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-bind-project", sessionID: route.sessionID })
+        try {
+          const binding: any = await chooseMapProject(dialog)
+          if (binding?.project_name || binding?.project_slug) {
+            toast.show({ message: "Projeto MAP vinculado: " + String(binding.project_name || binding.project_slug), variant: "success", duration: 6500 })
+          }
+        } catch (err) {
+          await debugUiLog("map:choose-project:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao vincular projeto MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Vincular módulo MAP",
+      name: "markscode.map.bind-module",
+      category: "MarksCode",
+      slashName: "map-bind-module",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-bind-module", sessionID: route.sessionID })
+        try {
+          const binding: any = await chooseMapModule(dialog)
+          if (binding?.module_name || binding?.module_slug) {
+            toast.show({ message: "Módulo MAP vinculado: " + String(binding.module_name || binding.module_slug), variant: "success", duration: 6500 })
+          }
+        } catch (err) {
+          await debugUiLog("map:choose-module:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao vincular módulo MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Criar/vincular task MAP",
+      name: "markscode.map.bind-task",
+      category: "MarksCode",
+      slashName: "map-bind-task",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-bind-task", sessionID: route.sessionID })
+        try {
+          const binding: any = await chooseOrCreateMapTask(dialog)
+          if (binding?.task_title || binding?.task_id) {
+            toast.show({ message: "Task MAP vinculada: " + String(binding.task_title || binding.task_id), variant: "success", duration: 6500 })
+          }
+        } catch (err) {
+          await debugUiLog("map:choose-task:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao vincular task MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Recarregar contexto MAP",
+      name: "markscode.map.reload-context",
+      category: "MarksCode",
+      slashName: "map-context-reload",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-context-reload", sessionID: route.sessionID })
+        try {
+          await reloadMapContext()
+          toast.show({ message: "Contexto MAP carregado", variant: "success", duration: 6500 })
+        } catch (err) {
+          await debugUiLog("map:context-reload:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao carregar contexto MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Iniciar sessão MAP",
+      name: "markscode.map.session-start",
+      category: "MarksCode",
+      slashName: "map-session-start",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-session-start", sessionID: route.sessionID })
+        try {
+          const binding: any = await startMapTaskSession()
+          if (binding?.task_title || binding?.task_id) {
+            toast.show({ message: "Sessão MAP iniciada: " + String(binding.task_title || binding.task_id), variant: "success", duration: 7000 })
+          }
+        } catch (err) {
+          await debugUiLog("map:session-start:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao iniciar sessão MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Registrar progresso MAP",
+      name: "markscode.map.session-progress",
+      category: "MarksCode",
+      slashName: "map-session-progress",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-session-progress", sessionID: route.sessionID })
+        try {
+          const binding: any = await progressMapTaskSession(dialog)
+          if (binding?.task_title || binding?.task_id) {
+            toast.show({ message: "Progresso MAP registrado", variant: "success", duration: 7000 })
+          }
+        } catch (err) {
+          await debugUiLog("map:session-progress:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao registrar progresso MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Encerrar sessão MAP",
+      name: "markscode.map.session-end",
+      category: "MarksCode",
+      slashName: "map-session-end",
+      run: async () => {
+        await debugUiLog("map:command", { command: "map-session-end", sessionID: route.sessionID })
+        try {
+          const binding: any = await endMapTaskSession(dialog)
+          if (binding?.task_title || binding?.task_id) {
+            toast.show({ message: "Sessão MAP encerrada", variant: "success", duration: 7000 })
+          }
+        } catch (err) {
+          await debugUiLog("map:session-end:error", { sessionID: route.sessionID, message: err instanceof Error ? err.message : String(err) })
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao encerrar sessão MAP", variant: "error", duration: 9000 })
+        }
+        dialog.clear()
+      },
+    },
+    // MARKSCODE_MAP_COMMANDS_END
+// MARKSCODE_MEMORIES_COMMANDS_END
+    {
+      title: "MarksCode: Login Markspanel",
+      name: "markscode.markspanel.login",
+      category: "MarksCode",
+      slashName: "markspanel-login",
+      run: async () => {
+        await showMarkspanelLoginDialog()
+      },
+    },
+    // MARKSCODE_REMOTE_SSH_COMMANDS_START
+    {
+      title: "Modo remoto: gerenciar perfis",
+      name: "markscode.remote-ssh.profile.manage",
+      category: "MarksCode",
+      slashName: "remote-ssh-profiles",
+      run: async () => {
+        await showRemoteSSHProfilesDialog()
+      },
+    },
+    // MARKSCODE_REMOTE_SSH_COMMANDS_END
   ])
 
   const sessionCommands = createMemo(() =>
@@ -1199,6 +2533,103 @@ export function Session() {
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
+  // MARKSCODE_MEMORIES_AUTOSAVE_START
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => {
+        const previousSessionID = activeMemorySessionID()
+        if (previousSessionID && previousSessionID !== sessionID) {
+          saveSessionMemoryFor(previousSessionID, "auto").catch((error) => {
+            console.error("session switch memory save failed", error)
+          })
+        }
+
+        if (!sessionID) {
+          setActiveMemorySessionID(undefined)
+          return
+        }
+
+        setActiveMemorySessionID(sessionID)
+        const initial = cachedMemorySnapshotFor(sessionID)
+        setLastMemorySaveAt(Date.now())
+        setLastMemoryChars(initial.length)
+        setLastMemoryHash(memoryHash(initial))
+
+        const timer = setInterval(() => {
+          const text = memorySnapshot()
+          if (!text) return
+
+          const now = Date.now()
+          const elapsed = now - lastMemorySaveAt()
+          const deltaChars = text.length - lastMemoryChars()
+          const hash = memoryHash(text)
+
+          if (elapsed < 120_000) return
+          if (deltaChars < 5000) return
+          if (hash === lastMemoryHash()) return
+
+          saveSessionMemory("auto")
+            .then((ok) => {
+              if (ok) toast.show({ message: "Human memory auto-saved", variant: "success", duration: 6000 })
+            })
+            .catch((error) => {
+              console.error("auto memory save failed", error)
+            })
+        }, 15000)
+
+        onCleanup(() => {
+          clearInterval(timer)
+          saveSessionMemoryFor(sessionID, "auto").catch((error) => {
+            console.error("exit memory save failed", error)
+          })
+        })
+      },
+    ),
+  )
+  // MARKSCODE_MEMORIES_AUTOSAVE_END
+  // MARKSCODE_MEMORIES_OVERFLOW_START
+  createEffect(() => {
+    const sessionID = route.sessionID
+    if (!sessionID) return
+    if (overflowRecovering()) return
+
+    const list = messages()
+    const candidate = [...list].reverse().find((item) => item.role === "assistant" && item.error)
+    if (!candidate) return
+    if (lastOverflowRecoveredMessageID() === candidate.id) return
+
+    const errorText = errorTextFromMessage(candidate)
+    if (!isContextOverflowError(errorText)) return
+
+    setLastOverflowRecoveredMessageID(candidate.id)
+    recoverFromContextOverflow(sessionID).catch((error) => {
+      console.error("compact overflow recovery failed", error)
+      toast.show({ message: "Failed to recover from context overflow", variant: "error", duration: 9000 })
+    })
+  })
+  // MARKSCODE_MEMORIES_OVERFLOW_END
+
+  // MARKSCODE_QUOTA_WARNING_START
+  createEffect(() => {
+    const list = messages()
+    const candidate = [...list].reverse().find((item) => item.role === "assistant" && item.error)
+    if (!candidate) return
+
+    const errorText = errorTextFromMessage(candidate)
+    if (!errorText) return
+
+    const isQuotaError = /(quota|limit.*exceeded|exhausted|rate.limit|402|429|plano|billing)/i.test(errorText)
+    if (!isQuotaError) return
+
+    toast.show({
+      message:
+        "⚠️ Limite de tokens Markspanel atingido ou quota excedida. Aguarde a renovação mensal ou faça upgrade do plano.",
+      variant: "warning",
+      duration: 12000,
+    })
+  })
+  // MARKSCODE_QUOTA_WARNING_END
 
   return (
     <PathFormatterProvider path={session()?.directory}>
@@ -1613,7 +3044,7 @@ const PART_MAPPING = {
 }
 
 function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: AssistantMessage }) {
-  const { theme } = useTheme()
+  const { theme, subtleSyntax } = useTheme()
   const ctx = use()
   // Collapsed by default in hide mode: a single line throughout, so the
   // layout never shifts. Click to open the full markdown block, click to close.
@@ -1632,7 +3063,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     return end === undefined ? 0 : Math.max(0, end - props.part.time.start)
   })
   const summary = createMemo(() => reasoningSummary(content()))
-  const syntax = createMemo(() => generateSubtleSyntax(theme))
+  const syntax = createMemo(() => subtleSyntax())
 
   const toggle = () => {
     if (!inMinimal()) return
@@ -1647,18 +3078,18 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
             toggleable={inMinimal()}
             open={!inMinimal() || expanded()}
             done={isDone()}
-            title={summary().title}
+            title={summary()?.title ?? null}
             duration={isDone() ? Locale.duration(duration()) : undefined}
           />
         </box>
-        <Show when={(!inMinimal() || expanded()) && summary().body}>
+        <Show when={(!inMinimal() || expanded()) && summary()?.body}>
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
             <code
               filetype="markdown"
               drawUnstyledText={false}
               streaming={true}
               syntaxStyle={syntax()}
-              content={summary().body}
+              content={summary()?.body}
               conceal={ctx.conceal()}
               fg={theme.textMuted}
             />
@@ -1997,7 +3428,7 @@ function BlockTool(props: {
           </text>
         }
       >
-        <Spinner color={theme.textMuted}>{props.title.replace(/^# /, "")}</Spinner>
+        <Spinner color={theme.textMuted}>{String(props.title || "").replace(/^# /, "")}</Spinner>
       </Show>
       {props.children}
       <Show when={error()}>

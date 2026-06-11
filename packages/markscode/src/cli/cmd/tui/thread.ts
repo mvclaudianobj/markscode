@@ -21,6 +21,8 @@ import {
   sanitizedProcessEnv,
 } from "@opencode-ai/core/util/opencode-process"
 import { validateSession } from "./validate-session"
+import { AppRuntime } from "@/effect/app-runtime"
+import { MarkspanelStartupGate } from "@/markspanel/startup-gate"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -138,6 +140,13 @@ export const TuiThreadCommand = cmd({
         return
       }
       const cwd = Filesystem.resolve(process.cwd())
+      try {
+        await AppRuntime.runPromise(MarkspanelStartupGate.ensureParentGate())
+      } catch (error) {
+        UI.error(errorMessage(error))
+        process.exitCode = 1
+        return
+      }
       const env = sanitizedProcessEnv({
         [OPENCODE_PROCESS_ROLE]: "worker",
         [OPENCODE_RUN_ID]: ensureRunID(),
@@ -184,6 +193,15 @@ export const TuiThreadCommand = cmd({
           })
         })
         worker.terminate()
+      }
+
+      try {
+        await client.call("startupGate", { directory: cwd, model: args.model })
+      } catch (error) {
+        await stop()
+        UI.error(errorMessage(error))
+        process.exitCode = 1
+        return
       }
 
       const prompt = await input(args.prompt)

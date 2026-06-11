@@ -24,6 +24,13 @@ export function isOverflow(input: {
   outputTokenMax?: number
 }) {
   if (input.cfg.compaction?.auto === false) return false
+  if (["marks", "local-proxy", "local-proxy2"].includes(input.model.providerID)) return false
+  const list = input.cfg.compaction?.models
+  if (Array.isArray(list)) {
+    const id = input.model.id
+    const full = `${input.model.providerID}/${input.model.id}`
+    if (list.includes(id) || list.includes(full)) return false
+  }
   if (input.model.limit.context === 0) return false
 
   const count =

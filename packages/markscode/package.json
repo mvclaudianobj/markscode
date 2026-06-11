@@ -19,7 +19,7 @@
     "db": "bun drizzle-kit"
   },
   "bin": {
-    "markscode": "./bin/opencode"
+    "markscode": "./bin/markscode"
   },
   "exports": {
     "./*": "./src/*.ts"

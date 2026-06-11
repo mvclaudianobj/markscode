@@ -83,6 +83,7 @@ export function Footer() {
               </text>
             </Show>
             <text fg={theme.textMuted}>/status</text>
+            {/* TODO: quota indicator — exibir aviso de quota Markspanel aqui quando sync.data expor quota */}
           </Match>
         </Switch>
       </box>

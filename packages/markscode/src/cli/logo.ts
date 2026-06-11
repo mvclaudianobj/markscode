@@ -1,11 +1,17 @@
 export const logo = {
-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
+  left: [
+    "█▄ ▄█ ▄▀▀▄ █▀▀▄ █ ▄▀ ▄▀▀▀ ▄▀▀▄ ▄▀▀▀▄ █▀▀▄ █▀▀▀",
+    "█ ▀ █ █▀▀█ █▀▀▄ █▀▄   ▀▀▄ █  ▄ █   █ █  █ █▀▀ ",
+    "▀   ▀ ▀  ▀ ▀  ▀ ▀  ▀ ▀▀▀   ▀▀   ▀▀▀  ▀▀▀  ▀▀▀▀",
+  ],
+  right: ["", "", ""],
 }
+
+export const asciiTextArt = logo.left.join("\n")
 
 export const go = {
-  left: ["    ", "█▀▀▀", "█_^█", "▀▀▀▀"],
-  right: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],
+  left: logo.left,
+  right: logo.right,
 }
 
-export const marks = "_^~,"
+export const marks = "MarksCode"

@@ -31,6 +31,8 @@ import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 
+  const BUILTIN = ["opencode-anthropic-auth@0.0.13", "@tarquinen/opencode-dcp@latest"]
+
 const log = Log.create({ service: "plugin" })
 
 type State = {

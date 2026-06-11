@@ -5,6 +5,9 @@ import SidebarMcp from "../feature-plugins/sidebar/mcp"
 import SidebarLsp from "../feature-plugins/sidebar/lsp"
 import SidebarTodo from "../feature-plugins/sidebar/todo"
 import SidebarFiles from "../feature-plugins/sidebar/files"
+import SidebarMemories from "../feature-plugins/sidebar/memories"
+import SidebarRemote from "../feature-plugins/sidebar/remote"
+import SidebarBrowser from "../feature-plugins/sidebar/browser"
 import SidebarFooter from "../feature-plugins/sidebar/footer"
 import PluginManager from "../feature-plugins/system/plugins"
 import Notifications from "../feature-plugins/system/notifications"
@@ -31,6 +34,9 @@ export function internalTuiPlugins(flags: Pick<RuntimeFlags.Info, "experimentalE
     SidebarLsp,
     SidebarTodo,
     SidebarFiles,
+  SidebarMemories,
+  SidebarRemote,
+  SidebarBrowser,
     SidebarFooter,
     Notifications,
     PluginManager,

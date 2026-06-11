@@ -1,5 +1,29 @@
+import { hasMemoriesAPIKey, resolveMemoryConfig } from "./memory-config"
 export type MemoryMode = "short_term" | "long_term" | "visual"
 export type MemoryType = "episodic" | "semantic" | "procedural"
+
+export interface SaveMemoryInput {
+  user_id: string
+  session_id: string
+  type: MemoryType
+  memory_mode?: MemoryMode
+  title?: string
+  subject?: string
+  content: string
+  importance?: number
+  tags?: string[]
+  triggers?: string[]
+  retrieval_cues?: string[]
+  mnemonic_techniques?: string[]
+  visual_refs?: string[]
+  source_name?: string
+}
+
+export interface HumanContext {
+  short_term: MemoryRecord[]
+  long_term: MemoryRecord[]
+  visual: MemoryRecord[]
+}
 
 export interface MemoryRecord {
   id: string
@@ -12,6 +36,10 @@ export interface MemoryRecord {
   content: string
   importance: number
   tags: string[]
+  triggers?: string[]
+  retrieval_cues?: string[]
+  mnemonic_techniques?: string[]
+  visual_refs?: string[]
   created_at: string
   updated_at: string
 }
@@ -21,6 +49,7 @@ export interface RecallInput {
   session_id?: string
   cue: string
   limit?: number
+  timeout_ms?: number
 }
 
 export interface RecallResult {
@@ -28,39 +57,126 @@ export interface RecallResult {
   scores: number[]
 }
 
-async function request(path: string, init?: RequestInit): Promise<unknown> {
+export interface SessionContextResult {
+  messages?: Array<{ role?: string; content?: string; text?: string; created_at?: string }>
+  items?: Array<{ role?: string; content?: string; text?: string; created_at?: string }>
+  memories?: Array<{ role?: string; content?: string; text?: string; created_at?: string }>
+}
+
+export interface SearchMemoriesResult {
+  memories?: MemoryRecord[]
+  items?: MemoryRecord[]
+}
+
+export interface SessionCompactInput {
+  user_id: string
+  session_id: string
+  limit?: number
+  refresh?: boolean
+  include_content?: boolean
+  content_preview?: number
+}
+
+export interface ContextSafetyResult {
+  safe: boolean
+  reason: string
+  severity: "info" | "warning" | "critical"
+  estimated_tokens: number
+  safe_limit_tokens: number
+  hard_limit_tokens: number
+  recommendation: string
+  handoff_available: boolean
+}
+
+const DEFAULT_MEMORIES_URL = "http://api.marks.ia.br:8689"
+const DEFAULT_MEMORIES_API_KEY = ""
+const DEFAULT_MEMORIES_USER_ID = "marks-local"
+
+function resolveBaseURL() {
+  return resolveMemoryConfig().memories.url
+}
+
+function resolveAPIKey() {
+  return resolveMemoryConfig().memories.api_key
+}
+
+export function memoriesAPIStatus() {
+  const config = resolveMemoryConfig()
+  return {
+    url: config.memories.url,
+    api_key_configured: Boolean(config.memories.api_key),
+    api_key_source: config.memories.api_key_source,
+    user_id: config.user_id || "marks-local",
+  }
+}
+
+function requestTimeoutMs(value?: number) {
+  const configured = Number(process.env.MARKSCODE_MEMORIES_API_TIMEOUT_MS || process.env.MEMORIES_API_TIMEOUT_MS || "")
+  const raw = Number.isFinite(value) ? Number(value) : configured
+  return Math.min(30000, Math.max(1000, Math.floor(raw || 10000)))
+}
+
+async function request(path: string, init?: RequestInit & { timeout_ms?: number }): Promise<any> {
+  const apiKey = resolveAPIKey()
   const headers = new Headers(init?.headers || {})
-  const apiKey = process.env.MEMORIES_API_KEY || ""
   if (!headers.has("X-API-Key") && apiKey.trim()) headers.set("X-API-Key", apiKey)
   if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json")
 
-  const response = await fetch(`${(process.env.MEMORIES_URL || "http://api.marks.ia.br:8689").replace(/\/$/, "")}${path}`, {
-    ...init,
+  const timeoutMs = requestTimeoutMs(init?.timeout_ms)
+  const { timeout_ms: _timeoutMs, ...requestInit } = init || {}
+  void _timeoutMs
+  const res = await fetch(`${resolveBaseURL()}${path}`, {
+    ...requestInit,
     headers,
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(timeoutMs),
   })
-  const text = await response.text().catch(() => "")
-  const body = text.trim() ? JSON.parse(text) : {}
-  if (!response.ok) throw new Error(`Memories API error: ${response.status}`)
+
+  const text = await res.text().catch(() => "")
+  let body: any = {}
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = { raw: text }
+    }
+  }
+
+  if (!res.ok) {
+    const reason = (body && (body.error || body.message)) || `http_${res.status}`
+    throw new Error(`Memories API error: ${reason}`)
+  }
+
   return body
 }
 
-async function requestOpen(path: string, init?: RequestInit): Promise<unknown> {
-  return request(path, init).catch(() => undefined)
+export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
+  return request("/memories/human", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: input.user_id,
+      session_id: input.session_id,
+      type: input.type,
+      memory_mode: input.memory_mode || "long_term",
+      title: input.title,
+      subject: input.subject,
+      content: input.content,
+      importance: input.importance ?? 0.7,
+      tags: input.tags ?? [],
+      triggers: input.triggers ?? [],
+      retrieval_cues: input.retrieval_cues ?? [],
+      mnemonic_techniques: input.mnemonic_techniques ?? [],
+      visual_refs: input.visual_refs ?? [],
+      source_name: input.source_name,
+    }),
+  })
 }
 
-function objectBody(body: unknown) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return {}
-  return body as Record<string, unknown>
-}
-
-function itemList<T>(body: unknown): T[] {
-  if (Array.isArray(body)) return body as T[]
-  const record = objectBody(body)
-  if (Array.isArray(record.items)) return record.items as T[]
-  if (Array.isArray(record.memories)) return record.memories as T[]
-  if (Array.isArray(record.data)) return record.data as T[]
-  return []
+export async function getHumanContext(input: { user_id: string; session_id: string }): Promise<HumanContext> {
+  const params = new URLSearchParams({
+    user_id: input.user_id,
+    session_id: input.session_id,
+  })
+  return request(`/memories/human/context?${params.toString()}`)
 }
 
 export async function recallHumanMemories(input: RecallInput): Promise<RecallResult> {
@@ -72,13 +188,131 @@ export async function recallHumanMemories(input: RecallInput): Promise<RecallRes
       cue: input.cue,
       limit: input.limit ?? 8,
     }),
+    timeout_ms: input.timeout_ms,
   })
-  if (!body || typeof body !== "object") return { memories: [], scores: [] }
-  const result = body as Record<string, unknown>
-  return {
-    memories: Array.isArray(result.memories) ? (result.memories as MemoryRecord[]) : [],
-    scores: Array.isArray(result.scores) ? result.scores.filter((score): score is number => typeof score === "number") : [],
+
+  if (Array.isArray(body?.memories) || Array.isArray(body?.scores)) {
+    return {
+      memories: Array.isArray(body?.memories) ? body.memories : [],
+      scores: Array.isArray(body?.scores) ? body.scores : [],
+    }
   }
+
+  if (Array.isArray(body?.items)) {
+    const mapped: Array<{ item: MemoryRecord; score: number }> = body.items.flatMap((entry: unknown) => {
+      if (!entry || typeof entry !== "object") return []
+      const item = "item" in entry ? entry.item : undefined
+      const score = "score" in entry && typeof entry.score === "number" ? entry.score : 0
+      if (!item || typeof item !== "object") return []
+      return [{ item: item as MemoryRecord, score }]
+    })
+
+    return {
+      memories: mapped.map((x) => x.item),
+      scores: mapped.map((x) => x.score),
+    }
+  }
+
+  return { memories: [], scores: [] }
+}
+
+export async function getSessionContext(input: {
+  user_id: string
+  session_id: string
+  limit?: number
+}): Promise<SessionContextResult> {
+  const params = new URLSearchParams({
+    user_id: input.user_id,
+    limit: String(input.limit ?? 20),
+  })
+  return request(`/sessions/${encodeURIComponent(input.session_id)}/context?${params.toString()}`)
+}
+
+export async function searchSessionMemories(input: {
+  user_id: string
+  session_id: string
+  limit?: number
+}): Promise<SearchMemoriesResult> {
+  return request("/memories/search", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: input.user_id,
+      session_id: input.session_id,
+      limit: input.limit ?? 50,
+    }),
+  })
+}
+
+export async function getSessionCompactContext(input: SessionCompactInput): Promise<any> {
+  const params = new URLSearchParams({
+    user_id: input.user_id,
+    limit: String(input.limit ?? 5),
+  })
+  if (input.refresh) params.set("refresh", "1")
+  if (input.include_content) params.set("include_content", "1")
+  if (typeof input.content_preview === "number" && Number.isFinite(input.content_preview)) {
+    params.set("content_preview", String(Math.max(1, Math.floor(input.content_preview))))
+  }
+  return request("/sessions/" + encodeURIComponent(input.session_id) + "/compact?" + params.toString())
+}
+
+export async function getSessionContextSafety(input: {
+  user_id: string
+  session_id: string
+}): Promise<ContextSafetyResult> {
+  const params = new URLSearchParams({
+    user_id: input.user_id,
+  })
+  return request(`/sessions/${encodeURIComponent(input.session_id)}/context/safety?${params.toString()}`)
+}
+
+export async function createSessionHandoff(input: {
+  user_id: string
+  session_id: string
+  project_key?: string
+  target_tokens?: number
+  limit?: number
+  store_memory?: boolean
+}): Promise<any> {
+  return request(`/sessions/${encodeURIComponent(input.session_id)}/handoff`, {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: input.user_id,
+      project_key: input.project_key,
+      target_tokens: input.target_tokens,
+      limit: input.limit,
+      store_memory: input.store_memory ?? true,
+    }),
+  })
+}
+
+export async function continueSessionFromHandoff(input: {
+  user_id: string
+  source_session_id: string
+  new_session_id?: string
+  target_tokens?: number
+  handoff?: any
+}): Promise<any> {
+  return request("/sessions/continue", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: input.user_id,
+      source_session_id: input.source_session_id,
+      new_session_id: input.new_session_id,
+      target_tokens: input.target_tokens,
+      handoff: input.handoff,
+    }),
+  })
+}
+
+export async function rebuildCompactMemories(input?: { limit?: number; force?: boolean }): Promise<any> {
+  return request("/memories/compact/rebuild", {
+    method: "POST",
+    body: JSON.stringify({
+      limit: input?.limit ?? 2000,
+      force: input?.force ?? true,
+    }),
+  })
 }
 
 export async function importMemories(input: {
@@ -93,118 +327,188 @@ export async function importMemories(input: {
     memory_mode?: MemoryMode
     importance?: number
     tags?: string[]
+    triggers?: string[]
+    retrieval_cues?: string[]
+    mnemonic_techniques?: string[]
+    visual_refs?: string[]
   }>
-}): Promise<unknown> {
+}): Promise<any> {
   return request("/memories/import", {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      source: input.source,
+      source_name: input.source_name,
+      subject: input.subject,
+      default_user_id: input.default_user_id,
+      default_session_id: input.default_session_id,
+      items: input.items,
+    }),
   })
 }
 
-export async function getHumanContext(input?: { user_id?: string; session_id?: string; q?: string; limit?: number }) {
-  const query = new URLSearchParams()
-  if (input?.user_id) query.set("user_id", input.user_id)
-  if (input?.session_id) query.set("session_id", input.session_id)
-  if (input?.q) query.set("q", input.q)
-  if (input?.limit) query.set("limit", String(input.limit))
-  const body = objectBody(await requestOpen(`/memories/human/context${query.size ? `?${query}` : ""}`))
-  return {
-    context: typeof body.context === "string" ? body.context : "",
-    memories: itemList<MemoryRecord>(body),
-  }
-}
-
-export async function saveHumanMemory(input: {
+export interface GlobalContextInput {
   user_id?: string
   session_id?: string
-  content: string
-  type?: MemoryType
-  memory_mode?: MemoryMode
-  importance?: number
+  query?: string
+  limit?: number
+  timeout_ms?: number
+}
+
+export interface GlobalContextResult {
+  memories: Array<{
+    id: string
+    title?: string
+    subject?: string
+    content: string
+    importance: number
+    tags: string[]
+    created_at: string
+  }>
+  sessions: Array<{ session_id: string; last_message?: string; created_at?: string }>
+}
+
+export async function getGlobalContext(input: GlobalContextInput): Promise<GlobalContextResult> {
+  const params = new URLSearchParams({
+    ...(input.user_id && { user_id: input.user_id }),
+    ...(input.session_id && { session_id: input.session_id }),
+    ...(input.query && { query: input.query }),
+    limit: String(input.limit ?? 10),
+  })
+  return request(`/memories/global/context?${params.toString()}`, { timeout_ms: input.timeout_ms })
+}
+
+export interface SearchAdvancedInput {
+  user_id?: string
+  session_id?: string
+  query?: string
+  type?: "episodic" | "semantic" | "procedural"
+  memory_mode?: "short_term" | "long_term" | "visual"
+  source?: string
+  importance_min?: number
+  date_from?: string
+  date_to?: string
   tags?: string[]
-}) {
-  const body = objectBody(
-    await requestOpen("/memories/human", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  )
+  limit?: number
+  offset?: number
+  fuzzy?: boolean
+  cross_session?: boolean
+  timeout_ms?: number
+}
+
+export interface SearchAdvancedResult {
+  memories: Array<{
+    id: string
+    title?: string
+    subject?: string
+    content: string
+    importance: number
+    tags: string[]
+    created_at: string
+  }>
+  total: number
+}
+
+export async function searchAdvancedMemories(input: SearchAdvancedInput): Promise<SearchAdvancedResult> {
+  const params = new URLSearchParams()
+  if (input.query) {
+    params.set("q", input.query)
+    params.set("query", input.query)
+  }
+  if (input.user_id) params.set("user_id", input.user_id)
+  if (input.session_id) params.set("session_id", input.session_id)
+  else if (input.cross_session !== false) params.set("cross_session", "1")
+  if (input.type) params.set("type", input.type)
+  if (input.memory_mode) params.set("memory_mode", input.memory_mode)
+  if (input.source) params.set("source", input.source)
+  if (typeof input.importance_min === "number") params.set("importance_min", String(input.importance_min))
+  if (input.date_from) params.set("date_from", input.date_from)
+  if (input.date_to) params.set("date_to", input.date_to)
+  if (Array.isArray(input.tags) && input.tags.length) params.set("tags", input.tags.join(","))
+  params.set("limit", String(input.limit ?? 20))
+  if (typeof input.offset === "number" && Number.isFinite(input.offset)) {
+    params.set("offset", String(Math.max(0, Math.floor(input.offset))))
+  }
+  params.set("fuzzy", input.fuzzy === false ? "0" : "1")
+
+  const data: any = await request("/memories/search/advanced?" + params.toString(), { timeout_ms: input.timeout_ms })
+  const memories = Array.isArray(data?.memories) ? data.memories : Array.isArray(data?.items) ? data.items : []
   return {
-    ok: body.ok !== false,
-    memory: body.memory as MemoryRecord | undefined,
+    memories,
+    total: typeof data?.total === "number" ? data.total : memories.length,
   }
 }
 
-export async function getGlobalContext(input?: { q?: string; limit?: number }) {
-  const query = new URLSearchParams()
-  if (input?.q) query.set("q", input.q)
-  if (input?.limit) query.set("limit", String(input.limit))
-  const body = objectBody(await requestOpen(`/memories/context/global${query.size ? `?${query}` : ""}`))
-  return {
-    context: typeof body.context === "string" ? body.context : "",
-    memories: itemList<MemoryRecord>(body),
-  }
+export interface RecentMemoryTopic {
+  topic: string
+  source: string
+  title?: string
+  subject?: string
+  content_preview?: string
+  tags?: string[]
+  created_at?: string
+  count?: number
 }
 
-export async function searchAdvancedMemories(input: { q: string; cross_session?: boolean; fuzzy?: boolean; limit?: number }) {
-  const query = new URLSearchParams()
-  query.set("q", input.q)
-  if (input.cross_session) query.set("cross_session", "1")
-  if (input.fuzzy) query.set("fuzzy", "1")
-  if (input.limit) query.set("limit", String(input.limit))
-  return {
-    items: itemList<MemoryRecord>(await requestOpen(`/memories/search/advanced?${query}`)),
-  }
+export interface RecentMemoryTopicsResult {
+  available: boolean
+  source: "cloud"
+  topics: RecentMemoryTopic[]
+  errors: string[]
+  status: string
 }
 
-export async function getSessionCompactContext(input: { session_id: string; limit?: number }) {
-  const query = new URLSearchParams({ session_id: input.session_id })
-  if (input.limit) query.set("limit", String(input.limit))
-  const body = objectBody(await requestOpen(`/memories/session/compact-context?${query}`))
-  return {
-    context: typeof body.context === "string" ? body.context : "",
-    summary: typeof body.summary === "string" ? body.summary : "",
-    tokens: typeof body.tokens === "number" ? body.tokens : 0,
-  }
+function topicTextFromMemory(memory: Record<string, unknown>) {
+  const tags = Array.isArray(memory.tags) ? memory.tags.map(String).filter(Boolean) : []
+  const label = String(memory.subject || memory.title || tags[0] || "").trim()
+  if (label) return label
+  return String(memory.content || "").replace(/\s+/g, " ").trim().split(/[.!?;:\n]/)[0]?.slice(0, 80).trim()
 }
 
-export async function getSessionContextSafety(input: { session_id: string; token_count?: number; max_tokens?: number }) {
-  const query = new URLSearchParams({ session_id: input.session_id })
-  if (input.token_count) query.set("token_count", String(input.token_count))
-  if (input.max_tokens) query.set("max_tokens", String(input.max_tokens))
-  const body = objectBody(await requestOpen(`/memories/session/context-safety?${query}`))
-  return {
-    safe: typeof body.safe === "boolean" ? body.safe : true,
-    should_handoff: typeof body.should_handoff === "boolean" ? body.should_handoff : false,
-    reason: typeof body.reason === "string" ? body.reason : "fail-open",
-    compact_context: typeof body.compact_context === "string" ? body.compact_context : "",
-  }
+export function deriveRecentMemoryTopics(input: { memories?: unknown[]; source?: string; limit?: number }): RecentMemoryTopic[] {
+  const seen = new Map<string, RecentMemoryTopic>()
+  ;(Array.isArray(input.memories) ? input.memories : []).forEach((entry) => {
+    if (!entry || typeof entry !== "object") return
+    const memory = entry as Record<string, unknown>
+    const topic = topicTextFromMemory(memory)
+    if (!topic) return
+    const key = topic.toLowerCase().replace(/\s+/g, " ")
+    const current = seen.get(key)
+    seen.set(key, current ? { ...current, count: (current.count || 1) + 1 } : {
+      topic,
+      source: String(memory.source || memory.source_name || input.source || "cloud"),
+      title: memory.title ? String(memory.title) : undefined,
+      subject: memory.subject ? String(memory.subject) : undefined,
+      content_preview: String(memory.content || memory.text || "").replace(/\s+/g, " ").trim().slice(0, 240) || undefined,
+      tags: Array.isArray(memory.tags) ? memory.tags.map(String).filter(Boolean) : undefined,
+      created_at: memory.created_at ? String(memory.created_at) : undefined,
+      count: 1,
+    })
+  })
+  return Array.from(seen.values()).slice(0, Math.max(1, Math.floor(input.limit || 12)))
 }
 
-export async function createSessionHandoff(input: { session_id: string; summary?: string; reason?: string; metadata?: Record<string, unknown> }) {
-  const body = objectBody(
-    await requestOpen("/memories/session/handoff", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  )
-  return {
-    ok: body.ok !== false,
-    handoff_id: typeof body.handoff_id === "string" ? body.handoff_id : "",
-    summary: typeof body.summary === "string" ? body.summary : input.summary ?? "",
-  }
-}
-
-export async function continueSessionFromHandoff(input: { handoff_id?: string; session_id?: string }) {
-  const body = objectBody(
-    await requestOpen("/memories/session/handoff/continue", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  )
-  return {
-    ok: body.ok !== false,
-    context: typeof body.context === "string" ? body.context : "",
-    session_id: typeof body.session_id === "string" ? body.session_id : input.session_id ?? "",
-  }
+export async function listRecentCloudMemoryTopics(input: { user_id?: string; session_id?: string; limit?: number; query?: string; timeout_ms?: number } = {}): Promise<RecentMemoryTopicsResult> {
+  if (!hasMemoriesAPIKey()) return { available: false, source: "cloud", topics: [], errors: ["Memories API key não configurada"], status: "cloud_unconfigured" }
+  const errors: string[] = []
+  const limit = Math.max(1, Math.floor(input.limit || 12))
+  const timeoutMs = Math.min(30000, Math.max(1000, Math.floor(Number(input.timeout_ms ?? process.env.MARKSCODE_RECENT_TOPICS_TIMEOUT_MS ?? 3500))))
+  const query = input.query || "Markscode BrainSystem memória sessão projeto assunto tópico markscode brain memvid"
+  const advanced = await searchAdvancedMemories({ user_id: input.user_id, session_id: input.session_id, query, fuzzy: true, cross_session: true, limit, timeout_ms: timeoutMs }).catch((err) => {
+    errors.push("advanced: " + (err instanceof Error ? err.message : String(err)))
+    return undefined
+  })
+  const fromAdvanced = deriveRecentMemoryTopics({ memories: advanced?.memories, source: "cloud-advanced", limit })
+  if (fromAdvanced.length) return { available: true, source: "cloud", topics: fromAdvanced, errors, status: "ok" }
+  const recalled = input.user_id ? await recallHumanMemories({ user_id: input.user_id, session_id: input.session_id, cue: query, limit, timeout_ms: timeoutMs }).catch((err) => {
+    errors.push("recall: " + (err instanceof Error ? err.message : String(err)))
+    return undefined
+  }) : undefined
+  const fromRecall = deriveRecentMemoryTopics({ memories: recalled?.memories, source: "cloud-recall-fallback", limit })
+  if (fromRecall.length) return { available: true, source: "cloud", topics: fromRecall, errors, status: errors.length ? "fallback_recall" : "ok" }
+  const global = await getGlobalContext({ user_id: input.user_id, session_id: input.session_id, query: input.query, limit, timeout_ms: timeoutMs }).catch((err) => {
+    errors.push("global-context: " + (err instanceof Error ? err.message : String(err)))
+    return undefined
+  })
+  const fromGlobal = deriveRecentMemoryTopics({ memories: global?.memories, source: "cloud-global-context", limit })
+  return { available: true, source: "cloud", topics: fromGlobal, errors, status: fromGlobal.length ? "ok" : "empty_or_endpoint_unavailable" }
 }

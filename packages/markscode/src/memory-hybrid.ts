@@ -14,6 +14,10 @@ export interface HybridRecallInput {
   provider?: MemoryProvider
 }
 
+export interface HybridStatusInput {
+  capsule?: string
+}
+
 export interface HybridRecallItem {
   id?: string
   source: "cloud" | "local"
@@ -46,6 +50,31 @@ export interface HybridSourcesResult {
   sources: HybridSource[]
   local_available: boolean
   cloud_available: boolean
+  errors: string[]
+}
+
+export interface HybridRecentTopic {
+  topic: string
+  source: "cloud" | "local"
+  content_preview: string
+  title?: string
+  subject?: string
+  score?: number
+}
+
+export interface HybridRecentTopicsInput {
+  user_id?: string
+  session_id?: string
+  query?: string
+  limit?: number
+  max_chars?: number
+  provider?: MemoryProvider
+}
+
+export interface HybridRecentTopicsResult {
+  topics: HybridRecentTopic[]
+  provider: MemoryProvider
+  sources: HybridSource[]
   errors: string[]
 }
 
@@ -237,7 +266,7 @@ function sqliteJSON(db: string, sql: string) {
   }
 }
 
-function detectLocalMemvid(): LocalMemoryStatus {
+function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
   const configuredCLI = process.env.MARKSCODE_MEMVID_CLI?.trim()
   if (configuredCLI) {
     return { available: true, cli: configuredCLI, reason: "MARKSCODE_MEMVID_CLI configured" }
@@ -961,8 +990,8 @@ const RUST_MEMVID_HELPER = [
   "}",
 ].join("\n")
 
-export async function hybridMemoryStatus(): Promise<unknown> {
-  const local = detectLocalMemvid()
+export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unknown> {
+  const local = detectLocalMemvid(input)
   const embeddedCLI = join(dirname(process.execPath), "vendor/memvid", process.platform === "win32" ? "memvid.exe" : "memvid")
   return {
     provider: providerFrom(),
@@ -970,7 +999,7 @@ export async function hybridMemoryStatus(): Promise<unknown> {
     local_available: local.available,
     local,
     embedded_cli: existsSync(embeddedCLI) && statSync(embeddedCLI).isFile() ? embeddedCLI : undefined,
-    capsule: defaultMemvidCapsulePath(),
+    capsule: input?.capsule || defaultMemvidCapsulePath(),
     cloud_available: Boolean(process.env.MEMORIES_API_KEY || process.env.MEMORIES_URL),
     cloud_url: process.env.MEMORIES_URL || "http://api.marks.ia.br:8689",
     defaults: {
@@ -981,8 +1010,8 @@ export async function hybridMemoryStatus(): Promise<unknown> {
   }
 }
 
-export async function doctorHybridMemory(): Promise<unknown> {
-  const status = await hybridMemoryStatus() as Record<string, unknown>
+export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unknown> {
+  const status = await hybridMemoryStatus(input) as Record<string, unknown>
   return {
     ...status,
     ok: Boolean(status.local_available || status.cloud_available),
@@ -1047,6 +1076,26 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
         content: memory.content.length > maxChars ? memory.content.slice(0, maxChars - 1).trimEnd() + "\u2026" : memory.content,
       })),
   }
+}
+
+export async function listHybridRecentTopics(input: HybridRecentTopicsInput = {}): Promise<HybridRecentTopicsResult> {
+  const provider = providerFrom(input.provider)
+  const errors: string[] = []
+  const sourcesResult = await listHybridSources().catch((err: unknown) => {
+    errors.push("sources: " + errorMessage(err))
+    return { sources: [] as HybridSource[], errors: [] as string[] }
+  })
+  errors.push(...(sourcesResult.errors || []))
+  const result = await recallHybridMemories({ user_id: input.user_id, session_id: input.session_id, cue: [input.query, "assuntos recentes", "recent topics", "brainsystem", input.session_id].filter(Boolean).join(" "), limit: input.limit || 12, max_chars: input.max_chars || 320, provider }).catch((err: unknown) => {
+    errors.push("recall: " + errorMessage(err))
+    return { memories: [] as HybridRecallItem[], errors: [] as string[] }
+  })
+  errors.push(...(result.errors || []))
+  return { provider, sources: sourcesResult.sources || [], errors, topics: (result.memories || []).map((memory) => {
+    const content = memory.content.replace(/\s+/g, " ").trim()
+    const topic = (memory.title || memory.subject || content.split(/[.!?]/)[0] || "Assunto recente").trim()
+    return { topic: topic.length > 96 ? topic.slice(0, 95).trimEnd() + "…" : topic, source: memory.source, content_preview: content.length > 220 ? content.slice(0, 219).trimEnd() + "…" : content, title: memory.title, subject: memory.subject, score: memory.score }
+  }) }
 }
 
 export function formatMemoryContext(result: HybridRecallResult, maxChars?: number): string | undefined {

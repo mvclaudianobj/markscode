@@ -369,6 +369,7 @@ export type TuiTheme = {
 export type TuiKV = {
   get: <Value = unknown>(key: string, fallback?: Value) => Value
   set: (key: string, value: unknown) => void
+  signal: <Value = unknown>(key: string, fallback: Value) => readonly [() => Value, (next: any) => void]
   readonly ready: boolean
 }
 

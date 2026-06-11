@@ -1,5 +1,5 @@
 import { Image } from "@/image/image"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -7,6 +7,7 @@ import { Config } from "@/config/config"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
+import { Account } from "@/account/account"
 import * as Session from "./session"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
@@ -587,6 +588,30 @@ export const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
+            // Fire-and-forget usage reporting para Markspanel
+            yield* Effect.gen(function* () {
+              const maybeAccountSvc = yield* Effect.serviceOption(Account.Service)
+              if (Option.isNone(maybeAccountSvc)) return
+              const acct = maybeAccountSvc.value
+              const active = yield* acct.active().pipe(Effect.catch(() => Effect.succeed(Option.none())))
+              if (Option.isSome(active) && active.value.active_org_id) {
+                yield* acct.reportUsage({
+                  url: active.value.url,
+                  accountID: active.value.id,
+                  provider: ctx.model.providerID,
+                  model: ctx.model.id,
+                  inputTokens: usage.tokens.input,
+                  outputTokens: usage.tokens.output,
+                  totalTokens: usage.tokens.total ?? (usage.tokens.input + usage.tokens.output),
+                  reasoningTokens: usage.tokens.reasoning,
+                  cacheReadTokens: usage.tokens.cache.read,
+                  cacheWriteTokens: usage.tokens.cache.write,
+                  costUsd: usage.cost,
+                  sessionId: ctx.sessionID,
+                  messageId: ctx.assistantMessage.id,
+                })
+              }
+            }).pipe(Effect.ignore, Effect.forkIn(scope))
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {

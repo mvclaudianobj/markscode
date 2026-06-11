@@ -9,7 +9,11 @@ import { ProviderTransform } from "@/provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
+import PROMPT_DEBUG from "./prompt/debug.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_ASK from "./prompt/ask.txt"
+import PROMPT_DOCS from "./prompt/docs.txt"
+import PROMPT_ORCHESTRATOR from "./prompt/orchestrator.txt"
 import PROMPT_SCOUT from "./prompt/scout.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
@@ -165,7 +169,115 @@ export const layer = Layer.effect(
             mode: "primary",
             native: true,
           },
-          general: {
+          debug: {
+        name: "debug",
+        description: "Diagnose and fix software issues with systematic debugging methodology.",
+        prompt: PROMPT_DEBUG,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            question: "allow",
+            plan_enter: "allow",
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      docs: {
+        name: "docs",
+        description: "Generate and improve technical documentation based on real code behavior.",
+        prompt: PROMPT_DOCS,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: {
+              "*": "allow",
+              "*.env": "ask",
+              "*.env.*": "ask",
+              "*.env.example": "allow",
+            },
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            question: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      orchestrator: {
+        name: "orchestrator",
+        description: "Coordinate complex tasks by delegating to specialized agents in parallel.",
+        prompt: PROMPT_ORCHESTRATOR,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            question: "allow",
+            task: "allow",
+            todoread: "allow",
+            todowrite: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      ask: {
+        name: "ask",
+        description: "Get answers and explanations without making changes to the codebase.",
+        prompt: PROMPT_ASK,
+        options: {},
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: {
+              "*": "allow",
+              "*.env": "ask",
+              "*.env.*": "ask",
+              "*.env.example": "allow",
+            },
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            question: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      general: {
             name: "general",
             description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
             permission: Permission.merge(

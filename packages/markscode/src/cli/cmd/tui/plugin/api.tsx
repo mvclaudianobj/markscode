@@ -327,6 +327,9 @@ export function createTuiApi(input: Input): TuiPluginApi {
       set(key, value) {
         input.kv.set(key, value)
       },
+      signal(key, fallback) {
+        return input.kv.signal(key, fallback)
+      },
       get ready() {
         return input.kv.ready
       },
