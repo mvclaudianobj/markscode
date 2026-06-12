@@ -92,6 +92,19 @@ export const ensureParentGate = Effect.fn("markspanel.startup.ensure")(function*
   yield* Effect.gen(function* () {
     const quotaResult = yield* service.quota(active.value.id).pipe(Effect.catch(() => Effect.succeed(null)))
     if (!quotaResult) return
+    const contractedPlan = quotaResult.contracted_plan?.name ?? quotaResult.contracted_plan?.slug ?? "não informado"
+    const effectivePlan = quotaResult.effective_plan?.name ?? quotaResult.effective_plan?.slug ?? quotaResult.tier_name ?? quotaResult.tier
+    yield* Prompt.log.info(`Plano Markspanel contratado: ${contractedPlan}`)
+    yield* Prompt.log.info(`Plano Markspanel efetivo: ${effectivePlan}`)
+    if (quotaResult.billing_state) {
+      yield* Prompt.log.info(`Status de cobrança Markspanel: ${quotaResult.billing_state}`)
+    }
+    if (quotaResult.fallback_applied) {
+      yield* Prompt.log.warn(
+        `⚠️  ${quotaResult.message ?? "Status de cobrança pendente/inativo; plano free aplicado até regularização."}`,
+      )
+      yield* Prompt.log.warn("   Plano free aplicado sem deslogar; regularize a cobrança para restaurar o plano contratado.")
+    }
     if (quotaResult.monthly?.exhausted && quotaResult.hard_limit) {
       yield* Prompt.log.warn(
         `⚠️  Limite mensal de tokens Markspanel atingido. O uso pode estar bloqueado pelo servidor.`,

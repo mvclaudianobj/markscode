@@ -66,6 +66,47 @@ export type ActiveOrg = {
   org: Org
 }
 
+export type MarkspanelQuotaPlan = {
+  id?: string | number | null
+  slug?: string | null
+  name?: string | null
+}
+
+export type MarkspanelQuotaSubscription = {
+  id?: string | number | null
+  status?: string | null
+  asaas_status?: string | null
+  next_due_date?: string | null
+  ends_at?: string | null
+}
+
+export type MarkspanelQuotaCounter = {
+  limit: number
+  used: number
+  remaining: number
+  pct: number
+  warning: boolean
+  exhausted: boolean
+}
+
+export type MarkspanelQuota = {
+  tier: string
+  tier_name?: string | null
+  tier_id?: string | number | null
+  tier_source?: string | null
+  hard_limit: boolean
+  billing_state?: string | null
+  fallback_applied?: boolean
+  contracted_plan?: MarkspanelQuotaPlan | null
+  effective_plan?: MarkspanelQuotaPlan | null
+  subscription?: MarkspanelQuotaSubscription | null
+  message?: string | null
+  monthly?: MarkspanelQuotaCounter
+  daily?: MarkspanelQuotaCounter
+  monthly_requests?: MarkspanelQuotaCounter
+  daily_requests?: MarkspanelQuotaCounter
+}
+
 class RemoteConfig extends Schema.Class<RemoteConfig>("RemoteConfig")({
   config: Schema.Record(Schema.String, Schema.Json),
 }) {}
@@ -212,14 +253,7 @@ export interface Interface {
     messageId?: string
   }) => Effect.Effect<void, never>
 
-  readonly quota: (
-    accountID: AccountID,
-  ) => Effect.Effect<{
-    tier: string
-    hard_limit: boolean
-    monthly: { limit: number; used: number; remaining: number; pct: number; warning: boolean; exhausted: boolean }
-    daily: { limit: number; used: number; remaining: number; pct: number; warning: boolean; exhausted: boolean }
-  } | null, never>
+  readonly quota: (accountID: AccountID) => Effect.Effect<MarkspanelQuota | null, never>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Account") {}
