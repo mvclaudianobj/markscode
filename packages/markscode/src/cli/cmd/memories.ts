@@ -183,6 +183,7 @@ export const MemoriesCommand = cmd({
             subject: args.subject ? String(args.subject) : undefined,
             limit: Number(args.limit ?? 100),
             dry_run: true,
+            capsule: args.capsule ? String(args.capsule) : undefined,
           })
           UI.println(JSON.stringify(result, null, 2) + EOL)
           return
@@ -199,6 +200,7 @@ export const MemoriesCommand = cmd({
             limit: Number(args.limit ?? 100),
             write_cloud: Boolean(args.writeCloud),
             write_memvid: Boolean(args.writeMemvid),
+            capsule: args.capsule ? String(args.capsule) : undefined,
           })
           UI.println(JSON.stringify(result, null, 2) + EOL)
           return
@@ -229,6 +231,7 @@ export const MemoriesCommand = cmd({
             cue,
             limit: Number(args.limit ?? 8),
             provider: args.provider ? (String(args.provider) as MemoryProvider) : undefined,
+            capsule: args.capsule ? String(args.capsule) : undefined,
           })
           void formatMemoryContext
           UI.println(JSON.stringify(result, null, 2) + EOL)

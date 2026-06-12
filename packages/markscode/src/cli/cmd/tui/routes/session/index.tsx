@@ -105,7 +105,8 @@ import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin/runtime"
 import { SessionRetry } from "@/session/retry"
-import { hybridMemoryStatus, listHybridRecentTopics } from "@/memory-hybrid"
+import { hybridMemoryStatus, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
+import { listRemoteSSHProfiles, replaceRemoteSSHProfiles } from "@/remote/profile-repo"
 import { DialogRecentTopics } from "../../component/dialog-recent-topics"
 import { DialogAllSessionList } from "../../component/dialog-all-session-list"
 import { getRevertDiffFiles } from "../../util/revert-diff"
@@ -529,6 +530,7 @@ export function Session() {
     key_name?: string
     host_alias?: string
     credential_ref?: string
+    auth_method?: string
   }
 
   const MARKSCODE_MASTER_KEY_NAME = "marks-key-mestra"
@@ -552,16 +554,72 @@ export function Session() {
     key_name?: string
     host_alias?: string
     credential_ref?: string
+    auth_method?: string | null
+    metadata?: string | null
     created_at: string
     updated_at: string
   }
 
   type RemoteSSHProfileAction = "list" | "use" | "save" | "master" | "registry" | "edit" | "delete" | "import"
 
-  const readRemoteSSHProfiles = () => {
-    const raw = kv.get("remote_ssh_profiles")
-    if (!Array.isArray(raw)) return [] as RemoteSSHProfile[]
-    return raw as RemoteSSHProfile[]
+  const normalizeRemoteType = (value: unknown): "ssh" | "winrm" => value === "winrm" ? "winrm" : "ssh"
+  const normalizeRemoteTransport = (value: unknown): "http" | "https" | undefined => value === "http" ? "http" : value === "https" ? "https" : undefined
+  const normalizeRemoteProfile = (profile: Partial<RemoteSSHProfile> & { name: string; host: string; user: string }): RemoteSSHProfile => {
+    const now = new Date().toISOString()
+    const type = normalizeRemoteType(profile.type)
+    return {
+      id: profile.id || profile.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()),
+      name: profile.name,
+      type,
+      host: profile.host,
+      user: profile.user,
+      port: normalizeRemotePort(String(profile.port || (type === "winrm" ? 5986 : 22))),
+      transport: normalizeRemoteTransport(profile.transport) || (type === "winrm" ? "https" : undefined),
+      identity_file: type === "winrm" ? profile.identity_file : profile.identity_file || undefined,
+      key_name: profile.key_name || undefined,
+      host_alias: profile.host_alias || undefined,
+      credential_ref: profile.credential_ref || undefined,
+      auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : undefined),
+      metadata: profile.metadata || undefined,
+      created_at: profile.created_at || now,
+      updated_at: now,
+    }
+  }
+
+  const readRemoteSSHProfiles = (): RemoteSSHProfile[] => {
+    const kvProfiles = () => {
+      const raw = kv.get("remote_ssh_profiles")
+      if (!Array.isArray(raw)) return [] as RemoteSSHProfile[]
+      return raw as RemoteSSHProfile[]
+    }
+    try {
+      const dbProfiles: RemoteSSHProfile[] = listRemoteSSHProfiles().map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        type: profile.type === "winrm" ? "winrm" : "ssh",
+        host: profile.host,
+        user: profile.user,
+        port: profile.port,
+        transport: profile.transport === "http" ? "http" : profile.transport === "https" ? "https" : undefined,
+        identity_file: profile.identity_file || undefined,
+        key_name: profile.key_name || undefined,
+        host_alias: profile.host_alias || undefined,
+        credential_ref: profile.credential_ref || undefined,
+        auth_method: profile.auth_method || undefined,
+        metadata: profile.metadata || undefined,
+        created_at: new Date(profile.time_created).toISOString(),
+        updated_at: new Date(profile.time_updated).toISOString(),
+      }))
+      if (dbProfiles.length) {
+        kv.set("remote_ssh_profiles", dbProfiles)
+        return dbProfiles
+      }
+      const legacy = kvProfiles()
+      if (legacy.length) replaceRemoteSSHProfiles(legacy.map((profile) => ({ id: profile.id, account_id: null, org_id: null, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport || null, identity_file: profile.identity_file || null, key_name: profile.key_name || null, host_alias: profile.host_alias || null, credential_ref: profile.credential_ref || null, auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null), metadata: profile.metadata || null })))
+      return legacy
+    } catch {
+      return kvProfiles()
+    }
   }
 
   const remoteSSHProfileAliases = (profile: RemoteSSHProfile) => [profile.name, profile.host_alias, profile.host]
@@ -572,12 +630,29 @@ export function Session() {
     const aliases = profiles.flatMap(remoteSSHProfileAliases)
     kv.set("remote_ssh_profile_names", names)
     kv.set("remote_ssh_profile_aliases", aliases)
-    kv.set("remote_ssh_profiles_registry", profiles.map((profile) => ({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, credential_ref: profile.credential_ref })))
+    kv.set("remote_ssh_profiles_registry", profiles.map((profile) => ({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, credential_ref: profile.credential_ref, auth_method: profile.auth_method })))
     return { names, aliases }
   }
 
   const writeRemoteSSHProfiles = (profiles: RemoteSSHProfile[]) => {
     const sorted = profiles.toSorted((a, b) => a.name.localeCompare(b.name))
+    replaceRemoteSSHProfiles(sorted.map((profile) => ({
+      id: profile.id,
+      account_id: null,
+      org_id: null,
+      name: profile.name,
+      type: profile.type || "ssh",
+      host: profile.host,
+      user: profile.user,
+      port: profile.port,
+      transport: profile.transport || null,
+      identity_file: profile.identity_file || null,
+      key_name: profile.key_name || null,
+      host_alias: profile.host_alias || null,
+      credential_ref: profile.credential_ref || null,
+      auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null),
+      metadata: profile.metadata || null,
+    })))
     kv.set("remote_ssh_profiles", sorted)
     updateRemoteSSHProfilesRegistry(sorted)
   }
@@ -632,7 +707,7 @@ export function Session() {
     const data = JSON.parse(raw) as Partial<RemoteSSHProfile>
     if (!data.name || !data.host || !data.user) throw new Error("Acesso remoto requer name, host e user")
     const now = new Date().toISOString()
-    writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), { id: data.id || data.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || (data.type === "winrm" ? 5986 : 22))), transport: data.transport || (data.type === "winrm" ? "https" : undefined), identity_file: data.type === "winrm" ? data.identity_file : data.identity_file || MARKSCODE_MASTER_IDENTITY_FILE, key_name: data.type === "winrm" ? data.key_name : data.key_name || MARKSCODE_MASTER_KEY_NAME, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || now, updated_at: now }])
+    writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), normalizeRemoteProfile({ ...data, name: data.name, host: data.host, user: data.user, identity_file: data.type === "winrm" ? data.identity_file : data.identity_file || MARKSCODE_MASTER_IDENTITY_FILE, key_name: data.type === "winrm" ? data.key_name : data.key_name || MARKSCODE_MASTER_KEY_NAME, created_at: data.created_at || now })])
     toast.show({ message: "Perfil remoto com chave mestra salvo sem senha", variant: "success" })
     dialog.clear()
   }
@@ -681,7 +756,7 @@ export function Session() {
       const name = ((await DialogPrompt.show(dialog, "Salvar perfil atual", { placeholder: "nome do perfil", value: String(cfg.host_alias || cfg.host || "") })) || "").trim()
       if (!name) { dialog.clear(); return }
       const now = new Date().toISOString()
-      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== name), { id: name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name, type: cfg.type || "ssh", host: cfg.host, user: cfg.user, port: normalizeRemotePort(String(cfg.port || 22)), transport: cfg.transport, identity_file: cfg.identity_file, key_name: cfg.key_name, host_alias: cfg.host_alias, credential_ref: cfg.credential_ref, created_at: now, updated_at: now }])
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== name), normalizeRemoteProfile({ id: name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name, type: cfg.type, host: cfg.host, user: cfg.user, port: cfg.port, transport: cfg.transport, identity_file: cfg.identity_file, key_name: cfg.key_name, host_alias: cfg.host_alias, credential_ref: cfg.credential_ref, auth_method: cfg.auth_method, created_at: now })])
       toast.show({ message: "Perfil remoto salvo sem senha em texto puro", variant: "success" })
       dialog.clear()
       return
@@ -693,7 +768,7 @@ export function Session() {
       if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
       if (!data.name || !data.host || !data.user) throw new Error("Perfil JSON requer name, host e user")
       const now = new Date().toISOString()
-      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), { id: data.id || data.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || 22)), transport: data.transport, identity_file: data.identity_file, key_name: data.key_name, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || now, updated_at: now }])
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), normalizeRemoteProfile({ ...data, name: data.name, host: data.host, user: data.user, created_at: data.created_at || now })])
       toast.show({ message: "Perfil remoto importado sem senha em texto puro", variant: "success" })
       dialog.clear()
       return
@@ -708,12 +783,12 @@ export function Session() {
       if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
       if (!data.name || !data.host || !data.user) throw new Error("Perfil editado requer name, host e user")
       const now = new Date().toISOString()
-      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((item) => item.id !== profile.id && item.name !== data.name), { id: data.id || profile.id, name: data.name, type: data.type || "ssh", host: data.host, user: data.user, port: normalizeRemotePort(String(data.port || profile.port || 22)), transport: data.transport, identity_file: data.identity_file, key_name: data.key_name, host_alias: data.host_alias, credential_ref: data.credential_ref, created_at: data.created_at || profile.created_at || now, updated_at: now }])
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((item) => item.id !== profile.id && item.name !== data.name), normalizeRemoteProfile({ ...data, id: data.id || profile.id, name: data.name, host: data.host, user: data.user, created_at: data.created_at || profile.created_at || now })])
       toast.show({ message: "Perfil remoto editado e salvo sem senha", variant: "success" })
       dialog.clear()
       return
     }
-    const cfg: RemoteSSHConfig = { type: profile.type || "ssh", host: profile.host, user: profile.user, port: normalizeRemotePort(String(profile.port)), transport: profile.transport || "https", identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref }
+    const cfg: RemoteSSHConfig = { type: normalizeRemoteType(profile.type), host: profile.host, user: profile.user, port: normalizeRemotePort(String(profile.port)), transport: normalizeRemoteTransport(profile.transport) || "https", identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref, auth_method: profile.auth_method || undefined }
     kv.set("remote_ssh_config", cfg)
     kv.set("remote_ssh_active_profile", profile.id)
     toast.show({ message: "Remote profile active in this chat", variant: "success" })
@@ -2304,6 +2379,45 @@ export function Session() {
             }}
           />
         ))
+      },
+    },
+    {
+      title: "MarksCode: Buscar na Memória Local (Memvid)",
+      name: "markscode.memories.search-local",
+      category: "MarksCode",
+      slashName: "memory-search-local",
+      run: async () => {
+        const searchQuery = await DialogPrompt.show(dialog, "Buscar na Memória Local (Memvid)", { placeholder: "Digite o contexto/prompt de busca local..." })
+        if (!searchQuery) { dialog.clear(); return }
+        try {
+          const result = await recallHybridMemories({ user_id: memoriesUserID, session_id: route.sessionID || undefined, cue: searchQuery, provider: "local", limit: 10 })
+          const rows = result.memories.map((memory) => "- " + (memory.title || memory.subject || "local") + ": " + memory.content.replace(/\s+/g, " ").trim().slice(0, 180))
+          injectContext("[Memórias locais - Memvid]", ["- query: " + searchQuery, "- local_available: " + String(result.local_available), "", ...(rows.length ? rows : result.errors.map((error) => "- erro: " + error))])
+          toast.show({ message: rows.length ? String(rows.length) + " memórias locais carregadas" : "Nenhuma memória local encontrada", variant: rows.length ? "success" : "warning" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memória local", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Buscar na Memória Global",
+      name: "markscode.memories.search-global",
+      category: "MarksCode",
+      slashName: "memory-search-global",
+      run: async () => {
+        const searchQuery = await DialogPrompt.show(dialog, "Buscar na Memória Global", { placeholder: "Digite o contexto/prompt de busca global..." })
+        if (!searchQuery) { dialog.clear(); return }
+        try {
+          const global = await getGlobalContext({ user_id: memoriesUserID, session_id: route.sessionID || undefined, query: searchQuery, limit: 10 })
+          const memories = Array.isArray(global?.memories) ? global.memories : []
+          const rows = memories.map((memory) => "- " + (memory.title || memory.subject || "global") + ": " + String(memory.content || "").replace(/\s+/g, " ").trim().slice(0, 180))
+          injectContext("[Memórias globais]", ["- query: " + searchQuery, "", ...(rows.length ? rows : ["Nenhuma memória global encontrada"])])
+          toast.show({ message: rows.length ? String(rows.length) + " memórias globais carregadas" : "Nenhuma memória global encontrada", variant: rows.length ? "success" : "warning" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memória global", variant: "error" })
+        }
+        dialog.clear()
       },
     },
     {

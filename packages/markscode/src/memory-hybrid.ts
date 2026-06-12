@@ -12,6 +12,7 @@ export interface HybridRecallInput {
   limit?: number
   max_chars?: number
   provider?: MemoryProvider
+  capsule?: string
 }
 
 export interface HybridStatusInput {
@@ -105,6 +106,7 @@ export interface HybridIngestInput {
   write_cloud?: boolean
   write_memvid?: boolean
   dry_run?: boolean
+  capsule?: string
 }
 
 export interface HybridIngestPreviewResult {
@@ -127,6 +129,9 @@ interface LocalMemoryStatus {
   available: boolean
   cli?: string
   dir?: string
+  official_cli?: boolean
+  capsule?: string
+  count?: number
   reason?: string
 }
 
@@ -266,28 +271,75 @@ function sqliteJSON(db: string, sql: string) {
   }
 }
 
-function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
-  const configuredCLI = process.env.MARKSCODE_MEMVID_CLI?.trim()
-  if (configuredCLI) {
-    return { available: true, cli: configuredCLI, reason: "MARKSCODE_MEMVID_CLI configured" }
+function officialMemvidCLIStatus(cli: string) {
+  const result = runCommandDetailedWithTimeout([cli, "contract", "--json"], 3000)
+  if (!result.ok || !result.stdout) return { ok: false, reason: result.stderr || result.stdout || "contract --json failed" }
+  try {
+    const body = JSON.parse(result.stdout) as Record<string, unknown>
+    const tool = String(body.tool || "")
+    const version = Number(body.contract_version)
+    if (tool !== "markscode-memvid") return { ok: false, reason: "unexpected memvid tool: " + tool }
+    if (version !== 1) return { ok: false, reason: "unsupported markscode-memvid contract_version: " + String(body.contract_version) }
+    return { ok: true, reason: "official markscode-memvid contract v1" }
+  } catch (err) {
+    return { ok: false, reason: "contract parse failed: " + errorMessage(err) }
   }
+}
 
-  const embeddedCLI = join(dirname(process.execPath), "vendor/memvid", process.platform === "win32" ? "memvid.exe" : "memvid")
-  if (existsSync(embeddedCLI) && statSync(embeddedCLI).isFile()) {
-    return { available: true, cli: embeddedCLI, reason: "embedded Memvid sidecar found next to markscode binary" }
+function embeddedMemvidCandidates() {
+  const names = process.platform === "win32" ? ["markscode-memvid.exe", "markscode-memvid"] : ["markscode-memvid"]
+  return uniquePaths([
+    ...names.map((name) => join(dirname(process.execPath), "vendor/memvid", name)),
+    ...names.map((name) => join(process.cwd(), "vendor/memvid", name)),
+    ...names.map((name) => join(REPO_ROOT, "markscode/packages/markscode/vendor/memvid", name)),
+  ])
+}
+
+function capsuleItemCount(cli: string | undefined, capsule: string) {
+  if (!cli || !existsSync(capsule)) return undefined
+  const result = runCommandDetailedWithTimeout([cli, "status", "--capsule", capsule, "--json"], 3000)
+  if (!result.ok || !result.stdout) return undefined
+  try {
+    const body = JSON.parse(result.stdout) as Record<string, unknown>
+    const count = Number(body.count ?? body.item_count ?? body.items ?? body.total)
+    return Number.isFinite(count) ? count : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
+  const capsule = input?.capsule || defaultMemvidCapsulePath()
+  const officialCandidates = uniquePaths([
+    process.env.MARKSCODE_MEMVID_CLI?.trim() || "",
+    ...embeddedMemvidCandidates(),
+    commandExists("markscode-memvid") || "",
+  ])
+  const officialResults = officialCandidates.map((cli) => ({ cli, contract: officialMemvidCLIStatus(cli) }))
+  const official = officialResults.find((item) => item.contract.ok)
+  if (official) {
+    const capsuleExists = existsSync(capsule)
+    return {
+      available: capsuleExists,
+      cli: official.cli,
+      official_cli: true,
+      capsule,
+      count: capsuleItemCount(official.cli, capsule),
+      reason: capsuleExists ? official.contract.reason : "official markscode-memvid available; capsule not found: " + capsule,
+    }
   }
 
   const foundCLI = commandExists("memvid-cli") || commandExists("memvid")
   if (foundCLI) {
-    return { available: true, cli: foundCLI, reason: "memvid CLI found in PATH" }
+    return { available: existsSync(capsule), cli: foundCLI, capsule, reason: "non-official Memvid CLI found in PATH; markscode-memvid sidecar contract unavailable" }
   }
 
   const dir = process.env.MEMVID_DIR?.trim() || join(REPO_ROOT, "ecosystem/systems/memvid")
   if (dir && existsSync(join(dir, "Cargo.toml"))) {
-    return { available: true, dir, reason: "MEMVID_DIR contains Cargo.toml; CLI not installed" }
+    return { available: existsSync(capsule), dir, capsule, reason: "MEMVID_DIR contains Cargo.toml; official markscode-memvid CLI not installed" }
   }
 
-  return { available: false, reason: "No MARKSCODE_MEMVID_CLI, embedded vendor/memvid sidecar, memvid CLI in PATH, or MEMVID_DIR/Cargo.toml detected" }
+  return { available: false, capsule, reason: "No official markscode-memvid sidecar/CLI contract v1 found" }
 }
 
 function normalizeCloudResult(result: unknown): HybridRecallItem[] {
@@ -341,7 +393,7 @@ async function recallLocalMemvid(input: HybridRecallInput, status: LocalMemorySt
   if (!status.available) return []
   if (!status.cli) return []
 
-  const capsule = defaultMemvidCapsulePath()
+  const capsule = input.capsule || defaultMemvidCapsulePath()
   if (!existsSync(capsule)) return []
 
   const limit = saneLimit(input.limit)
@@ -365,6 +417,7 @@ function normalizeLocalMemvidOutput(output: string): HybridRecallItem[] {
     if (parsed && typeof parsed === "object") {
       const body = parsed as Record<string, unknown>
       if (Array.isArray(body.items)) return body.items.flatMap((item) => normalizeMemoryRecord(item, numberOrUndefined((item as Record<string, unknown>)?.score), "local"))
+      if (Array.isArray(body.hits)) return body.hits.flatMap((item) => normalizeMemoryRecord(item, numberOrUndefined((item as Record<string, unknown>)?.score), "local"))
       if (Array.isArray(body.memories)) return body.memories.flatMap((item) => normalizeMemoryRecord(item, numberOrUndefined((item as Record<string, unknown>)?.score), "local"))
       if (Array.isArray(body.results)) return body.results.flatMap((item) => normalizeMemoryRecord(item, numberOrUndefined((item as Record<string, unknown>)?.score), "local"))
       return normalizeMemoryRecord(body, numberOrUndefined(body.score), "local")
@@ -810,13 +863,13 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
       })
     : undefined
 
-  const memvid = input.write_memvid ? writeMemvidCapsule(preview.items, warnings, errors) : undefined
+  const memvid = input.write_memvid ? writeMemvidCapsule(preview.items, warnings, errors, input.capsule) : undefined
   return { source: preview.source, count: preview.count, imported_cloud: importedCloud, memvid, errors, warnings }
 }
 
-function writeMemvidCapsule(items: HybridIngestItem[], warnings: string[], errors: string[]): MemvidWriteResult {
-  const local = detectLocalMemvid()
-  const capsulePath = defaultMemvidCapsulePath()
+function writeMemvidCapsule(items: HybridIngestItem[], warnings: string[], errors: string[], capsule?: string): MemvidWriteResult {
+  const capsulePath = capsule || defaultMemvidCapsulePath()
+  const local = detectLocalMemvid({ capsule: capsulePath })
   mkdirSync(dirname(capsulePath), { recursive: true })
 
   if (!items.length) {
@@ -872,6 +925,7 @@ function tryWriteMemvidWithCLI(cli: string, capsulePath: string, items: HybridIn
     const inputPath = join(tmp, "items.json")
     writeMemvidInputJSON(inputPath, items)
     const candidates = [
+      [cli, "ingest", "--input", inputPath, "--capsule", capsulePath, "--json"],
       [cli, "ingest", "--input", inputPath, "--output", capsulePath],
       [cli, "build", "--input", inputPath, "--output", capsulePath],
       [cli, "create", capsulePath, "--input", inputPath],
@@ -992,13 +1046,13 @@ const RUST_MEMVID_HELPER = [
 
 export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unknown> {
   const local = detectLocalMemvid(input)
-  const embeddedCLI = join(dirname(process.execPath), "vendor/memvid", process.platform === "win32" ? "memvid.exe" : "memvid")
+  const embeddedCLI = embeddedMemvidCandidates().find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
   return {
     provider: providerFrom(),
     hybrid_prompt_enabled: /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || ""),
     local_available: local.available,
     local,
-    embedded_cli: existsSync(embeddedCLI) && statSync(embeddedCLI).isFile() ? embeddedCLI : undefined,
+    embedded_cli: embeddedCLI,
     capsule: input?.capsule || defaultMemvidCapsulePath(),
     cloud_available: Boolean(process.env.MEMORIES_API_KEY || process.env.MEMORIES_URL),
     cloud_url: process.env.MEMORIES_URL || "http://api.marks.ia.br:8689",
