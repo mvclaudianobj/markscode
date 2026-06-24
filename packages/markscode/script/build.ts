@@ -258,6 +258,45 @@ if (!skipInstall) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Compat: ensure @opentui/solid re-exports Solid control-flow helpers
 {
   const localSolid = path.resolve(dir, "node_modules/@opentui/solid/index.js")

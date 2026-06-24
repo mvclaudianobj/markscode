@@ -106,13 +106,15 @@ export function memoriesAPIStatus() {
     url: config.memories.url,
     api_key_configured: Boolean(config.memories.api_key),
     api_key_source: config.memories.api_key_source,
+    timeout_ms: config.memories.timeout_ms,
     user_id: config.user_id || "marks-local",
   }
 }
 
 function requestTimeoutMs(value?: number) {
+  const memoryConfig = resolveMemoryConfig()
   const configured = Number(process.env.MARKSCODE_MEMORIES_API_TIMEOUT_MS || process.env.MEMORIES_API_TIMEOUT_MS || "")
-  const raw = Number.isFinite(value) ? Number(value) : configured
+  const raw = Number.isFinite(value) ? Number(value) : Number.isFinite(configured) && configured > 0 ? configured : memoryConfig.memories.timeout_ms
   return Math.min(30000, Math.max(1000, Math.floor(raw || 10000)))
 }
 

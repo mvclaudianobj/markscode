@@ -91,6 +91,7 @@ export const ExperimentalPaths = {
   worktreeReset: "/experimental/worktree/reset",
   session: "/experimental/session",
   sessionAll: "/experimental/session/all",
+  sessionAllImport: "/experimental/session/all/import",
   resource: "/experimental/resource",
 } as const
 
@@ -224,6 +225,18 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "List all database sessions",
             description:
               "Get a list of MarksCode sessions from all known local database files, sorted by most recently updated.",
+          }),
+        ),
+        HttpApiEndpoint.post("sessionAllImport", ExperimentalPaths.sessionAllImport, {
+          query: WorkspaceRoutingQuery,
+          payload: SessionAllDbs.ImportInput,
+          success: described(SessionAllDbs.ImportResult, "Imported session"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.session.importAll",
+            summary: "Import session from another database",
+            description: "Import one session from a known local MarksCode database into the active database.",
           }),
         ),
         HttpApiEndpoint.get("resource", ExperimentalPaths.resource, {

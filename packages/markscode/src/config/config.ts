@@ -43,6 +43,7 @@ import { ConfigSkills } from "./skills"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { setRemoteMemoryConfig } from "@/memory-config"
 
 const log = Log.create({ service: "config" })
 
@@ -252,6 +253,14 @@ export const Info = Schema.Struct({
       url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }),
     }),
   ),
+  memories: Schema.optional(
+    Schema.Struct({
+      url: Schema.optional(Schema.String).annotate({ description: "Memories API URL" }),
+      api_key: Schema.optional(Schema.String).annotate({ description: "Memories API key" }),
+      user_id: Schema.optional(Schema.String).annotate({ description: "Default Memories API user id" }),
+      timeout_ms: Schema.optional(PositiveInt).annotate({ description: "Memories API request timeout in milliseconds" }),
+    }),
+  ).annotate({ description: "Memories API fallback configuration" }),
   tool_output: Schema.optional(
     Schema.Struct({
       max_lines: Schema.optional(PositiveInt).annotate({
@@ -783,6 +792,10 @@ export const layer = Layer.effect(
         }
         if (Flag.OPENCODE_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
+        }
+
+        if (result.memories && Object.keys(result.memories).length > 0) {
+          setRemoteMemoryConfig(result.memories, "Config")
         }
 
         return {

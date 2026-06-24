@@ -4,7 +4,7 @@ import { Effect, Layer, Option, Schema, Context } from "effect"
 
 import { Database } from "@/storage/db"
 import { AccountStateTable, AccountTable } from "./account.sql"
-import { AccessToken, AccountID, AccountRepoError, Info, OrgID, RefreshToken } from "./schema"
+import { AccessToken, AccountID, AccountRepoError, Info, OrgID, RefreshToken, AccountUnauthorizedError } from "./schema"
 import { normalizeServerUrl } from "./url"
 
 export type AccountRow = (typeof AccountTable)["$inferSelect"]
@@ -35,6 +35,7 @@ export interface Interface {
     expiry: number
     orgID: Option.Option<OrgID>
   }) => Effect.Effect<void, AccountRepoError>
+  readonly invalidateToken: (accountID: AccountID) => Effect.Effect<void, AccountRepoError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/AccountRepo") {}
@@ -154,6 +155,16 @@ export const layer: Layer.Layer<Service> = Layer.effect(
       }).pipe(Effect.asVoid),
     )
 
+    const invalidateToken = Effect.fn("AccountRepo.invalidateToken")((accountID: AccountID) =>
+      query((db) =>
+        db
+          .update(AccountTable)
+          .set({ token_expiry: null })
+          .where(eq(AccountTable.id, accountID))
+          .run(),
+      ).pipe(Effect.asVoid),
+    )
+
     return Service.of({
       active,
       list,
@@ -162,6 +173,7 @@ export const layer: Layer.Layer<Service> = Layer.effect(
       getRow,
       persistToken,
       persistAccount,
+      invalidateToken,
     })
   }),
 )

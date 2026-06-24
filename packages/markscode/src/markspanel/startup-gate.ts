@@ -36,6 +36,83 @@ const activeAccountWithOrg = Effect.fn("markspanel.startup.active")(function* ()
   return active
 })
 
+const loadConfig = Effect.fn("markspanel.startup.config")(function* (input: { account: Info; warningPrefix?: string }) {
+  const service = yield* Account.Service
+  const spin = Prompt.spinner()
+  yield* spin.start("Carregando perfil Markspanel...")
+  const config = yield* service.config(input.account.id, input.account.active_org_id!).pipe(
+    Effect.catch(() =>
+      Effect.gen(function* () {
+        yield* spin.stop(`${input.warningPrefix ?? "Aviso"}: erro ao carregar perfil Markspanel (rede/auth).`, 2)
+        return Option.none<Record<string, unknown>>()
+      }),
+    ),
+  )
+  if (Option.isSome(config)) {
+    yield* spin.stop("Perfil Markspanel recebido.")
+    return config
+  }
+  return config
+})
+
+const continueFreeMode = Effect.fn("markspanel.startup.free")(function* (message: string) {
+  yield* Prompt.log.warn(message)
+  yield* Prompt.log.warn("Continuando em modo livre — verifique conexão, token ou perfil Markspanel.")
+})
+
+const configFailureChoice = Effect.fn("markspanel.startup.config.choice")(function* (active: Info) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    yield* continueFreeMode("Markspanel não carregou /api/config — usando providers locais/free.")
+    return Option.none<Record<string, unknown>>()
+  }
+
+  const choice = yield* Prompt.select({
+    message: "Não foi possível carregar o perfil Markspanel. O que deseja fazer?",
+    options: [
+      { value: "relogin" as const, label: "Resetar token / fazer login novamente (recomendado)" },
+      { value: "free" as const, label: "Continuar em modo livre" },
+      { value: "exit" as const, label: "Sair" },
+    ],
+  })
+
+  if (Option.isNone(choice) || choice.value === "exit") {
+    return yield* failure("Inicialização cancelada: perfil Markspanel não carregado e modo livre não selecionado.")
+  }
+  if (choice.value === "free") {
+    yield* continueFreeMode("Markspanel não retornou /api/config — usando providers locais/free.")
+    return Option.none<Record<string, unknown>>()
+  }
+
+  yield* markspanelLoginEffect(active.url || defaultMarkspanelUrl)
+  const refreshed = yield* activeAccountWithOrg()
+  if (Option.isNone(refreshed)) {
+    return yield* failure(
+      "Login Markspanel concluído sem conta/organização ativa. A TUI não será aberta sem active_org_id.",
+    )
+  }
+
+  const retry = yield* loadConfig({ account: refreshed.value, warningPrefix: "Aviso após novo login" })
+  if (Option.isSome(retry)) return retry
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    yield* continueFreeMode("Markspanel ainda não carregou /api/config após novo login — usando providers locais/free.")
+    return Option.none<Record<string, unknown>>()
+  }
+
+  const fallback = yield* Prompt.select({
+    message: "O perfil Markspanel ainda não carregou após novo login. Como deseja continuar?",
+    options: [
+      { value: "free" as const, label: "Continuar em modo livre" },
+      { value: "exit" as const, label: "Sair" },
+    ],
+  })
+  if (Option.isSome(fallback) && fallback.value === "free") {
+    yield* continueFreeMode("Markspanel não retornou /api/config após novo login — usando providers locais/free.")
+    return Option.none<Record<string, unknown>>()
+  }
+  return yield* failure("Inicialização cancelada: perfil Markspanel não carregado após novo login.")
+})
+
 export const ensureParentGate = Effect.fn("markspanel.startup.ensure")(function* () {
   const service = yield* Account.Service
   const beforeLogin = yield* activeAccountWithOrg()
@@ -54,37 +131,25 @@ export const ensureParentGate = Effect.fn("markspanel.startup.ensure")(function*
   const email = active.value.email ?? active.value.id
   yield* Prompt.log.success(`Logado como ${email}`)
 
-  const spin = Prompt.spinner()
-  yield* spin.start("Carregando perfil Markspanel...")
-
-  const config = yield* service.config(active.value.id, active.value.active_org_id!).pipe(
-    Effect.catch(() =>
-      Effect.gen(function* () {
-        yield* spin.stop("Erro ao carregar perfil Markspanel.", 1)
-        return yield* failure(
-          "Conta Markspanel restrita ou sem permissão para /api/config. A TUI foi bloqueada antes da inicialização.",
-        )
-      }),
-    ),
-  )
+  const initialConfig = yield* loadConfig({ account: active.value })
+  const config = Option.isSome(initialConfig) ? initialConfig : yield* configFailureChoice(active.value)
   if (Option.isNone(config)) {
-    yield* spin.stop("Perfil não encontrado.", 1)
-    return yield* failure(
-      "Markspanel não retornou /api/config para a organização ativa. A TUI não será aberta sem configuração autorizada.",
-    )
+    return
   }
 
   const stats = remoteConfigStats(config.value)
   if (stats.providers < 1) {
-    yield* spin.stop("Nenhum provider autorizado.", 1)
-    return yield* failure("Nenhum provider autorizado foi retornado pelo Markspanel para esta organização.")
+    yield* Prompt.log.warn("Aviso: nenhum provider autorizado. Continuando em modo livre.")
+    yield* Prompt.log.warn("Markspanel não retornou providers — usando providers locais/free.")
+    return
   }
   if (stats.models < 1) {
-    yield* spin.stop("Nenhum modelo autorizado.", 1)
-    return yield* failure("Nenhum modelo autorizado foi retornado pelo Markspanel para esta organização.")
+    yield* Prompt.log.warn("Aviso: nenhum modelo autorizado. Continuando em modo livre.")
+    yield* Prompt.log.warn("Markspanel não retornou modelos — usando modelos locais/free.")
+    return
   }
 
-  yield* spin.stop(
+  yield* Prompt.log.success(
     `Perfil carregado: ${stats.providers} provider${stats.providers !== 1 ? "s" : ""}, ${stats.models} modelo${stats.models !== 1 ? "s" : ""}`,
   )
 

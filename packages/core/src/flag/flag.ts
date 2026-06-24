@@ -43,7 +43,6 @@ export const Flag = {
     copy === undefined ? process.platform === "win32" : truthy("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),
   OPENCODE_MODELS_URL: process.env["OPENCODE_MODELS_URL"],
   OPENCODE_MODELS_PATH: process.env["OPENCODE_MODELS_PATH"],
-  OPENCODE_DB: process.env["OPENCODE_DB"],
 
   OPENCODE_WORKSPACE_ID: process.env["OPENCODE_WORKSPACE_ID"],
   OPENCODE_EXPERIMENTAL_WORKSPACES: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),
@@ -56,6 +55,13 @@ export const Flag = {
   },
   get OPENCODE_TUI_CONFIG() {
     return process.env["OPENCODE_TUI_CONFIG"]
+  },
+  get OPENCODE_DB() {
+    return process.env["OPENCODE_DB"]
+  },
+  set OPENCODE_DB(value: string | undefined) {
+    if (value === undefined) delete process.env["OPENCODE_DB"]
+    else process.env["OPENCODE_DB"] = value
   },
   get OPENCODE_CONFIG_DIR() {
     return process.env["OPENCODE_CONFIG_DIR"]

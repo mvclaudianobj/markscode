@@ -161,6 +161,14 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       )
     })
 
+    const sessionAllImport = Effect.fn("ExperimentalHttpApi.sessionAllImport")(function* (ctx: {
+      payload: typeof SessionAllDbs.ImportInput.Type
+    }) {
+      return yield* Effect.promise(() => SessionAllDbs.importSession(ctx.payload)).pipe(
+        Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))),
+      )
+    })
+
     return handlers
       .handle("console", getConsole)
       .handle("consoleOrgs", listConsoleOrgs)
@@ -173,6 +181,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("worktreeReset", worktreeReset)
       .handle("session", session)
       .handle("sessionAll", sessionAll)
+      .handle("sessionAllImport", sessionAllImport)
       .handle("resource", resource)
   }),
 )

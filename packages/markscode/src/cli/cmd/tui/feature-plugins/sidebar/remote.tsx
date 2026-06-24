@@ -25,13 +25,13 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <b>{collapsed() ? "▸" : "▾"} Multi Remote mode</b>
       </text>
       <Show when={!collapsed()}>
-        <text fg={mode() ? theme().success : theme().textMuted}>status: {mode() ? "active" : "inactive"}</text>
+        <text fg={mode() ? theme().success : theme().textMuted}>{"status: " + (mode() ? "active" : "inactive")}</text>
       </Show>
       <Show when={!collapsed()}>
-        <text fg={theme().textMuted}>target: {target()}</text>
+        <text fg={theme().textMuted}>{"target: " + target()}</text>
       </Show>
       <Show when={!collapsed()}>
-        <text fg={theme().textMuted}>profiles: {activeProfiles().length ? activeProfiles().join(", ") : "none"}</text>
+        <text fg={theme().textMuted}>{"profiles: " + (activeProfiles().length ? activeProfiles().join(", ") : "none")}</text>
       </Show>
       <Show when={!collapsed()}>
         <text fg={theme().textMuted}>shortcut: /remote-ssh-profiles</text>

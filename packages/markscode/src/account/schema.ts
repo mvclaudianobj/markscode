@@ -41,6 +41,12 @@ export class AccountServiceError extends Schema.TaggedErrorClass<AccountServiceE
   cause: Schema.optional(Schema.Defect),
 }) {}
 
+export class AccountUnauthorizedError extends Schema.TaggedErrorClass<AccountUnauthorizedError>()("AccountUnauthorizedError", {
+  message: Schema.String,
+  statusCode: Schema.Number,
+  accountID: Schema.optional(AccountID),
+}) {}
+
 export class AccountTransportError extends Schema.TaggedErrorClass<AccountTransportError>()("AccountTransportError", {
   method: Schema.String,
   url: Schema.String,
@@ -68,7 +74,10 @@ export class AccountTransportError extends Schema.TaggedErrorClass<AccountTransp
   }
 }
 
-export type AccountError = AccountRepoError | AccountServiceError | AccountTransportError
+export type AccountError = AccountRepoError | AccountServiceError | AccountTransportError | AccountUnauthorizedError
+
+// Re-export for convenience
+export { AccountUnauthorizedError as Unauthorized }
 
 export class Login extends Schema.Class<Login>("Login")({
   code: DeviceCode,

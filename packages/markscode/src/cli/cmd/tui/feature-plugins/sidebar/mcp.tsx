@@ -37,8 +37,7 @@ function View(props: { api: TuiPluginApi }) {
             <b>MCP</b>
             <Show when={!open()}>
               <span style={{ fg: theme().textMuted }}>
-                {" "}
-                ({on()} active{bad() > 0 ? `, ${bad()} error${bad() > 1 ? "s" : ""}` : ""})
+                {` (${on()} active${bad() > 0 ? `, ${bad()} error${bad() > 1 ? "s" : ""}` : ""})`}
               </span>
             </Show>
           </text>

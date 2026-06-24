@@ -16,6 +16,7 @@ import {
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import path from "path"
+import { Effect, Option } from "effect"
 import { useRoute, useRouteData } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
 import { useEditorContext } from "@tui/context/editor"
@@ -80,16 +81,6 @@ import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import {
-  listMapProjects,
-  listMapModules,
-  listMapTasks,
-  getMapBootstrap,
-  upsertMapTask,
-  startMapSession,
-  progressMapSession,
-  endMapSession,
-} from "@/map-api"
-import {
   getHumanContext,
   getSessionCompactContext,
   saveHumanMemory,
@@ -99,14 +90,30 @@ import {
   getGlobalContext,
   searchAdvancedMemories,
 } from "@/memories-api"
+import { hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
+import {
+  listMapProjects,
+  listMapModules,
+  listMapTasks,
+  getMapBootstrap,
+  upsertMapTask,
+  startMapSession,
+  progressMapSession,
+  endMapSession,
+} from "@/map-api"
+
 import { useEvent } from "../../context/event"
 import { useProject } from "../../context/project"
 import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin/runtime"
 import { SessionRetry } from "@/session/retry"
-import { hybridMemoryStatus, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
+import { Account } from "@/account/account"
+import { AppRuntime } from "@/effect/app-runtime"
+import { loadMemory } from "@/memory"
 import { listRemoteSSHProfiles, replaceRemoteSSHProfiles } from "@/remote/profile-repo"
+import { diagnoseBrainSystem } from "@/memory-diagnose"
+import { Database } from "@/storage/db"
 import { DialogRecentTopics } from "../../component/dialog-recent-topics"
 import { DialogAllSessionList } from "../../component/dialog-all-session-list"
 import { getRevertDiffFiles } from "../../util/revert-diff"
@@ -520,8 +527,10 @@ export function Session() {
   }
 
   // --- MARKSCODE REMOTE SSH PROFILES INFRASTRUCTURE (auto-generated) ---
+  type RemoteProfileType = "ssh" | "winrm" | "powershell" | "whm"
+
   type RemoteSSHConfig = {
-    type?: "ssh" | "winrm"
+    type?: RemoteProfileType
     host: string
     user: string
     port: number
@@ -531,6 +540,10 @@ export function Session() {
     host_alias?: string
     credential_ref?: string
     auth_method?: string
+    protocol?: string
+    master_key_ref?: string
+    encrypted_password?: string
+    pki_enabled?: number
   }
 
   const MARKSCODE_MASTER_KEY_NAME = "marks-key-mestra"
@@ -545,7 +558,7 @@ export function Session() {
   type RemoteSSHProfile = {
     id: string
     name: string
-    type?: "ssh" | "winrm"
+    type?: RemoteProfileType
     host: string
     user: string
     port: number
@@ -558,12 +571,20 @@ export function Session() {
     metadata?: string | null
     created_at: string
     updated_at: string
+    protocol?: string
+    master_key_ref?: string
+    encrypted_password?: string
+    pki_enabled?: number
   }
 
   type RemoteSSHProfileAction = "list" | "use" | "save" | "master" | "registry" | "edit" | "delete" | "import"
 
-  const normalizeRemoteType = (value: unknown): "ssh" | "winrm" => value === "winrm" ? "winrm" : "ssh"
+  const normalizeRemoteType = (value: unknown): RemoteProfileType => value === "winrm" || value === "powershell" || value === "whm" ? value : "ssh"
   const normalizeRemoteTransport = (value: unknown): "http" | "https" | undefined => value === "http" ? "http" : value === "https" ? "https" : undefined
+  const defaultRemotePort = (type: RemoteProfileType) => type === "whm" ? 2087 : type === "winrm" || type === "powershell" ? 5986 : 22
+  const defaultRemoteTransport = (type: RemoteProfileType) => type === "whm" || type === "winrm" || type === "powershell" ? "https" : undefined
+  const isWindowsRemoteType = (type?: RemoteProfileType) => type === "winrm" || type === "powershell"
+  const encodeRemoteCredential = (plaintext: string) => `encrypted:${Buffer.from(plaintext, "utf-8").toString("base64")}`
   const normalizeRemoteProfile = (profile: Partial<RemoteSSHProfile> & { name: string; host: string; user: string }): RemoteSSHProfile => {
     const now = new Date().toISOString()
     const type = normalizeRemoteType(profile.type)
@@ -573,13 +594,17 @@ export function Session() {
       type,
       host: profile.host,
       user: profile.user,
-      port: normalizeRemotePort(String(profile.port || (type === "winrm" ? 5986 : 22))),
-      transport: normalizeRemoteTransport(profile.transport) || (type === "winrm" ? "https" : undefined),
-      identity_file: type === "winrm" ? profile.identity_file : profile.identity_file || undefined,
+      port: normalizeRemotePort(String(profile.port || defaultRemotePort(type))),
+      transport: normalizeRemoteTransport(profile.transport) || defaultRemoteTransport(type),
+      identity_file: profile.identity_file || undefined,
       key_name: profile.key_name || undefined,
       host_alias: profile.host_alias || undefined,
       credential_ref: profile.credential_ref || undefined,
       auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : undefined),
+      protocol: profile.protocol || type,
+      master_key_ref: profile.master_key_ref || undefined,
+      encrypted_password: profile.encrypted_password || undefined,
+      pki_enabled: profile.pki_enabled ? 1 : 0,
       metadata: profile.metadata || undefined,
       created_at: profile.created_at || now,
       updated_at: now,
@@ -589,14 +614,22 @@ export function Session() {
   const readRemoteSSHProfiles = (): RemoteSSHProfile[] => {
     const kvProfiles = () => {
       const raw = kv.get("remote_ssh_profiles")
-      if (!Array.isArray(raw)) return [] as RemoteSSHProfile[]
-      return raw as RemoteSSHProfile[]
+      if (Array.isArray(raw)) return raw as RemoteSSHProfile[]
+      if (typeof raw === "string" && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw)
+          return Array.isArray(parsed) ? parsed as RemoteSSHProfile[] : [] as RemoteSSHProfile[]
+        } catch {
+          return [] as RemoteSSHProfile[]
+        }
+      }
+      return [] as RemoteSSHProfile[]
     }
     try {
       const dbProfiles: RemoteSSHProfile[] = listRemoteSSHProfiles().map((profile) => ({
         id: profile.id,
         name: profile.name,
-        type: profile.type === "winrm" ? "winrm" : "ssh",
+        type: normalizeRemoteType(profile.type),
         host: profile.host,
         user: profile.user,
         port: profile.port,
@@ -609,18 +642,25 @@ export function Session() {
         metadata: profile.metadata || undefined,
         created_at: new Date(profile.time_created).toISOString(),
         updated_at: new Date(profile.time_updated).toISOString(),
+        protocol: profile.protocol || undefined,
+        master_key_ref: profile.master_key_ref || undefined,
+        encrypted_password: profile.encrypted_password || undefined,
+        pki_enabled: profile.pki_enabled ? 1 : 0,
       }))
       if (dbProfiles.length) {
         kv.set("remote_ssh_profiles", dbProfiles)
         return dbProfiles
       }
       const legacy = kvProfiles()
-      if (legacy.length) replaceRemoteSSHProfiles(legacy.map((profile) => ({ id: profile.id, account_id: null, org_id: null, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport || null, identity_file: profile.identity_file || null, key_name: profile.key_name || null, host_alias: profile.host_alias || null, credential_ref: profile.credential_ref || null, auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null), metadata: profile.metadata || null })))
+      if (legacy.length) replaceRemoteSSHProfiles(legacy.map((profile) => ({ id: profile.id, account_id: null, org_id: null, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport || null, identity_file: profile.identity_file || null, key_name: profile.key_name || null, host_alias: profile.host_alias || null, credential_ref: profile.credential_ref || null, auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null), protocol: profile.protocol || null, master_key_ref: profile.master_key_ref || null, encrypted_password: profile.encrypted_password || null, pki_enabled: profile.pki_enabled ? 1 : 0, metadata: profile.metadata || null })))
       return legacy
     } catch {
       return kvProfiles()
     }
   }
+
+  const remoteSSHProfilesDBWarning = (error: unknown) =>
+    "remote_ssh_profiles_db_warning: perfil salvo no fallback de sessão; DB indisponível (" + errorMessage(error).replace(/\s+/g, " ").slice(0, 180) + ")"
 
   const remoteSSHProfileAliases = (profile: RemoteSSHProfile) => [profile.name, profile.host_alias, profile.host]
     .filter((value): value is string => Boolean(value && value.trim()))
@@ -630,113 +670,315 @@ export function Session() {
     const aliases = profiles.flatMap(remoteSSHProfileAliases)
     kv.set("remote_ssh_profile_names", names)
     kv.set("remote_ssh_profile_aliases", aliases)
-    kv.set("remote_ssh_profiles_registry", profiles.map((profile) => ({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, credential_ref: profile.credential_ref, auth_method: profile.auth_method })))
+    kv.set("remote_ssh_profiles_registry", profiles.map((profile) => ({ id: profile.id, name: profile.name, type: profile.type || "ssh", protocol: profile.protocol || profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport, host_alias: profile.host_alias, key_name: profile.key_name, credential_ref: profile.credential_ref ? "***ref***" : undefined, auth_method: profile.auth_method, password_saved: profile.encrypted_password ? "yes" : "no", master_key_ref: profile.master_key_ref, pki_enabled: profile.pki_enabled ? "yes" : "no" })))
     return { names, aliases }
   }
 
   const writeRemoteSSHProfiles = (profiles: RemoteSSHProfile[]) => {
     const sorted = profiles.toSorted((a, b) => a.name.localeCompare(b.name))
-    replaceRemoteSSHProfiles(sorted.map((profile) => ({
-      id: profile.id,
-      account_id: null,
-      org_id: null,
-      name: profile.name,
-      type: profile.type || "ssh",
+    const warning = (() => {
+      try {
+        replaceRemoteSSHProfiles(sorted.map((profile) => ({
+          id: profile.id,
+          account_id: null,
+          org_id: null,
+          name: profile.name,
+          type: profile.type || "ssh",
+          host: profile.host,
+          user: profile.user,
+          port: profile.port,
+          transport: profile.transport || null,
+          identity_file: profile.identity_file || null,
+          key_name: profile.key_name || null,
+          host_alias: profile.host_alias || null,
+          credential_ref: profile.credential_ref || null,
+          auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null),
+          protocol: profile.protocol || profile.type || "ssh",
+          master_key_ref: profile.master_key_ref || null,
+          encrypted_password: profile.encrypted_password || null,
+          pki_enabled: profile.pki_enabled ? 1 : 0,
+          metadata: profile.metadata || null,
+        })))
+        return undefined
+      } catch (error) {
+        return remoteSSHProfilesDBWarning(error)
+      }
+    })()
+    kv.set("remote_ssh_profiles", sorted)
+    kv.set("remote_ssh_profiles_db_warning", warning || "")
+    updateRemoteSSHProfilesRegistry(sorted)
+    return warning
+  }
+
+  const buildRemoteSSHConfigFromProfile = (profile: RemoteSSHProfile): RemoteSSHConfig => {
+    const profileType = normalizeRemoteType(profile.type)
+    return {
+      type: profileType,
       host: profile.host,
       user: profile.user,
-      port: profile.port,
-      transport: profile.transport || null,
-      identity_file: profile.identity_file || null,
-      key_name: profile.key_name || null,
-      host_alias: profile.host_alias || null,
-      credential_ref: profile.credential_ref || null,
-      auth_method: profile.auth_method || (profile.credential_ref ? "password_ref" : profile.identity_file || profile.key_name ? "key" : null),
-      metadata: profile.metadata || null,
-    })))
-    kv.set("remote_ssh_profiles", sorted)
-    updateRemoteSSHProfilesRegistry(sorted)
+      port: normalizeRemotePort(String(profile.port || defaultRemotePort(profileType))),
+      transport: normalizeRemoteTransport(profile.transport) || defaultRemoteTransport(profileType),
+      identity_file: profile.identity_file,
+      key_name: profile.key_name,
+      host_alias: profile.host_alias,
+      credential_ref: profile.credential_ref,
+      auth_method: profile.auth_method || undefined,
+      protocol: profile.protocol || profileType,
+      master_key_ref: profile.master_key_ref,
+      encrypted_password: profile.encrypted_password,
+      pki_enabled: profile.pki_enabled,
+    }
+  }
+
+  const remoteProfileContextRows = (profile: RemoteSSHProfile, cfg = buildRemoteSSHConfigFromProfile(profile)) => {
+    const profileType = normalizeRemoteType(cfg.type)
+    return [
+      "Type: " + profileType,
+      "Profile: " + profile.name,
+      "Host: " + cfg.host,
+      "User: " + cfg.user,
+      "Port: " + String(cfg.port),
+      ...(cfg.transport ? ["Transport: " + cfg.transport] : []),
+      ...(cfg.host_alias ? ["Alias: " + cfg.host_alias] : []),
+      ...(cfg.identity_file ? ["Identity file: " + cfg.identity_file] : []),
+      ...(cfg.key_name ? ["Key name: " + cfg.key_name] : []),
+      ...(cfg.master_key_ref ? ["Master key ref: " + cfg.master_key_ref] : []),
+      ...(cfg.auth_method ? ["Auth method: " + cfg.auth_method] : []),
+      "Password saved: " + (cfg.encrypted_password ? "yes" : "no"),
+      ...(isWindowsRemoteType(profileType) ? [
+        "WinRM/PowerShell: use SSH tool normally; MarksCode must route via local pwsh/WinRM/PowerShell.",
+        "PowerShell remoto direto: perfil powershell executa comandos Windows via PowerShell/Invoke-Command, não SSH Linux.",
+      ] : []),
+    ]
+  }
+
+  const isMasterKeyDeployProfile = (profile: RemoteSSHProfile) =>
+    profile.master_key_ref === MARKSCODE_MASTER_KEY_NAME || profile.key_name === MARKSCODE_MASTER_KEY_NAME || (profile.auth_method === "key_with_password_bootstrap" && Boolean(profile.encrypted_password))
+
+  const injectRemoteProfileContext = (profile: RemoteSSHProfile, cfg = buildRemoteSSHConfigFromProfile(profile), deployRequested = false) => {
+    injectContext("[Remote profile active]", remoteProfileContextRows(profile, cfg))
+    if (deployRequested || isMasterKeyDeployProfile(profile)) {
+      injectContext("[Remote master-key deploy requested]", [
+        "AI deployment instruction: deploy/use MarksCode master key " + MARKSCODE_MASTER_KEY_NAME + " to " + profile.user + "@" + profile.host + ":" + String(cfg.port) + ".",
+        "Use saved encrypted_password only as bootstrap material when required; never reveal, echo, print, or log plaintext password or encoded secret.",
+        "After deployment, prefer SSH key auth using " + MARKSCODE_MASTER_IDENTITY_FILE + ".",
+        "Saved bootstrap password: " + (profile.encrypted_password ? "yes" : "no"),
+      ])
+    }
+  }
+
+  const activateRemoteProfile = (profile: RemoteSSHProfile, options: { inject?: boolean; deployRequested?: boolean } = {}) => {
+    const normalized = normalizeRemoteProfile(profile)
+    const cfg = buildRemoteSSHConfigFromProfile(normalized)
+    kv.set("remote_ssh_mode", true)
+    kv.set("remote_ssh_config", cfg)
+    kv.set("remote_ssh_active_profile", normalized.id)
+    kv.set("remote_ssh_profile_name", normalized.name)
+    updateRemoteSSHProfilesRegistry()
+    if (options.inject !== false) injectRemoteProfileContext(normalized, cfg, options.deployRequested)
+    return cfg
   }
 
   const MARKSCODE_VISIBLE_REMOTE_PROFILES_ACTIONS = [
-    "Listar perfis",
-    "Usar perfil",
-    "Salvar perfil atual",
-    "Criar acesso com chave mestra",
-    "Injetar registry de perfis no contexto",
-    "Editar perfil",
-    "Excluir perfil",
-    "Importar perfil JSON",
+    "Create SSH/Linux profile",
+    "Create WinRM/Windows profile",
+    "Create PowerShell/Windows profile",
+    "Create WHM/cPanel profile",
+    "Use profile",
+    "Edit profile",
+    "Delete profile",
+    "Export/copy JSON",
+    "Import JSON (advanced)",
+    "Close",
   ] as const
+
+  type RemoteProfileWizardKind = RemoteProfileType
+  type RemoteProfileAuthChoice = "master" | "identity" | "credential" | "password" | "master_password" | "skip"
+
+  const remoteWizardLabel = (kind: RemoteProfileWizardKind) => kind === "ssh" ? "SSH/Linux" : kind === "winrm" ? "WinRM/Windows" : kind === "powershell" ? "PowerShell/Windows" : "WHM/cPanel"
+
+  const asCleanText = (value: unknown) => String(value ?? "").trim()
+  const validateRemoteName = (value: unknown) => {
+    const text = asCleanText(value)
+    if (!text) throw new Error("Nome do perfil é obrigatório")
+    return text
+  }
+  const validateRemoteHost = (value: unknown) => {
+    const text = asCleanText(value)
+    if (!text) throw new Error("Host é obrigatório")
+    return text
+  }
+  const validateRemoteUser = (value: unknown, fallback = "root") => {
+    const text = asCleanText(value) || fallback
+    if (!text) throw new Error("Usuário é obrigatório")
+    return text
+  }
+  const validateRemotePortStrict = (value: unknown, fallback: number) => {
+    const text = asCleanText(value) || String(fallback)
+    const port = Number.parseInt(text, 10)
+    if (!Number.isFinite(port) || port < 1 || port > 65535 || String(port) !== text) throw new Error("Porta deve ser numérica entre 1 e 65535")
+    return port
+  }
+  const rejectPlaintextSecretFields = (data: Record<string, unknown>) => {
+    const blocked = ["password", "senha", "plain_password", "plaintext_password"]
+    const found = blocked.filter((key) => data[key] !== undefined && data[key] !== null && String(data[key]).trim() !== "")
+    if (found.length) throw new Error("Perfil remoto não pode salvar senha em texto puro: " + found.join(", "))
+  }
+  const safeRemoteProfileJSON = (profile: RemoteSSHProfile) => JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", protocol: profile.protocol || profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport, identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref ? "***ref***" : undefined, auth_method: profile.auth_method || undefined, master_key_ref: profile.master_key_ref, password_saved: profile.encrypted_password ? "yes" : "no", pki_enabled: profile.pki_enabled ? "yes" : "no" }, null, 2)
+  const reviewRemoteProfileText = (title: string, profile: RemoteSSHProfile, deployMasterKey = false) => [
+    title,
+    "",
+    "Nome: " + String(profile.name),
+    "Tipo: " + String(profile.type || "ssh"),
+    "Host: " + String(profile.host),
+    "Usuário: " + String(profile.user),
+    "Porta: " + String(profile.port),
+    "Transporte: " + String(profile.transport || "-"),
+    "Autenticação: " + String(profile.auth_method || "configurar depois"),
+    "Chave mestra: " + (profile.key_name === MARKSCODE_MASTER_KEY_NAME || deployMasterKey ? "sim" : "não"),
+    "Identity file: " + String(profile.identity_file || "-"),
+    "Credential ref: " + String(profile.credential_ref ? "***ref***" : "-"),
+    "Senha salva: " + (profile.encrypted_password ? "sim (mascarada/codificada para bootstrap)" : "não"),
+    "Deploy chave mestra: " + (deployMasterKey ? "sim" : "não"),
+    "",
+    profile.encrypted_password ? "Nenhum campo password/senha em texto puro será salvo; a senha fica mascarada/codificada para bootstrap/deploy." : "Nenhum campo password/senha em texto puro será salvo.",
+  ].join("\n")
+
+  const promptRemoteRequired = async (title: string, placeholder: string, value = "") => {
+    const input = await DialogPrompt.show(dialog, title, { placeholder, value })
+    if (input === null) return null
+    return asCleanText(input)
+  }
+
+  const selectRemoteOption = <T,>(title: string, options: DialogSelectOption<T>[]) => new Promise<T | null>((resolve) => {
+    dialog.replace(
+      () => <DialogSelect title={title} options={options.map((option) => ({ ...option, onSelect: (ctx: DialogContext) => { resolve(option.value); ctx.clear() } }))} flat />,
+      () => resolve(null),
+    )
+  })
+
+  const confirmRemoteProfileReview = async (title: string, message: string) => {
+    const picked = await selectRemoteOption(title, [
+      { title: "Salvar perfil agora", value: "save", description: "Pressione Enter aqui para salvar", details: [message] },
+      { title: "Back to menu", value: "cancel", description: "Cancelar sem salvar" },
+    ])
+    return picked === "save"
+  }
+
+  const saveRemoteProfile = (profile: RemoteSSHProfile) => {
+    rejectPlaintextSecretFields(profile as unknown as Record<string, unknown>)
+    const warning = writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((item) => item.id !== profile.id && item.name !== profile.name), normalizeRemoteProfile(profile)])
+    updateRemoteSSHProfilesRegistry()
+    return warning
+  }
+
+  const runRemoteCreateWizard = async (kind: RemoteProfileWizardKind) => {
+    const label = remoteWizardLabel(kind)
+    const defaultPort = defaultRemotePort(kind)
+    const name = await promptRemoteRequired(label + " profile - name", "ex: production-server")
+    if (name === null) { dialog.clear(); return }
+    const host = await promptRemoteRequired(label + " profile - host", isWindowsRemoteType(kind) ? "ex: windows.example.com" : "ex: server.example.com")
+    if (host === null) { dialog.clear(); return }
+    const user = await promptRemoteRequired(label + " profile - user", isWindowsRemoteType(kind) ? "Administrator" : "root", isWindowsRemoteType(kind) ? "Administrator" : "root")
+    if (user === null) { dialog.clear(); return }
+    const portInput = await promptRemoteRequired(label + " profile - port", String(defaultPort), String(defaultPort))
+    if (portInput === null) { dialog.clear(); return }
+    const transport = isWindowsRemoteType(kind) ? await selectRemoteOption<"https" | "http">(label + " transport", [
+      { title: "HTTPS (5986)", value: "https", description: "Padrão recomendado para WinRM/PowerShell remoto" },
+      { title: "HTTP (5985)", value: "http", description: "Somente se seu Windows estiver configurado para HTTP" },
+    ]) : defaultRemoteTransport(kind)
+    if (!transport && isWindowsRemoteType(kind)) { dialog.clear(); return }
+    const auth = await selectRemoteOption<RemoteProfileAuthChoice>(label + " auth method", kind === "ssh" ? [
+      { title: "Deploy/use MarksCode master key", value: "master", description: "Usa marks-key-mestra e solicita deploy quando aplicável" },
+      { title: "Password saved for SSH bootstrap/deploy", value: "password", description: "Salva senha mascarada/codificada para primeiro acesso; não será exibida" },
+      { title: "Deploy master key using saved password", value: "master_password", description: "Salva senha para bootstrap e marca deploy da chave mestra" },
+      { title: "Identity file", value: "identity", description: "Caminho local da chave privada" },
+      { title: "Credential ref", value: "credential", description: "Referência segura existente, não senha" },
+      { title: "Skip for now", value: "skip", description: "Salvar sem método de autenticação" },
+    ] : kind === "whm" ? [
+      { title: "API token credential ref", value: "credential", description: "Preferido: referência segura existente do token WHM" },
+      { title: "Skip for now", value: "skip", description: "Salvar sem token; configurar depois" },
+    ] : [
+      { title: "Password saved for Windows remote access", value: "password", description: "Salva senha mascarada/codificada para WinRM/PowerShell; não será exibida" },
+      { title: "Credential ref", value: "credential", description: "Referência segura existente, não senha" },
+      { title: "Skip for now", value: "skip", description: "Salvar sem método de autenticação" },
+    ])
+    if (!auth) { dialog.clear(); return }
+    const authValue = auth === "identity" ? await promptRemoteRequired("Identity file", "~/.ssh/id_ed25519") : auth === "credential" ? await promptRemoteRequired(kind === "whm" ? "WHM API token credential ref" : label + " credential ref", "ex: cred://remote/prod-root") : auth === "password" || auth === "master_password" ? await promptRemoteRequired(label + " password (masked after save; do not share)", "senha para bootstrap/acesso remoto") : ""
+    if (authValue === null) { dialog.clear(); return }
+    const deployMasterKey = auth === "master" || auth === "master_password"
+    const now = new Date().toISOString()
+    const profile = normalizeRemoteProfile({
+      id: validateRemoteName(name).toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()),
+      name: validateRemoteName(name),
+      type: kind,
+      host: validateRemoteHost(host),
+      user: validateRemoteUser(user),
+      port: validateRemotePortStrict(portInput, defaultPort),
+      transport: transport || undefined,
+      identity_file: deployMasterKey ? MARKSCODE_MASTER_IDENTITY_FILE : auth === "identity" ? asCleanText(authValue) : undefined,
+      key_name: deployMasterKey ? MARKSCODE_MASTER_KEY_NAME : undefined,
+      credential_ref: auth === "credential" ? asCleanText(authValue) : undefined,
+      auth_method: deployMasterKey ? (auth === "master_password" ? "key_with_password_bootstrap" : "key") : auth === "identity" ? "key" : auth === "credential" ? (kind === "whm" ? "api_token_ref" : "credential_ref") : auth === "password" ? "password_saved" : undefined,
+      protocol: kind,
+      master_key_ref: deployMasterKey ? MARKSCODE_MASTER_KEY_NAME : undefined,
+      encrypted_password: auth === "password" || auth === "master_password" ? encodeRemoteCredential(asCleanText(authValue)) : undefined,
+      pki_enabled: deployMasterKey ? 1 : 0,
+      created_at: now,
+    })
+    if (!(await confirmRemoteProfileReview("Review " + label + " profile", reviewRemoteProfileText("Review before save", profile, deployMasterKey)))) { dialog.clear(); return }
+    const warning = saveRemoteProfile(profile)
+    if (deployMasterKey) {
+      kv.set("remote_ssh_deploy_key", "1")
+      kv.set("remote_ssh_deploy_host", profile.host)
+      kv.set("remote_ssh_deploy_user", profile.user)
+    }
+    activateRemoteProfile(profile, { deployRequested: deployMasterKey })
+    await DialogAlert.show(dialog, label + " profile saved", warning ? "Perfil salvo em fallback de sessão e ativado. O DB não recebeu a gravação agora; o perfil aparecerá em Use/sidebar nesta sessão. " + warning : profile.encrypted_password ? "Perfil salvo e ativado. Nenhum campo password/senha em texto puro foi salvo; senha armazenada mascarada/codificada para bootstrap/acesso necessário." : "Perfil salvo e ativado com sucesso sem campos password/senha em texto puro.")
+    dialog.clear()
+  }
 
   const pickRemoteSSHProfileSimple = async () => {
     const list = readRemoteSSHProfiles()
     if (!list.length) {
-      toast.show({ message: "No saved remote profile", variant: "warning" })
+      await DialogAlert.show(dialog, "Remote profiles", "Nenhum perfil remoto salvo.")
       dialog.clear()
       return undefined
     }
     const currentID = kv.get("remote_ssh_active_profile") as string | undefined
-    const rows = list.slice(0, 80).map((x, i) => String(i + 1) + ") " + (x.id === currentID ? "* " : "") + x.name + " | " + (x.type || "ssh") + " | " + x.user + "@" + x.host + ":" + x.port + " | key=" + (x.key_name || x.identity_file || x.credential_ref || "-"))
-    const input = ((await DialogPrompt.show(dialog, ["Remote profiles", ...rows, "", "Actions: number=use | d<num>=details | (Enter)=close"].join("\n"), {
-      placeholder: "",
-      value: "",
-    })) || "").trim().toLowerCase()
-    if (!input) return undefined
-    const num = parseInt(input.replace(/[^0-9]/g, ""))
-    if (!isNaN(num) && num > 0 && num <= list.length) return list[num - 1]
-    if (input === "d" || input.startsWith("d ")) {
-      const profileNum = parseInt(input.replace(/[^0-9]/g, ""))
-      const profile = !isNaN(profileNum) && profileNum > 0 && profileNum <= list.length ? list[profileNum - 1] : list[0]
-      await DialogPrompt.show(dialog, JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport, identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref }, null, 2), { placeholder: "Enter para fechar", value: "" })
-      toast.show({ message: "Detalhes exibidos em diálogo", variant: "success" })
-      return undefined
-    }
-    return undefined
-  }
-
-  const createMasterRemoteAccessProfile = async () => {
-    const raw = ((await DialogPrompt.show(dialog, [
-      "Criar acesso remoto com chave mestra MarksCode",
-      "Informe JSON sem senha. Para SSH, key_name/identity_file serão preenchidos por padrão.",
-      "Campos mínimos: name, host, user. Opcional: type ssh|winrm, port, host_alias, credential_ref.",
-    ].join("\n"), {
-      placeholder: '{"name":"server1","host":"1.2.3.4","user":"marcos","type":"ssh"}',
-      value: JSON.stringify({ name: "", host: "", user: "", type: "ssh", port: 22, key_name: MARKSCODE_MASTER_KEY_NAME, identity_file: MARKSCODE_MASTER_IDENTITY_FILE, host_alias: "" }, null, 2),
-    })) || "").trim()
-    if (!raw) { dialog.clear(); return }
-    const data = JSON.parse(raw) as Partial<RemoteSSHProfile>
-    if (!data.name || !data.host || !data.user) throw new Error("Acesso remoto requer name, host e user")
-    const now = new Date().toISOString()
-    writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), normalizeRemoteProfile({ ...data, name: data.name, host: data.host, user: data.user, identity_file: data.type === "winrm" ? data.identity_file : data.identity_file || MARKSCODE_MASTER_IDENTITY_FILE, key_name: data.type === "winrm" ? data.key_name : data.key_name || MARKSCODE_MASTER_KEY_NAME, created_at: data.created_at || now })])
-    toast.show({ message: "Perfil remoto com chave mestra salvo sem senha", variant: "success" })
-    dialog.clear()
+    const picked = await selectRemoteOption<string>("Select remote profile", list.slice(0, 80).map((profile) => ({
+      title: (profile.id === currentID ? "* " : "") + String(profile.name),
+      value: profile.id,
+      description: String(profile.user) + "@" + String(profile.host) + ":" + String(profile.port) + " | " + String(profile.type || "ssh"),
+      details: ["auth: " + String(profile.auth_method || "-"), "key: " + String(profile.key_name || profile.identity_file || profile.credential_ref || "-")],
+    })))
+    return picked ? list.find((profile) => profile.id === picked) : undefined
   }
 
   const showRemoteSSHProfilesDialog = async (presetAction?: RemoteSSHProfileAction) => {
-    const actionInput = presetAction || ((await DialogPrompt.show(dialog, [
-      "Gerenciador de perfis remotos MarksCode",
-      ...MARKSCODE_VISIBLE_REMOTE_PROFILES_ACTIONS.map((label, index) => String(index + 1) + ") " + label),
-      "",
-      "Digite número ou nome da ação.",
-    ].join("\n"), { placeholder: "Listar perfis", value: "" })) || "").trim().toLowerCase()
-    if (!actionInput) { dialog.clear(); return }
-    const actionMap: Record<string, RemoteSSHProfileAction> = {
-      "1": "list", listar: "list", "listar perfis": "list",
-      "2": "use", usar: "use", "usar perfil": "use",
-      "3": "save", salvar: "save", "salvar perfil atual": "save",
-      "4": "master", mestre: "master", "criar acesso com chave mestra": "master",
-      "5": "registry", registry: "registry", "injetar registry de perfis no contexto": "registry",
-      "6": "edit", editar: "edit", "editar perfil": "edit",
-      "7": "delete", excluir: "delete", "excluir perfil": "delete",
-      "8": "import", importar: "import", "importar perfil json": "import",
-    }
-    const action = actionMap[actionInput]
+    const action = presetAction || await selectRemoteOption<RemoteSSHProfileAction | "create-ssh" | "create-winrm" | "create-powershell" | "create-whm" | "export" | "close">("Gerenciar Perfis Remotos", [
+      { title: "Create SSH/Linux profile", value: "create-ssh", description: "Wizard guiado: nome, host, usuário, porta, autenticação e revisão" },
+      { title: "Create WinRM/Windows profile", value: "create-winrm", description: "Wizard guiado para Windows via WinRM" },
+      { title: "Create PowerShell/Windows profile", value: "create-powershell", description: "Wizard guiado para PowerShell remoto direto no Windows" },
+      { title: "Create WHM/cPanel profile", value: "create-whm", description: "Wizard guiado com credential_ref para token API" },
+      { title: "Use profile", value: "use", description: "Ativar um perfil remoto salvo" },
+      { title: "Edit profile", value: "edit", description: "Editar JSON seguro de um perfil existente" },
+      { title: "Delete profile", value: "delete", description: "Remover perfil salvo" },
+      { title: "Export/copy JSON", value: "export", description: "Mostrar JSON seguro para copiar" },
+      { title: "Import JSON (advanced)", value: "import", description: "Importar JSON sem senha/senha plaintext" },
+      { title: "Close", value: "close", description: "Fechar gerenciador" },
+    ])
     if (!action) {
       toast.show({ message: "Ação de perfil remoto não reconhecida", variant: "warning" })
       dialog.clear()
       return
     }
-    if (action === "master") { await createMasterRemoteAccessProfile(); return }
+    if (action === "close") { dialog.clear(); return }
+    if (action === "create-ssh") { await runRemoteCreateWizard("ssh"); return }
+    if (action === "create-winrm") { await runRemoteCreateWizard("winrm"); return }
+    if (action === "create-powershell") { await runRemoteCreateWizard("powershell"); return }
+    if (action === "create-whm") { await runRemoteCreateWizard("whm"); return }
+    if (action === "master") { await runRemoteCreateWizard("ssh"); return }
     if (action === "registry") {
       const registry = updateRemoteSSHProfilesRegistry()
       toast.show({ message: "Registry remoto atualizado: " + registry.names.length + " perfis / " + registry.aliases.length + " aliases", variant: "success" })
@@ -745,7 +987,7 @@ export function Session() {
     }
     if (action === "list") {
       const profiles = readRemoteSSHProfiles()
-      await DialogPrompt.show(dialog, profiles.length ? profiles.map((profile, index) => String(index + 1) + ") " + JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, host_alias: profile.host_alias, key_name: profile.key_name, identity_file: profile.identity_file, credential_ref: profile.credential_ref })).join("\n") : "Nenhum perfil salvo. Use Criar acesso com chave mestra ou Importar perfil JSON.", { placeholder: "Enter para fechar", value: "" })
+      await DialogPrompt.show(dialog, profiles.length ? profiles.map((profile, index) => String(index + 1) + ") " + safeRemoteProfileJSON(profile)).join("\n") : "Nenhum perfil salvo. Use Create SSH/Linux profile, Create WHM/cPanel profile ou Import JSON (advanced).", { placeholder: "Enter para fechar", value: "" })
       toast.show({ message: "Lista de perfis exibida em diálogo", variant: "success" })
       dialog.clear()
       return
@@ -756,8 +998,8 @@ export function Session() {
       const name = ((await DialogPrompt.show(dialog, "Salvar perfil atual", { placeholder: "nome do perfil", value: String(cfg.host_alias || cfg.host || "") })) || "").trim()
       if (!name) { dialog.clear(); return }
       const now = new Date().toISOString()
-      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== name), normalizeRemoteProfile({ id: name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name, type: cfg.type, host: cfg.host, user: cfg.user, port: cfg.port, transport: cfg.transport, identity_file: cfg.identity_file, key_name: cfg.key_name, host_alias: cfg.host_alias, credential_ref: cfg.credential_ref, auth_method: cfg.auth_method, created_at: now })])
-      toast.show({ message: "Perfil remoto salvo sem senha em texto puro", variant: "success" })
+      writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== name), normalizeRemoteProfile({ id: name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || String(Date.now()), name, type: cfg.type, host: cfg.host, user: cfg.user, port: cfg.port, transport: cfg.transport, identity_file: cfg.identity_file, key_name: cfg.key_name, host_alias: cfg.host_alias, credential_ref: cfg.credential_ref, auth_method: cfg.auth_method, protocol: cfg.protocol, master_key_ref: cfg.master_key_ref, encrypted_password: cfg.encrypted_password, pki_enabled: cfg.pki_enabled, created_at: now })])
+      toast.show({ message: "Perfil remoto salvo sem campos password/senha em texto puro", variant: "success" })
       dialog.clear()
       return
     }
@@ -765,32 +1007,33 @@ export function Session() {
       const raw = ((await DialogPrompt.show(dialog, "Importar perfil JSON", { placeholder: '{"name":"server1","host":"...","user":"..."}', value: "" })) || "").trim()
       if (!raw) { dialog.clear(); return }
       const data = JSON.parse(raw) as Partial<RemoteSSHProfile> & { password?: string; senha?: string }
-      if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
+      rejectPlaintextSecretFields(data as Record<string, unknown>)
       if (!data.name || !data.host || !data.user) throw new Error("Perfil JSON requer name, host e user")
+      validateRemotePortStrict(data.port || defaultRemotePort(normalizeRemoteType(data.type)), defaultRemotePort(normalizeRemoteType(data.type)))
       const now = new Date().toISOString()
       writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((profile) => profile.name !== data.name), normalizeRemoteProfile({ ...data, name: data.name, host: data.host, user: data.user, created_at: data.created_at || now })])
-      toast.show({ message: "Perfil remoto importado sem senha em texto puro", variant: "success" })
+      toast.show({ message: "Perfil remoto importado sem campos password/senha em texto puro", variant: "success" })
       dialog.clear()
       return
     }
     const profile = await pickRemoteSSHProfileSimple()
     if (!profile) { dialog.clear(); return }
     if (action === "delete") { writeRemoteSSHProfiles(readRemoteSSHProfiles().filter((item) => item.id !== profile.id)); toast.show({ message: "Perfil remoto excluído", variant: "success" }); dialog.clear(); return }
+    if (action === "export") { await DialogPrompt.show(dialog, "Export/copy JSON seguro", { placeholder: "Enter para fechar", value: safeRemoteProfileJSON(profile) }); dialog.clear(); return }
     if (action === "edit") {
       const raw = ((await DialogPrompt.show(dialog, "Editar perfil remoto JSON seguro (não inclua password/senha)", { placeholder: JSON.stringify(profile), value: JSON.stringify(profile, null, 2) })) || "").trim()
       if (!raw) { dialog.clear(); return }
       const data = JSON.parse(raw) as Partial<RemoteSSHProfile> & { password?: string; senha?: string }
-      if (data.password || data.senha) throw new Error("Perfil remoto não pode salvar senha em texto puro")
+      rejectPlaintextSecretFields(data as Record<string, unknown>)
       if (!data.name || !data.host || !data.user) throw new Error("Perfil editado requer name, host e user")
+      validateRemotePortStrict(data.port || profile.port || defaultRemotePort(normalizeRemoteType(data.type || profile.type)), defaultRemotePort(normalizeRemoteType(data.type || profile.type)))
       const now = new Date().toISOString()
       writeRemoteSSHProfiles([...readRemoteSSHProfiles().filter((item) => item.id !== profile.id && item.name !== data.name), normalizeRemoteProfile({ ...data, id: data.id || profile.id, name: data.name, host: data.host, user: data.user, created_at: data.created_at || profile.created_at || now })])
-      toast.show({ message: "Perfil remoto editado e salvo sem senha", variant: "success" })
+      toast.show({ message: "Perfil remoto editado e salvo sem campos password/senha em texto puro", variant: "success" })
       dialog.clear()
       return
     }
-    const cfg: RemoteSSHConfig = { type: normalizeRemoteType(profile.type), host: profile.host, user: profile.user, port: normalizeRemotePort(String(profile.port)), transport: normalizeRemoteTransport(profile.transport) || "https", identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref, auth_method: profile.auth_method || undefined }
-    kv.set("remote_ssh_config", cfg)
-    kv.set("remote_ssh_active_profile", profile.id)
+    activateRemoteProfile(profile)
     toast.show({ message: "Remote profile active in this chat", variant: "success" })
     dialog.clear()
   }
@@ -1015,14 +1258,53 @@ export function Session() {
     return rows.length ? rows : ["Nenhum assunto recente retornado. Status: " + JSON.stringify(result.sources)]
   }
 
+  const hasEnvMemoryAPIKey = () => Boolean(process.env.MARKSCODE_MEMORIES_API_KEY?.trim() || process.env.MEMORIES_API_KEY?.trim())
+
+  async function hydrateRemoteMemoryConfigFromActiveAccount() {
+    if (hasEnvMemoryAPIKey()) return
+
+    await AppRuntime.runPromise(
+      Effect.gen(function* () {
+        const service = yield* Account.Service
+        const active = yield* service.active()
+        if (Option.isNone(active)) return
+        if (!active.value.active_org_id) return
+        yield* service.config(active.value.id, active.value.active_org_id)
+      }).pipe(Effect.catch(() => Effect.void)),
+    ).catch(() => undefined)
+  }
 
   const refreshHybridMemoryStatus = async () => {
+    await hydrateRemoteMemoryConfigFromActiveAccount()
     const status = (await hybridMemoryStatus()) as Record<string, unknown>
     const local = status.local && typeof status.local === "object" ? status.local as Record<string, unknown> : {}
     kv.set("memories_hybrid_local_available", status.local_available ? "1" : "0")
     kv.set("memories_hybrid_cloud_available", status.cloud_available ? "1" : "0")
     kv.set("memories_hybrid_provider", String(status.provider || "hybrid"))
     kv.set("memories_hybrid_capsule", String(local.capsule || status.capsule || local.path || ""))
+    kv.set("memories_hybrid_local_count", Number.isFinite(local.count) ? String(local.count) : "")
+    kv.set("memories_hybrid_local_reason", local.reason ? String(local.reason) : "")
+
+    // BrainSystem diagnose
+    try {
+      const diag = diagnoseBrainSystem({
+        capsulePath: String(local.capsule || status.capsule || ""),
+        projectRoot: process.cwd(),
+        sessionDbPath: Database.getPath(),
+      })
+      kv.set("brainsystem_overall", diag.overall)
+      kv.set("brainsystem_layers", JSON.stringify(diag.layers.map(l => ({
+        name: l.layer,
+        status: l.status,
+        reason: l.details,
+      }))))
+      for (const layer of diag.layers) {
+        const key = "brainsystem_" + layer.layer.toLowerCase().replace(/[^a-z0-9]/g, "_")
+        kv.set(key, layer.status)
+      }
+    } catch {
+      kv.set("brainsystem_overall", "error")
+    }
   }
 
   const refreshCloudMemories = async (sessionID: string) => {
@@ -1045,6 +1327,11 @@ export function Session() {
     }
   }
   // MARKSCODE_MEMORIES_HELPERS_END
+  // Initialize BrainSystem/hybrid memory status on mount
+  onMount(() => {
+    void refreshHybridMemoryStatus()
+  })
+
       
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -2272,97 +2559,7 @@ export function Session() {
         moveChild(-1)
       }),
     },
-    {
-      title: "MarksCode: Testar auto-handoff de contexto",
-      name: "markscode.memories.test-auto-handoff",
-      category: "MarksCode",
-      slashName: "memory-test-auto-handoff",
-      run: async () => {
-        const targetSessionID = route.sessionID
-        if (!targetSessionID) {
-          toast.show({ message: "Set a session first", variant: "warning" })
-          dialog.clear()
-          return
-        }
-        try {
-          await recoverFromContextOverflow(targetSessionID, { force: true })
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Failed to test auto-handoff"
-          await debugMemoryLog("recover:test-command:error", { sessionID: targetSessionID, message })
-          toast.show({ message: "Auto-handoff falhou: " + message, variant: "error", duration: 15000 })
-        }
-        dialog.clear()
-      },
-    },
-    {
-      title: "MarksCode: Buscar na Memória (todos os endpoints)",
-      name: "markscode.memories.search",
-      category: "MarksCode",
-      slashName: "memory-search",
-      run: async () => {
-        const searchQuery = await DialogPrompt.show(dialog, "Buscar na Memória", {
-          placeholder: "Digite o contexto/prompt de busca...",
-        })
-        if (!searchQuery) {
-          dialog.clear()
-          return
-        }
-        try {
-          const targetSessionID = route.sessionID
-          const user = memoriesUserID
-          const search = await searchAdvancedMemories({
-            user_id: user,
-            session_id: targetSessionID || undefined,
-            query: searchQuery,
-            fuzzy: true,
-            limit: 10,
-          })
-          const fromSearch = Array.isArray(search?.memories) ? search.memories : []
-
-          let ctxRows = fromSearch
-          if (!ctxRows.length) {
-            const global = await getGlobalContext({
-              user_id: user,
-              session_id: targetSessionID || undefined,
-              query: searchQuery,
-              limit: 10,
-            })
-            ctxRows = Array.isArray(global?.memories) ? global.memories : []
-          }
-
-          if (!ctxRows.length) {
-            toast.show({ message: "Nenhuma memória encontrada", variant: "warning" })
-            dialog.clear()
-            return
-          }
-
-          const rows = ctxRows
-            .slice(0, 10)
-            .map((x) => {
-              const head = x.title || x.subject || "sem titulo"
-              const body = String(x.content || "").replace(/\s+/g, " ").trim().slice(0, 180)
-              return "- " + head + ": " + body
-            })
-
-          injectContext(
-            "[Memórias - Contexto de busca API]",
-            [
-              "- query: " + searchQuery,
-              "- user_id: " + user,
-              "- session_id: " + (targetSessionID || "(global)"),
-              "- total: " + String(rows.length),
-              "",
-              ...rows,
-            ],
-          )
-          toast.show({ message: String(rows.length) + " memórias carregadas no contexto", variant: "success" })
-        } catch (err) {
-          toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memórias", variant: "error" })
-        }
-        dialog.clear()
-      },
-    },
-    {
+{
       title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
       name: "markscode.memories.recent-topics",
       category: "MarksCode",
@@ -2379,7 +2576,6 @@ export function Session() {
             }}
           />
         ))
-      },
     },
     {
       title: "MarksCode: Buscar na Memória Local (Memvid)",
@@ -2398,7 +2594,6 @@ export function Session() {
           toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memória local", variant: "error" })
         }
         dialog.clear()
-      },
     },
     {
       title: "MarksCode: Buscar na Memória Global",
@@ -2420,20 +2615,93 @@ export function Session() {
         dialog.clear()
       },
     },
-    {
-      title: "MarksCode: Inserir assuntos recentes no prompt",
-      name: "markscode.memories.recent-topics-insert",
+{
+      title: "MarksCode: Diagnóstico de memória (Memory Doctor)",
+      name: "markscode.memories.doctor",
       category: "MarksCode",
-      slashName: "memory-recent-topics-insert",
+      slashName: "memory-doctor",
       run: async () => {
-        try {
-          const result = await listHybridRecentTopics({ user_id: memoriesUserID, session_id: route.sessionID || undefined, limit: 12, provider: "hybrid" })
-          const rows = result.topics.map((topic, index) => String(index + 1) + ". [" + topic.source + "] " + topic.topic + (topic.content_preview ? " — " + topic.content_preview : ""))
-          injectContext("[Assuntos recentes - Memvid/BrainSystem]", rows.length ? rows : ["Nenhum assunto recente retornado. Status: " + JSON.stringify(result.sources)])
-          toast.show({ message: "Assuntos recentes carregados no prompt", variant: "success" })
-        } catch (err) {
-          toast.show({ message: err instanceof Error ? err.message : "Erro ao listar assuntos recentes", variant: "error" })
+        const lines: string[] = ["[Memory Doctor] - Diagnóstico BrainSystem"]
+
+        await hydrateRemoteMemoryConfigFromActiveAccount()
+        const status = (await hybridMemoryStatus().catch(() => ({}))) as Record<string, unknown>
+        const localStatus = status.local && typeof status.local === "object" ? status.local as Record<string, unknown> : {}
+        const sidecarPath = String(localStatus.cli || "")
+        const sidecarOk = Boolean(status.local_available)
+        const capsulePath = String(localStatus.capsule || status.capsule || "")
+        const capsuleCount = Number.isFinite(localStatus.count) ? String(localStatus.count) : ""
+        const sidecarReason = String(localStatus.reason || "")
+
+        lines.push(
+          sidecarOk
+            ? "✅ Sidecar Memvid: " + sidecarPath + " (contract v1)"
+            : "❌ Sidecar Memvid: " + (sidecarReason || "não encontrado"),
+        )
+
+        const capsuleExists = capsulePath && typeof Bun !== "undefined"
+          ? await (async () => { try { const f = Bun.file(capsulePath); return (await f.exists()); } catch { return false } })()
+          : false
+        lines.push(
+          capsuleExists
+            ? "✅ Cápsula .mv2: " + capsulePath + (capsuleCount ? " (" + capsuleCount + " itens)" : "")
+            : "❌ Cápsula .mv2: " + (capsulePath || "caminho desconhecido") + " (não encontrada)",
+        )
+
+        const memJson = await loadMemory().catch(() => ({}))
+        const memJsonCount = Object.keys(memJson).length
+        lines.push(
+          memJsonCount > 0
+            ? "✅ memories.json: " + memJsonCount + " assuntos"
+            : "⚠️ memories.json: vazio ou ausente",
+        )
+
+        const cloudOk = Boolean(status.cloud_available)
+        if (!cloudOk) {
+          lines.push("❌ API remota: sem configuração cloud (MARKSCODE_MEMORIES_API_KEY / MEMORIES_API_KEY)")
+        } else {
+          const cloudTest = await recallHybridMemories({ cue: "test", provider: "cloud", limit: 1 }).catch(() => null)
+          lines.push(
+            cloudTest && !cloudTest.errors.some((e) => e.startsWith("cloud:"))
+              ? "✅ API remota: acessível"
+              : "⚠️ API remota: chave configurada mas não respondeu",
+          )
         }
+
+        const memoryMdPath = process.cwd() + "/MEMORY.md"
+        const memoryMdExists = await (async () => { try { return await Bun.file(memoryMdPath).exists(); } catch { return false } })()
+        lines.push(
+          memoryMdExists
+            ? "✅ MEMORY.md: encontrado em " + memoryMdPath
+            : "❌ MEMORY.md: não encontrado no projeto",
+        )
+
+        const kvLocal = kv.get("memories_hybrid_local_available")
+        lines.push(
+          String(kvLocal) === "1"
+            ? "✅ KV Plugin: local=ok"
+            : "⚠️ KV Plugin: local=" + String(kvLocal || "não definido"),
+        )
+
+        const sessionID = route.sessionID
+        lines.push(
+          sessionID
+            ? "✅ Session ID: " + sessionID
+            : "❌ Session ID: não encontrado",
+        )
+
+        lines.push(
+          autoHandoffEnabled
+            ? "✅ Auto-handoff: ativo"
+            : "⚠️ Auto-handoff: inativo (MEMORIES_AUTO_HANDOFF_ENABLED=0)",
+        )
+
+        kv.set("memories_hybrid_local_available", sidecarOk ? "1" : "0")
+        kv.set("memories_hybrid_local_count", capsuleCount)
+        kv.set("memories_hybrid_local_reason", sidecarReason)
+        kv.set("memories_hybrid_capsule", capsulePath)
+
+        injectContext("[Memory Doctor]", lines)
+        toast.show({ message: "Memory Doctor executado — diagnóstico injetado no prompt", variant: "success", duration: 8000 })
         dialog.clear()
       },
     },
@@ -2570,6 +2838,395 @@ export function Session() {
       },
     },
     // MARKSCODE_MAP_COMMANDS_END
+{
+      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
+      name: "markscode.memories.recent-topics",
+      category: "MarksCode",
+      slashName: "memory-recent-topics",
+      run: () => {
+        dialog.replace(() => (
+          <DialogRecentTopics
+            userID={memoriesUserID}
+            sessionID={route.sessionID || undefined}
+            onSelect={(topic) => {
+              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
+              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
+              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
+            }}
+          />
+        ))
+      },
+    },
+{
+      title: "MarksCode: Salvar Human Memory manual",
+      name: "markscode.memories.save-human",
+      category: "MarksCode",
+      slashName: "memory-save-human",
+      run: async () => {
+        await saveSessionMemory("manual")
+          .then((ok) => {
+            if (!ok) {
+              toast.show({ message: "Sem conversa para salvar", variant: "warning", duration: 6500 })
+              return
+            }
+            toast.show({ message: "Human Memory salva", variant: "success", duration: 6000 })
+          })
+          .catch((err) => {
+            toast.show({ message: err instanceof Error ? err.message : "Erro ao salvar Human Memory", variant: "error", duration: 9000 })
+          })
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
+      name: "markscode.memories.recent-topics",
+      category: "MarksCode",
+      slashName: "memory-recent-topics",
+      run: () => {
+        dialog.replace(() => (
+          <DialogRecentTopics
+            userID={memoriesUserID}
+            sessionID={route.sessionID || undefined}
+            onSelect={(topic) => {
+              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
+              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
+              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "MarksCode: Testar auto-handoff de contexto",
+      name: "markscode.memories.test-auto-handoff",
+      category: "MarksCode",
+      slashName: "memory-test-auto-handoff",
+      run: async () => {
+        const targetSessionID = route.sessionID
+        if (!targetSessionID) {
+          toast.show({ message: "Set a session first", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        try {
+          await recoverFromContextOverflow(targetSessionID, { force: true })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to test auto-handoff"
+          await debugMemoryLog("recover:test-command:error", { sessionID: targetSessionID, message })
+          toast.show({ message: "Auto-handoff falhou: " + message, variant: "error", duration: 15000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Buscar na Memória (todos os endpoints)",
+      name: "markscode.memories.search",
+      category: "MarksCode",
+      slashName: "memory-search",
+      run: async () => {
+        const searchQuery = await DialogPrompt.show(dialog, "Buscar na Memória", {
+          placeholder: "Digite o contexto/prompt de busca...",
+        })
+        if (!searchQuery) {
+          dialog.clear()
+          return
+        }
+        try {
+          const targetSessionID = route.sessionID
+          const user = memoriesUserID
+          const search = await searchAdvancedMemories({
+            user_id: user,
+            session_id: targetSessionID || undefined,
+            query: searchQuery,
+            fuzzy: true,
+            limit: 10,
+          })
+          const fromSearch = Array.isArray(search?.memories) ? search.memories : []
+
+          let ctxRows = fromSearch
+          if (!ctxRows.length) {
+            const global = await getGlobalContext({
+              user_id: user,
+              session_id: targetSessionID || undefined,
+              query: searchQuery,
+              limit: 10,
+            })
+            ctxRows = Array.isArray(global?.memories) ? global.memories : []
+          }
+
+          if (!ctxRows.length) {
+            toast.show({ message: "Nenhuma memória encontrada", variant: "warning" })
+            dialog.clear()
+            return
+          }
+
+          const rows = ctxRows
+            .slice(0, 10)
+            .map((x) => {
+              const head = x.title || x.subject || "sem titulo"
+              const body = String(x.content || "").replace(/\s+/g, " ").trim().slice(0, 180)
+              return "- " + head + ": " + body
+            })
+
+          injectContext(
+            "[Memórias - Contexto de busca API]",
+            [
+              "- query: " + searchQuery,
+              "- user_id: " + user,
+              "- session_id: " + (targetSessionID || "(global)"),
+              "- total: " + String(rows.length),
+              "",
+              ...rows,
+            ],
+          )
+          toast.show({ message: String(rows.length) + " memórias carregadas no contexto", variant: "success" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memórias", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Repair BrainSystem",
+      name: "markscode.memories.repair",
+      category: "MarksCode",
+      slashName: "memory-repair",
+      run: async () => {
+        const projectRoot = process.cwd()
+        await hydrateRemoteMemoryConfigFromActiveAccount()
+        const status = (await hybridMemoryStatus().catch(() => ({}))) as Record<string, unknown>
+        const local = status.local && typeof status.local === "object" ? status.local as Record<string, unknown> : {}
+        const capsulePath = String(local.capsule || status.capsule || process.env.MARKSCODE_MEMVID_CAPSULE || "")
+        const diagnosis = diagnoseBrainSystem({
+          capsulePath: capsulePath || undefined,
+          projectRoot,
+          sessionDbPath: Database.getPath(),
+        })
+        const memoryLayer = diagnosis.layers.find((layer) => layer.layer === "Memory MD")
+        const projectTasksLayer = diagnosis.layers.find((layer) => layer.layer === "Project Tasks")
+        const memvidLayer = diagnosis.layers.find((layer) => layer.layer === "Cápsula Memvid")
+        const memoryMissing = memoryLayer?.status !== "ok"
+        const projectTasksMissing = projectTasksLayer?.status !== "ok"
+        const memvidNeedsRepair = memvidLayer?.status !== "ok"
+        const options: DialogSelectOption<string>[] = [
+          {
+            title: memoryMissing ? "Gerar MEMORY.md template" : "MEMORY.md já presente",
+            value: "memory-md",
+            description: memoryLayer?.details || "Verificar MEMORY.md do projeto",
+            disabled: !memoryMissing,
+          },
+          {
+            title: projectTasksMissing ? "Criar estrutura .tasks" : "Reparar estrutura .tasks",
+            value: "project-tasks",
+            description: projectTasksLayer?.details || "Criar/validar .tasks/index.md, template.md e README.md",
+          },
+          {
+            title: memvidNeedsRepair ? "Inicializar/buildar cápsula Memvid" : "Cápsula Memvid ok",
+            value: "memvid",
+            description: memvidLayer?.details || "Verificar capsule Memvid local",
+            disabled: !memvidNeedsRepair,
+          },
+          {
+            title: "Inserir plano/diagnóstico no prompt",
+            value: "inject-report",
+            description: "Adiciona relatório BrainSystem e próximos passos ao prompt atual",
+          },
+          {
+            title: "Atualizar status da sidebar",
+            value: "refresh",
+            description: "Reexecuta status híbrido e diagnóstico BrainSystem",
+          },
+        ]
+        const choose = await new Promise<string | undefined>((resolve) => {
+          dialog.replace(
+            () => (
+              <DialogSelect
+                title="Repair BrainSystem"
+                placeholder="Escolha uma ação segura..."
+                options={options}
+                onSelect={(option) => resolve(option.value)}
+              />
+            ),
+            () => resolve(undefined),
+          )
+        })
+        if (!choose) {
+          dialog.clear()
+          return
+        }
+        if (choose === "memory-md") {
+          const fs = await import("fs")
+          const pathMod = await import("path")
+          const ensureProjectTasks = () => {
+            const tasksDir = pathMod.join(projectRoot, ".tasks")
+            const projectName = pathMod.basename(projectRoot)
+            fs.mkdirSync(tasksDir, { recursive: true })
+            const files = [
+              { path: pathMod.join(tasksDir, "README.md"), content: ["# .tasks — Local execution ledger", "", "This directory stores local summaries of orchestrator and subagent task executions for this project.", "", "## Purpose", "- Keep sequential task execution notes and summaries.", "- Reduce token repetition by referencing prior prompts, results, validations, and follow-ups.", "- Organize complex project execution across orchestrator/subagent waves.", "", "## Safety", "- Do not store secrets, credentials, private keys, tokens, or sensitive customer data.", "- Summarize prompts/results instead of copying full confidential content.", ""].join("\n") },
+              { path: pathMod.join(tasksDir, "index.md"), content: ["# Tasks Index — " + projectName, "", "Generated: " + new Date().toISOString(), "", "## Active", "- ", "", "## Recent Executions", "- ", "", "## Decisions", "- ", "", "## Backlog", "- ", "", "## Done", "- ", ""].join("\n") },
+              { path: pathMod.join(tasksDir, "template.md"), content: ["# Task: <title>", "", "## Goal", "- ", "", "## Context", "- ", "", "## Subagent/Wave", "- ", "", "## Steps", "1. ", "", "## Validation", "- ", "", "## Summary", "- ", "", "## Follow-ups", "- ", ""].join("\n") },
+            ]
+            const created = files.filter((file) => !fs.existsSync(file.path)).map((file) => {
+              fs.writeFileSync(file.path, file.content, { encoding: "utf8", flag: "wx" })
+              return file.path
+            })
+            return { tasksDir, created }
+          }
+          const target = pathMod.join(projectRoot, "MEMORY.md")
+          const exists = fs.existsSync(target)
+          if (exists) {
+            const force = await DialogConfirm.show(dialog, "MEMORY.md já existe", "O arquivo já existe. Sobrescrever template? Esta ação pode substituir contexto do projeto.")
+            if (!force) {
+              dialog.clear()
+              return
+            }
+          } else {
+            const ok = await DialogConfirm.show(dialog, "Gerar MEMORY.md", "Criar template em " + target + "?")
+            if (!ok) {
+              dialog.clear()
+              return
+            }
+          }
+          const projectName = pathMod.basename(projectRoot)
+          const template = [
+            "# MEMORY.md — " + projectName,
+            "",
+            "Generated: " + new Date().toISOString(),
+            "",
+            "## Overview",
+            "- Descreva o objetivo do projeto e o contexto persistente essencial.",
+            "",
+            "## Architecture",
+            "- Registre módulos, integrações e decisões arquiteturais importantes.",
+            "",
+            "## Commands",
+            "- Typecheck: bun typecheck",
+            "- Tests: descreva os testes relevantes do projeto.",
+            "- Build: descreva o comando de build/deploy aplicável.",
+            "",
+            "## Memory Notes",
+            "- Adicione fatos persistentes que devem sobreviver entre sessões.",
+            "",
+            "## Project Tasks Ledger",
+            "- Use '.tasks/' como ledger local de execuções do orquestrador/subagentes, resumos de prompts/resultados, validações e follow-ups.",
+            "- Não armazene segredos em '.tasks/'.",
+            "",
+            "## Open Questions",
+            "- Liste dúvidas, riscos ou decisões pendentes.",
+            "",
+          ].join("\n")
+          fs.writeFileSync(target, template, { encoding: "utf8", flag: "w" })
+          const tasksResult = ensureProjectTasks()
+          await refreshHybridMemoryStatus().catch(() => undefined)
+          await DialogAlert.show(dialog, "MEMORY.md gerado", "Arquivo criado/atualizado em " + target + "\n.tasks: " + tasksResult.tasksDir + "\nArquivos .tasks criados: " + (tasksResult.created.length ? tasksResult.created.join(", ") : "nenhum; existentes preservados"))
+          dialog.clear()
+          return
+        }
+        if (choose === "project-tasks") {
+          const fs = await import("fs")
+          const pathMod = await import("path")
+          const ok = await DialogConfirm.show(dialog, "Criar estrutura .tasks", "Criar/reparar .tasks em " + pathMod.join(projectRoot, ".tasks") + " sem sobrescrever arquivos existentes?")
+          if (!ok) {
+            dialog.clear()
+            return
+          }
+          const tasksDir = pathMod.join(projectRoot, ".tasks")
+          const projectName = pathMod.basename(projectRoot)
+          fs.mkdirSync(tasksDir, { recursive: true })
+          const files = [
+            { path: pathMod.join(tasksDir, "README.md"), content: ["# .tasks — Local execution ledger", "", "This directory stores local summaries of orchestrator and subagent task executions for this project.", "", "## Purpose", "- Keep sequential task execution notes and summaries.", "- Reduce token repetition by referencing prior prompts, results, validations, and follow-ups.", "- Organize complex project execution across orchestrator/subagent waves.", "", "## Safety", "- Do not store secrets, credentials, private keys, tokens, or sensitive customer data.", "- Summarize prompts/results instead of copying full confidential content.", ""].join("\n") },
+            { path: pathMod.join(tasksDir, "index.md"), content: ["# Tasks Index — " + projectName, "", "Generated: " + new Date().toISOString(), "", "## Active", "- ", "", "## Recent Executions", "- ", "", "## Decisions", "- ", "", "## Backlog", "- ", "", "## Done", "- ", ""].join("\n") },
+            { path: pathMod.join(tasksDir, "template.md"), content: ["# Task: <title>", "", "## Goal", "- ", "", "## Context", "- ", "", "## Subagent/Wave", "- ", "", "## Steps", "1. ", "", "## Validation", "- ", "", "## Summary", "- ", "", "## Follow-ups", "- ", ""].join("\n") },
+          ]
+          const created = files.filter((file) => !fs.existsSync(file.path)).map((file) => {
+            fs.writeFileSync(file.path, file.content, { encoding: "utf8", flag: "wx" })
+            return file.path
+          })
+          await refreshHybridMemoryStatus().catch(() => undefined)
+          await DialogAlert.show(dialog, ".tasks verificado", "Diretório: " + tasksDir + "\nArquivos criados: " + (created.length ? created.join(", ") : "nenhum; existentes preservados"))
+          dialog.clear()
+          return
+        }
+        if (choose === "memvid") {
+          const ok = await DialogConfirm.show(dialog, "Build Memvid", "Gerar/atualizar cápsula Memvid local" + (capsulePath ? " em " + capsulePath : "") + "? A operação escreve arquivos locais de memória, sem segredos em texto puro.")
+          if (!ok) {
+            dialog.clear()
+            return
+          }
+          try {
+            const result = await ingestHybridMemories({
+              user_id: memoriesUserID,
+              session_id: route.sessionID || undefined,
+              source: "all",
+              limit: 500,
+              write_memvid: true,
+              capsule: capsulePath || undefined,
+            })
+            await refreshHybridMemoryStatus().catch(() => undefined)
+            const memvid = result.memvid && typeof result.memvid === "object" ? result.memvid as Record<string, unknown> : {}
+            await DialogAlert.show(dialog, "Memvid repair concluído", "Itens analisados: " + String(result.count || 0) + "\nEscritos: " + String(memvid.written ?? memvid.item_count ?? 0) + "\nAvisos: " + String((result.warnings || []).join("; ") || "nenhum") + "\nErros: " + String((result.errors || []).join("; ") || "nenhum"))
+          } catch (err) {
+            await DialogAlert.show(dialog, "Memvid repair falhou", err instanceof Error ? err.message : String(err))
+          }
+          dialog.clear()
+          return
+        }
+        if (choose === "inject-report") {
+          injectContext("[BrainSystem repair plan]", [
+            "overall: " + diagnosis.overall,
+            ...diagnosis.layers.flatMap((layer) => ["- " + layer.layer + ": " + layer.status + " — " + layer.details, layer.recommendation ? "  recomendação: " + layer.recommendation : ""].filter(Boolean)),
+            "",
+            "Plano seguro:",
+            "1. Criar MEMORY.md se ausente e preparar .tasks/ como ledger local, sem sobrescrever sem confirmação.",
+            "2. Criar/reparar .tasks/index.md, .tasks/template.md e .tasks/README.md preservando arquivos existentes.",
+            "3. Buildar capsule Memvid com write_memvid via API híbrida após confirmação.",
+            "4. Atualizar status BrainSystem/sidebar e revisar avisos restantes.",
+          ])
+          toast.show({ message: "Plano BrainSystem inserido no prompt", variant: "success" })
+          dialog.clear()
+          return
+        }
+        await refreshHybridMemoryStatus().catch(() => undefined)
+        await DialogAlert.show(dialog, "BrainSystem atualizado", "Status híbrido e diagnóstico BrainSystem foram atualizados.")
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
+      name: "markscode.memories.recent-topics",
+      category: "MarksCode",
+      slashName: "memory-recent-topics",
+      run: () => {
+        dialog.replace(() => (
+          <DialogRecentTopics
+            userID={memoriesUserID}
+            sessionID={route.sessionID || undefined}
+            onSelect={(topic) => {
+              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
+              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
+              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "MarksCode: Inserir assuntos recentes no prompt",
+      name: "markscode.memories.recent-topics-insert",
+      category: "MarksCode",
+      slashName: "memory-recent-topics-insert",
+      run: async () => {
+        try {
+          const result = await listHybridRecentTopics({ user_id: memoriesUserID, session_id: route.sessionID || undefined, limit: 12, provider: "hybrid" })
+          const rows = result.topics.map((topic, index) => String(index + 1) + ". [" + topic.source + "] " + topic.topic + (topic.content_preview ? " — " + topic.content_preview : ""))
+          injectContext("[Assuntos recentes - Memvid/BrainSystem]", rows.length ? rows : ["Nenhum assunto recente retornado. Status: " + JSON.stringify(result.sources)])
+          toast.show({ message: "Assuntos recentes carregados no prompt", variant: "success" })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao listar assuntos recentes", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
 // MARKSCODE_MEMORIES_COMMANDS_END
     {
       title: "MarksCode: Login Markspanel",

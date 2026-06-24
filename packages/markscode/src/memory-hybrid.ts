@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs"
 import { homedir, tmpdir } from "os"
 import { dirname, join } from "path"
+import { resolveMemoryConfig } from "./memory-config"
 import { importMemories, recallHumanMemories, type MemoryMode, type MemoryType } from "./memories-api"
 
 export type MemoryProvider = "cloud" | "local" | "hybrid"
@@ -206,6 +207,14 @@ function providerFrom(value?: string): MemoryProvider {
   return PROVIDERS.has(provider as MemoryProvider) ? (provider as MemoryProvider) : "hybrid"
 }
 
+function memoryUserID(value?: string) {
+  return value || resolveMemoryConfig().user_id
+}
+
+function cloudMemoryAvailable() {
+  return Boolean(resolveMemoryConfig().memories.api_key || process.env.MARKSCODE_MEMORIES_URL || process.env.MEMORIES_URL)
+}
+
 function expandHybridMemoryCue(cue: string) {
   const normalized = cue.toLowerCase().replace(/[\s_]+/g, " ").trim()
   const hyphenNormalized = normalized.replace(/[\s_]+/g, "-")
@@ -289,6 +298,9 @@ function officialMemvidCLIStatus(cli: string) {
 function embeddedMemvidCandidates() {
   const names = process.platform === "win32" ? ["markscode-memvid.exe", "markscode-memvid"] : ["markscode-memvid"]
   return uniquePaths([
+    ...names.map((name) => join(homedir(), ".markscode/bin/vendor/memvid", name)),
+    ...names.map((name) => "/usr/local/bin/vendor/memvid/" + name),
+    ...names.map((name) => "/root/.markscode/bin/vendor/memvid/" + name),
     ...names.map((name) => join(dirname(process.execPath), "vendor/memvid", name)),
     ...names.map((name) => join(process.cwd(), "vendor/memvid", name)),
     ...names.map((name) => join(REPO_ROOT, "markscode/packages/markscode/vendor/memvid", name)),
@@ -555,7 +567,7 @@ async function inspectSource(source: string, input?: HybridIngestInput): Promise
 function baseItem(input: HybridIngestInput, source: string, content: string, extra?: Partial<HybridIngestItem>): HybridIngestItem {
   return {
     source,
-    user_id: input.user_id || process.env.MEMORIES_USER_ID || "marks-local",
+    user_id: memoryUserID(input.user_id),
     session_id: input.session_id,
     type: extra?.type || "semantic",
     memory_mode: extra?.memory_mode || "long_term",
@@ -824,7 +836,7 @@ export async function listHybridSources(): Promise<HybridSourcesResult> {
   return {
     sources,
     local_available: local.available || sources.some((source) => source.available && source.id !== "memories-api-sqlite"),
-    cloud_available: Boolean(process.env.MEMORIES_API_KEY || process.env.MEMORIES_URL),
+    cloud_available: cloudMemoryAvailable(),
     errors,
   }
 }
@@ -848,7 +860,7 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
         source: preview.source,
         source_name: input.source_name || input.source || preview.source,
         subject: input.subject,
-        default_user_id: input.user_id || process.env.MEMORIES_USER_ID || "marks-local",
+        default_user_id: memoryUserID(input.user_id),
         default_session_id: input.session_id || "hybrid-ingest-" + Date.now(),
         items: preview.items.map((item) => ({
           content: item.content,
@@ -1046,6 +1058,7 @@ const RUST_MEMVID_HELPER = [
 
 export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unknown> {
   const local = detectLocalMemvid(input)
+  const memoryConfig = resolveMemoryConfig()
   const embeddedCLI = embeddedMemvidCandidates().find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
   return {
     provider: providerFrom(),
@@ -1054,10 +1067,10 @@ export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unk
     local,
     embedded_cli: embeddedCLI,
     capsule: input?.capsule || defaultMemvidCapsulePath(),
-    cloud_available: Boolean(process.env.MEMORIES_API_KEY || process.env.MEMORIES_URL),
-    cloud_url: process.env.MEMORIES_URL || "http://api.marks.ia.br:8689",
+    cloud_available: Boolean(memoryConfig.memories.api_key || process.env.MARKSCODE_MEMORIES_URL || process.env.MEMORIES_URL),
+    cloud_url: memoryConfig.memories.url,
     defaults: {
-      user_id: process.env.MEMORIES_USER_ID || "marks-local",
+      user_id: memoryConfig.user_id,
       limit: saneLimit(),
       max_chars: saneMaxChars(),
     },
@@ -1075,7 +1088,7 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
         ok: Boolean(status.cloud_available),
         message: status.cloud_available
           ? "Cloud Memories API appears configured"
-          : "Set MEMORIES_API_KEY and optionally MEMORIES_URL for cloud recall",
+          : "Set MARKSCODE_MEMORIES_API_KEY or MEMORIES_API_KEY, and optionally MARKSCODE_MEMORIES_URL or MEMORIES_URL for cloud recall",
       },
       {
         name: "local-memvid-detection",
@@ -1089,7 +1102,7 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
 export async function recallHybridMemories(input: HybridRecallInput): Promise<HybridRecallResult> {
   const provider = providerFrom(input.provider)
   const limit = saneLimit(input.limit)
-  const userID = input.user_id || process.env.MEMORIES_USER_ID || "marks-local"
+  const userID = memoryUserID(input.user_id)
   const errors: string[] = []
   const local = detectLocalMemvid()
   const expandedCue = expandHybridMemoryCue(input.cue)

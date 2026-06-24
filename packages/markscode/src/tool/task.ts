@@ -12,6 +12,8 @@ import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { InstanceState } from "@/effect/instance-state"
+import { completeTaskLedger, errorTaskLedger, startTaskLedger } from "./task-ledger"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -230,6 +232,24 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Task ${nextSession.id} is already running.`))
       }
 
+      const instance = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const ledger = yield* Effect.sync(() =>
+        startTaskLedger({
+          projectRoot: instance?.worktree,
+          parentSessionId: ctx.sessionID,
+          parentMessageId: ctx.messageID,
+          ...(ctx.callID ? { callId: ctx.callID } : {}),
+          childSessionId: nextSession.id,
+          ...(params.task_id ? { resumedTaskId: params.task_id } : {}),
+          description: params.description,
+          subagentType: params.subagent_type,
+          ...(params.command ? { command: params.command } : {}),
+          background: runInBackground,
+          model,
+          prompt: params.prompt,
+        }),
+      ).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+
       if (runInBackground) {
         const info = yield* background.start({
           id: nextSession.id,
@@ -237,12 +257,18 @@ export const TaskTool = Tool.define(
           title: params.description,
           metadata,
           run: runTask().pipe(
+            Effect.tap((text) => Effect.sync(() => completeTaskLedger(ledger, text)).pipe(Effect.ignore)),
             Effect.tap((text) => inject("completed", text).pipe(Effect.ignore)),
             Effect.catchCause((cause) =>
-              (Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : inject("error", errorText(Cause.squash(cause))).pipe(Effect.ignore)
-              ).pipe(Effect.andThen(Effect.failCause(cause))),
+              Effect.sync(() => errorTaskLedger(ledger, errorText(Cause.squash(cause)))).pipe(
+                Effect.ignore,
+                Effect.andThen(
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.void
+                    : inject("error", errorText(Cause.squash(cause))).pipe(Effect.ignore),
+                ),
+                Effect.andThen(Effect.failCause(cause)),
+              ),
             ),
           ),
         })
@@ -270,7 +296,15 @@ export const TaskTool = Tool.define(
         }),
         () =>
           Effect.gen(function* () {
-            const text = yield* runTask()
+            const text = yield* runTask().pipe(
+              Effect.tap((value) => Effect.sync(() => completeTaskLedger(ledger, value)).pipe(Effect.ignore)),
+              Effect.catchCause((cause) =>
+                Effect.sync(() => errorTaskLedger(ledger, errorText(Cause.squash(cause)))).pipe(
+                  Effect.ignore,
+                  Effect.andThen(Effect.failCause(cause)),
+                ),
+              ),
+            )
             return {
               title: params.description,
               metadata,

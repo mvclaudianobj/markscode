@@ -29,10 +29,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
                 </text>
                 <box flexDirection="row" gap={1} flexShrink={0}>
                   <Show when={item.additions}>
-                    <text fg={theme().diffAdded}>+{item.additions}</text>
+                    <text fg={theme().diffAdded}>{`+${item.additions}`}</text>
                   </Show>
                   <Show when={item.deletions}>
-                    <text fg={theme().diffRemoved}>-{item.deletions}</text>
+                    <text fg={theme().diffRemoved}>{`-${item.deletions}`}</text>
                   </Show>
                 </box>
               </box>

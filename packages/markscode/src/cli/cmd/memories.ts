@@ -1,5 +1,9 @@
 import type { Argv } from "yargs"
 import { EOL } from "os"
+import { Effect, Option } from "effect"
+import { Account } from "@/account/account"
+import { AppRuntime } from "@/effect/app-runtime"
+import { Database } from "@/storage/db"
 import { cmd } from "./cmd"
 import { UI } from "../ui"
 import { bootstrap } from "../bootstrap"
@@ -24,8 +28,25 @@ import {
   listHybridRecentTopics,
   type MemoryProvider,
 } from "../../memory-hybrid"
+import { diagnoseBrainSystem, formatDiagnosisForDisplay } from "../../memory-diagnose"
 
 const DEFAULT_USER = "marks-local"
+
+const hasEnvMemoryAPIKey = () => Boolean(process.env.MARKSCODE_MEMORIES_API_KEY?.trim() || process.env.MEMORIES_API_KEY?.trim())
+
+async function hydrateRemoteMemoryConfigFromActiveAccount() {
+  if (hasEnvMemoryAPIKey()) return
+
+  await AppRuntime.runPromise(
+    Effect.gen(function* () {
+      const service = yield* Account.Service
+      const active = yield* service.active()
+      if (Option.isNone(active)) return
+      if (!active.value.active_org_id) return
+      yield* service.config(active.value.id, active.value.active_org_id)
+    }).pipe(Effect.catch(() => Effect.void)),
+  ).catch(() => undefined)
+}
 
 export const MemoriesCommand = cmd({
   command: "memories <action>",
@@ -35,7 +56,7 @@ export const MemoriesCommand = cmd({
       .positional("action", {
         describe: "action to perform",
         type: "string",
-        choices: ["login", "status", "config", "save", "context", "compact", "compact-rebuild", "recall", "import", "recent-topics", "topics", "hybrid-status", "hybrid-doctor", "hybrid-recall", "hybrid-sources", "hybrid-ingest-preview", "hybrid-ingest"],
+        choices: ["login", "status", "config", "save", "context", "compact", "compact-rebuild", "recall", "import", "recent-topics", "topics", "hybrid-status", "hybrid-doctor", "hybrid-recall", "hybrid-sources", "hybrid-ingest-preview", "hybrid-ingest", "diagnose"],
       })
       .option("user-id", {
         describe: "memory user id",
@@ -361,6 +382,16 @@ export const MemoriesCommand = cmd({
           })
 
           UI.println(JSON.stringify(result, null, 2) + EOL)
+          return
+        }
+
+        if (action === "diagnose") {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
+          const diag = diagnoseBrainSystem({
+            projectRoot: args.path ? String(args.path) : process.cwd(),
+            sessionDbPath: Database.getPath(),
+          })
+          UI.println(formatDiagnosisForDisplay(diag) + EOL)
           return
         }
 

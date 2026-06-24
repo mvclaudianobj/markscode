@@ -1,9 +1,10 @@
 import { Database as SQLiteDatabase } from "bun:sqlite"
-import { Global } from "@opencode-ai/core/global"
+import type { SQLQueryBindings } from "bun:sqlite"
 import { Database } from "@/storage/db"
 import { Schema } from "effect"
-import { existsSync, readdirSync, realpathSync } from "fs"
+import { existsSync, realpathSync } from "fs"
 import path from "path"
+import { DbRegistry } from "@/storage/db-registry"
 
 type Row = {
   id: string
@@ -86,38 +87,85 @@ export const Info = Schema.Struct({
   }),
 }).annotate({ identifier: "AllDbSession" })
 
-function knownDataDirs() {
-  return [Global.Path.data, "/root/.local/share/markscode", "/home/marcos/.local/share/markscode"].filter(
-    (item, index, arr) => item && arr.indexOf(item) === index,
-  )
-}
+export const ImportInput = Schema.Struct({
+  sourceDbPath: Schema.String,
+  sessionID: Schema.String,
+}).annotate({ identifier: "AllDbSessionImportInput" })
 
-function normalizeCandidate(candidate: string) {
-  if (!candidate || candidate === ":memory:") return
-  return path.isAbsolute(candidate) ? candidate : path.join(Global.Path.data, candidate)
-}
+export const ImportResult = Schema.Struct({
+  sessionID: Schema.String,
+  imported: Schema.Boolean,
+}).annotate({ identifier: "AllDbSessionImportResult" })
 
 function canonical(candidate: string) {
   return existsSync(candidate) ? realpathSync(candidate) : path.resolve(candidate)
 }
 
 function candidatePaths() {
-  const fromDirs = knownDataDirs().flatMap((dir) => {
-    if (!existsSync(dir)) return []
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /^markscode(?:-.+)?\.db$/.test(entry.name))
-      .map((entry) => path.join(dir, entry.name))
-  })
-  return [Database.getPath(), process.env.OPENCODE_DB, process.env.MARKSCODE_DB, ...fromDirs]
-    .map((item) => normalizeCandidate(item ?? ""))
-    .filter((item): item is string => !!item && existsSync(item))
+  return DbRegistry.scan({ currentPath: Database.getPath(), persist: true }).databases
+    .filter((db) => db.status === "ok")
+    .map((db) => db.path)
     .filter((item, index, arr) => arr.findIndex((other) => canonical(other) === canonical(item)) === index)
+}
+
+function tableExists(db: SQLiteDatabase, table: string) {
+  return !!db.query("select name from sqlite_master where type = 'table' and name = ?1").get(table)
+}
+
+function columns(db: SQLiteDatabase, table: string) {
+  return (db.query(`pragma table_info(${JSON.stringify(table)})`).all() as { name: string }[]).map((row) => row.name)
+}
+
+function quoteIdentifier(value: string) {
+  return JSON.stringify(value)
+}
+
+function placeholders(count: number) {
+  return Array.from({ length: count }, (_, index) => `?${index + 1}`).join(", ")
+}
+
+function insertRows(target: SQLiteDatabase, table: string, cols: string[], rows: Record<string, unknown>[]) {
+  if (rows.length === 0 || cols.length === 0) return
+  const sql = `insert into ${quoteIdentifier(table)} (${cols.map(quoteIdentifier).join(", ")}) values (${placeholders(cols.length)})`
+  const query = target.query(sql)
+  rows.forEach((row) => query.run(...(cols.map((column) => row[column]) as SQLQueryBindings[])))
+}
+
+function copyRows(input: {
+  source: SQLiteDatabase
+  target: SQLiteDatabase
+  table: string
+  where: string
+  value: string
+  sourceTables: Set<string>
+  targetTables: Set<string>
+}) {
+  if (!input.sourceTables.has(input.table) || !input.targetTables.has(input.table)) return
+  const cols = columns(input.source, input.table).filter((column) => columns(input.target, input.table).includes(column))
+  const rows = input.source
+    .query(`select ${cols.map(quoteIdentifier).join(", ")} from ${quoteIdentifier(input.table)} where ${quoteIdentifier(input.where)} = ?1`)
+    .all(input.value) as Record<string, unknown>[]
+  insertRows(input.target, input.table, cols, rows)
+}
+
+function assertNoConflicts(input: { source: SQLiteDatabase; target: SQLiteDatabase; table: string; where: string; value: string; sourceTables: Set<string>; targetTables: Set<string> }) {
+  if (!input.sourceTables.has(input.table) || !input.targetTables.has(input.table)) return
+  if (!columns(input.source, input.table).includes("id") || !columns(input.target, input.table).includes("id")) return
+  const conflicts = input.source
+    .query(
+      `select id from ${quoteIdentifier(input.table)} where ${quoteIdentifier(input.where)} = ?1 and id in (select id from ${quoteIdentifier(input.table)})`,
+    )
+    .all(input.value) as { id: string }[]
+  if (conflicts.some((row) => !!input.target.query(`select id from ${quoteIdentifier(input.table)} where id = ?1`).get(row.id))) {
+    throw new Error(`Import conflict in ${input.table}`)
+  }
 }
 
 function label(dbPath: string) {
   const base = path.basename(dbPath, ".db")
-  if (base === "markscode") return "default"
+  if (base === "markscode" || base === "opencode") return "default"
   if (base.startsWith("markscode-")) return base.slice("markscode-".length)
+  if (base.startsWith("opencode-")) return base.slice("opencode-".length)
   return base
 }
 
@@ -196,6 +244,38 @@ export async function list(input: { search?: string; limit?: number } = {}) {
     }
   })
   return sessions.toSorted((a, b) => b.time.updated - a.time.updated).slice(0, limit)
+}
+
+export async function importSession(input: typeof ImportInput.Type) {
+  const activePath = canonical(Database.getPath())
+  const sourcePath = candidatePaths().find((dbPath) => canonical(dbPath) === canonical(input.sourceDbPath))
+  if (!sourcePath) throw new Error("Source database is not registered")
+  if (canonical(sourcePath) === activePath) return { sessionID: input.sessionID, imported: false }
+  const target = Database.Client().$client
+  if (target.query("select id from session where id = ?1").get(input.sessionID)) return { sessionID: input.sessionID, imported: false }
+  const source = new SQLiteDatabase(sourcePath, { readonly: true, strict: true })
+  try {
+    const sourceTables = new Set((source.query("select name from sqlite_master where type = 'table'").all() as { name: string }[]).map((row) => row.name))
+    const targetTables = new Set((target.query("select name from sqlite_master where type = 'table'").all() as { name: string }[]).map((row) => row.name))
+    if (!sourceTables.has("session") || !targetTables.has("session")) throw new Error("Session table is missing")
+    const session = source.query("select id, project_id from session where id = ?1").get(input.sessionID) as { id: string; project_id: string } | null
+    if (!session) throw new Error("Session not found in source database")
+    ;["message", "part", "session_message"].forEach((table) =>
+      assertNoConflicts({ source, target, table, where: "session_id", value: input.sessionID, sourceTables, targetTables }),
+    )
+    target.transaction(() => {
+      if (sourceTables.has("project") && targetTables.has("project") && !target.query("select id from project where id = ?1").get(session.project_id)) {
+        copyRows({ source, target, table: "project", where: "id", value: session.project_id, sourceTables, targetTables })
+      }
+      copyRows({ source, target, table: "session", where: "id", value: input.sessionID, sourceTables, targetTables })
+      ;["message", "part", "todo", "session_message"].forEach((table) =>
+        copyRows({ source, target, table, where: "session_id", value: input.sessionID, sourceTables, targetTables }),
+      )
+    })()
+    return { sessionID: input.sessionID, imported: true }
+  } finally {
+    source.close()
+  }
 }
 
 export * as SessionAllDbs from "./session-all-dbs"

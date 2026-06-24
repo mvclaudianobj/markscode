@@ -43,6 +43,7 @@ import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { ensureProcessMetadata } from "@opencode-ai/core/util/opencode-process"
 import { isRecord } from "@/util/record"
+import { DbSelector } from "@/storage/db-selector"
 
 const processMetadata = ensureProcessMetadata("main")
 
@@ -59,6 +60,11 @@ process.on("uncaughtException", (e) => {
 })
 
 const args = hideBin(process.argv)
+
+function isTuiStartup() {
+  const first = args.find((arg) => !arg.startsWith("-"))
+  return !first || first === "$0"
+}
 
 function show(out: string) {
   const text = out.trimStart()
@@ -121,7 +127,11 @@ const cli = yargs(args)
       run_id: processMetadata.runID,
     })
 
-    const marker = path.join(Global.Path.data, "opencode.db")
+    if (isTuiStartup()) {
+      await DbSelector.ensureSelected({ currentPath: Database.getPath() })
+    }
+
+    const marker = Database.getPath()
     if (!(await Filesystem.exists(marker))) {
       const tty = process.stderr.isTTY
       process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)

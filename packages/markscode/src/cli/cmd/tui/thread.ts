@@ -23,6 +23,8 @@ import {
 import { validateSession } from "./validate-session"
 import { AppRuntime } from "@/effect/app-runtime"
 import { MarkspanelStartupGate } from "@/markspanel/startup-gate"
+import { Database } from "@/storage/db"
+import { DbSelector } from "@/storage/db-selector"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -140,6 +142,7 @@ export const TuiThreadCommand = cmd({
         return
       }
       const cwd = Filesystem.resolve(process.cwd())
+      await DbSelector.ensureSelected({ currentPath: Database.getPath() })
       try {
         await AppRuntime.runPromise(MarkspanelStartupGate.ensureParentGate())
       } catch (error) {

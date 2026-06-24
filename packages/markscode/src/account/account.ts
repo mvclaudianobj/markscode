@@ -9,6 +9,7 @@ import {
 } from "effect/unstable/http"
 
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { setRemoteMemoryConfig } from "@/memory-config"
 import { AccountRepo, type AccountRow } from "./repo"
 import { normalizeServerUrl } from "./url"
 import {
@@ -20,6 +21,7 @@ import {
   RefreshToken,
   AccountServiceError,
   AccountTransportError,
+  AccountUnauthorizedError,
   Login,
   Org,
   OrgID,
@@ -39,6 +41,7 @@ export {
   AccountRepoError,
   AccountServiceError,
   AccountTransportError,
+  AccountUnauthorizedError,
   AccessToken,
   RefreshToken,
   DeviceCode,
@@ -236,6 +239,7 @@ export interface Interface {
     email: string
     password: string
   }) => Effect.Effect<PollSuccess, AccountError>
+  readonly invalidateToken: (accountID: AccountID) => Effect.Effect<void, AccountError>
 
   readonly reportUsage: (input: {
     url: string
@@ -436,6 +440,16 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
         ),
       )
 
+      if (response.status === 401) {
+        return yield* Effect.fail(
+          new AccountUnauthorizedError({
+            message: "Token expirado ou revogado. Faça login novamente.",
+            statusCode: 401,
+            accountID,
+          }),
+        )
+      }
+
       if (response.status === 404) return Option.none()
 
       const ok = yield* HttpClientResponse.filterStatusOk(response).pipe(mapAccountServiceError())
@@ -443,6 +457,7 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       const parsed = yield* HttpClientResponse.schemaBodyJson(RemoteConfig)(ok).pipe(
         mapAccountServiceError("Failed to decode response"),
       )
+      setRemoteMemoryConfig(parsed.config.memories, `${account.url}/api/config`)
       return Option.some(parsed.config)
     })
 
@@ -637,6 +652,10 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       return (json as any) ?? null
     })
 
+    const invalidateToken = Effect.fn("Account.invalidateToken")((accountID: AccountID) =>
+      repo.invalidateToken(accountID),
+    )
+
     return Service.of({
       active: repo.active,
       activeOrg,
@@ -650,6 +669,7 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       login,
       poll,
       loginWithPassword,
+      invalidateToken,
       reportUsage,
       quota,
     })
