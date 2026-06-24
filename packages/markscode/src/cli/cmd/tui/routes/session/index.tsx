@@ -2576,6 +2576,7 @@ export function Session() {
             }}
           />
         ))
+      },
     },
     {
       title: "MarksCode: Buscar na Memória Local (Memvid)",
@@ -2594,6 +2595,7 @@ export function Session() {
           toast.show({ message: err instanceof Error ? err.message : "Erro ao buscar memória local", variant: "error" })
         }
         dialog.clear()
+      },
     },
     {
       title: "MarksCode: Buscar na Memória Global",
