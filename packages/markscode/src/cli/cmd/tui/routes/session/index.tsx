@@ -81,17 +81,6 @@ import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import {
-  getHumanContext,
-  getSessionCompactContext,
-  saveHumanMemory,
-  getSessionContextSafety,
-  createSessionHandoff,
-  continueSessionFromHandoff,
-  getGlobalContext,
-  searchAdvancedMemories,
-} from "@/memories-api"
-import { hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
-import {
   listMapProjects,
   listMapModules,
   listMapTasks,
@@ -101,7 +90,16 @@ import {
   progressMapSession,
   endMapSession,
 } from "@/map-api"
-
+import {
+  getHumanContext,
+  getSessionCompactContext,
+  saveHumanMemory,
+  getSessionContextSafety,
+  createSessionHandoff,
+  continueSessionFromHandoff,
+  getGlobalContext,
+  searchAdvancedMemories,
+} from "@/memories-api"
 import { useEvent } from "../../context/event"
 import { useProject } from "../../context/project"
 import { useTuiConfig } from "../../context/tui-config"
@@ -111,6 +109,7 @@ import { SessionRetry } from "@/session/retry"
 import { Account } from "@/account/account"
 import { AppRuntime } from "@/effect/app-runtime"
 import { loadMemory } from "@/memory"
+import { hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
 import { listRemoteSSHProfiles, replaceRemoteSSHProfiles } from "@/remote/profile-repo"
 import { diagnoseBrainSystem } from "@/memory-diagnose"
 import { Database } from "@/storage/db"
