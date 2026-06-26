@@ -8,6 +8,7 @@ import {
   LLMEvent,
   Usage,
   type FinishReason,
+  type LLMError,
   type LLMRequest,
   type ProviderMetadata,
   type ReasoningPart,
@@ -304,23 +305,26 @@ const lowerUserContent = Effect.fn("OpenAIResponses.lowerUserContent")(function*
 
 // Tool results may carry structured text/images. Keep media as provider-native
 // content instead of JSON-stringifying base64 into a prompt string.
-const lowerToolResultContentItem = Effect.fn("OpenAIResponses.lowerToolResultContentItem")(function* (
-  item: ToolResultContentPart,
-) {
-  if (item.type === "text") return { type: "input_text" as const, text: item.text }
-  if (item.mediaType.startsWith("image/"))
-    return {
-      type: "input_image" as const,
-      image_url: ProviderShared.mediaDataUrl(item),
-    }
-  return yield* invalid(`OpenAI Responses tool-result media content only supports images, got ${item.mediaType}`)
-})
+const lowerToolResultContentItem = (item: ToolResultContentPart) =>
+  Effect.gen(function* () {
+    if (item.type === "text") return { type: "input_text" as const, text: item.text }
+    if (item.mediaType.startsWith("image/"))
+      return {
+        type: "input_image" as const,
+        image_url: ProviderShared.mediaDataUrl(item),
+      }
+    return yield* invalid(`OpenAI Responses tool-result media content only supports images, got ${item.mediaType}`)
+  })
 
 const lowerToolResultOutput = Effect.fn("OpenAIResponses.lowerToolResultOutput")(function* (part: ToolResultPart) {
   // Text/json/error results are encoded as a plain string for backward
   // compatibility with existing cassettes and provider expectations.
   if (part.result.type !== "content") return ProviderShared.toolResultText(part)
-  return yield* Effect.forEach(part.result.value, lowerToolResultContentItem)
+  const output: OpenAIResponsesInputContent[] = []
+  for (const item of part.result.value) {
+    output.push(yield* lowerToolResultContentItem(item))
+  }
+  return output
 })
 
 const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (request: LLMRequest) {
@@ -425,7 +429,7 @@ const lowerOptions = Effect.fn("OpenAIResponses.lowerOptions")(function* (reques
   }
 })
 
-const fromRequest = Effect.fn("OpenAIResponses.fromRequest")(function* (request: LLMRequest) {
+const fromRequest = Effect.fn("OpenAIResponses.fromRequest")(function* (request: LLMRequest): Generator<Effect.Effect<unknown, LLMError, never>, OpenAIResponsesBody, any> {
   const generation = request.generation
   return {
     model: request.model.id,
