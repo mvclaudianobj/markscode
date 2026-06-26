@@ -556,6 +556,7 @@ export type TuiPluginStatus = {
   target: string
   enabled: boolean
   active: boolean
+  loadable?: boolean
 }
 
 export type TuiPluginInstallOptions = {

@@ -215,7 +215,7 @@ export function diagnoseBrainSystem(input?: {
 
   // Layer 5: Remote API
   const memoryConfig = resolveMemoryConfig()
-  const apiKey = input?.apiKey || memoryConfig.memories.api_key || process.env.MARKSCODE_API_KEY
+  const apiKey = input?.apiKey || memoryConfig.memories.api_key
   const apiBaseUrl = input?.apiBaseUrl || memoryConfig.memories.url || process.env.MEMORIES_API_BASE_URL || "http://api.marks.ia.br:8689"
   const remoteTimeoutMs = memoryConfig.memories.timeout_ms || 3000
 
@@ -273,7 +273,7 @@ export function diagnoseBrainSystem(input?: {
       layer: "Memória Remota API",
       status: "unavailable",
       details: "API key não configurada",
-      recommendation: "Configurar MARKSCODE_MEMORIES_API_KEY/MEMORIES_API_KEY ou carregar Markspanel /api/config com config.memories",
+      recommendation: "Padrão local-first ativo; configure MARKSCODE_MEMORIES_API_KEY/MEMORIES_API_KEY apenas se quiser sincronização remota",
     })
   }
 

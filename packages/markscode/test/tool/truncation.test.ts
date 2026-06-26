@@ -25,6 +25,21 @@ const configuredLayer = (cfg: Config.Info) =>
   )
 const configuredIt = (cfg: Config.Info) => testEffect(configuredLayer(cfg))
 
+const withRtkAuto = <A, E, R>(value: string | undefined, effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.MARKSCODE_RTK_AUTO
+      if (value === undefined) delete process.env.MARKSCODE_RTK_AUTO
+      else process.env.MARKSCODE_RTK_AUTO = value
+      return previous
+    }),
+    () => effect,
+    (previous) => Effect.sync(() => {
+      if (previous === undefined) delete process.env.MARKSCODE_RTK_AUTO
+      else process.env.MARKSCODE_RTK_AUTO = previous
+    }),
+  )
+
 describe("Truncate", () => {
   describe("output", () => {
     it.live("truncates large json file by bytes", () =>
@@ -35,7 +50,7 @@ describe("Truncate", () => {
         const result = yield* svc.output(content)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("truncated...")
+        expect(result.content).toContain("RTK native compression applied")
         if (result.truncated) expect(result.outputPath).toBeDefined()
       }),
     )
@@ -55,7 +70,7 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
-        const result = yield* svc.output(lines, { maxLines: 10 })
+        const result = yield* withRtkAuto("0", svc.output(lines, { maxLines: 10 }))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("...90 lines truncated...")
@@ -66,7 +81,7 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const content = "a".repeat(1000)
-        const result = yield* svc.output(content, { maxBytes: 100 })
+        const result = yield* withRtkAuto("0", svc.output(content, { maxBytes: 100 }))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("truncated...")
@@ -77,7 +92,7 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 10 }, (_, i) => `line${i}`).join("\n")
-        const result = yield* svc.output(lines, { maxLines: 3 })
+        const result = yield* withRtkAuto("0", svc.output(lines, { maxLines: 3 }))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("line0")
@@ -91,7 +106,7 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 10 }, (_, i) => `line${i}`).join("\n")
-        const result = yield* svc.output(lines, { maxLines: 3, direction: "tail" })
+        const result = yield* withRtkAuto("0", svc.output(lines, { maxLines: 3, direction: "tail" }))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("line7")
@@ -131,7 +146,7 @@ describe("Truncate", () => {
       lineIt.live("output() truncates to configured max_lines", () =>
         Effect.gen(function* () {
           const content = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
-          const result = yield* (yield* Truncate.Service).output(content)
+          const result = yield* withRtkAuto("0", (yield* Truncate.Service).output(content))
           expect(result.truncated).toBe(true)
           expect(result.content).toContain("...90 lines truncated...")
         }),
@@ -142,7 +157,7 @@ describe("Truncate", () => {
       byteIt.live("output() truncates to configured max_bytes", () =>
         Effect.gen(function* () {
           const content = "a".repeat(1000)
-          const result = yield* (yield* Truncate.Service).output(content)
+          const result = yield* withRtkAuto("0", (yield* Truncate.Service).output(content))
           expect(result.truncated).toBe(true)
           expect(result.content).toContain("bytes truncated...")
         }),
@@ -169,8 +184,24 @@ describe("Truncate", () => {
         const result = yield* svc.output(content)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("bytes truncated...")
+        expect(result.content).toContain("RTK native compression applied")
         expect(Buffer.byteLength(content, "utf-8")).toBeGreaterThan(Truncate.MAX_BYTES)
+      }),
+    )
+
+    it.live("applies native RTK compression while preserving full output path", () =>
+      Effect.gen(function* () {
+        const svc = yield* Truncate.Service
+        const content = Array.from({ length: 200 }, (_, i) => `line ${i} ${"x".repeat(20)}`).join("\n")
+        const result = yield* svc.output(content, { maxLines: 20, maxBytes: 1000 })
+
+        expect(result.truncated).toBe(true)
+        expect(result.content).toContain("RTK native compression applied")
+        expect(result.content).toContain("Full output saved to:")
+        expect(result.content.length).toBeLessThan(content.length)
+        if (!result.truncated) throw new Error("expected truncated")
+        const fsys = yield* AppFileSystem.Service
+        expect(yield* fsys.readFileString(result.outputPath)).toBe(content)
       }),
     )
 
@@ -178,7 +209,7 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
-        const result = yield* svc.output(lines, { maxLines: 10 })
+        const result = yield* withRtkAuto("0", svc.output(lines, { maxLines: 10 }))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("The tool call succeeded but the output was truncated")

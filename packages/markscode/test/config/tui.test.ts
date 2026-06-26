@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Global } from "@opencode-ai/core/global"
 import { Config } from "@/config/config"
+import { ConfigGlobal } from "@/config/global"
 import { ConfigPlugin } from "@/config/plugin"
 import { CurrentWorkingDirectory } from "@/cli/cmd/tui/config/cwd"
 import { TuiConfig } from "../../src/cli/cmd/tui/config/tui"
@@ -107,6 +108,75 @@ it.instance("keeps server and tui plugin merge semantics aligned", () =>
       expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
       expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
       expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+    }),
+  ),
+)
+
+it.instance("loads only plugin origins from global markscode config", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const test = yield* TestInstance
+      const xdg = path.join(test.directory, "xdg")
+      const markscodeConfig = path.join(ConfigGlobal.markscodeGlobalConfigDir({ XDG_CONFIG_HOME: xdg }), "markscode.json")
+      yield* fs.writeWithDirs(
+        markscodeConfig,
+        JSON.stringify(
+          {
+            plugin: ["server-only@1.0.0"],
+            theme: "must-not-merge",
+            plugin_enabled: { "server-only": false },
+          },
+          null,
+          2,
+        ),
+      )
+
+      yield* withEnv(
+        "XDG_CONFIG_HOME",
+        xdg,
+        Effect.gen(function* () {
+          const config = yield* getTuiConfig(test.directory)
+          expect(config.plugin).toEqual(["server-only@1.0.0"])
+          expect(config.theme).toBeUndefined()
+          expect(config.plugin_enabled).toBeUndefined()
+          expect(config.plugin_origins).toEqual([
+            {
+              spec: "server-only@1.0.0",
+              scope: "global",
+              source: markscodeConfig,
+            },
+          ])
+        }),
+      )
+    }),
+  ),
+)
+
+it.instance("skips global markscode config plugins in pure mode", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const test = yield* TestInstance
+      const xdg = path.join(test.directory, "xdg")
+      yield* fs.writeWithDirs(
+        path.join(ConfigGlobal.markscodeGlobalConfigDir({ XDG_CONFIG_HOME: xdg }), "markscode.json"),
+        JSON.stringify({ plugin: ["server-only@1.0.0"] }, null, 2),
+      )
+
+      yield* withEnv(
+        "XDG_CONFIG_HOME",
+        xdg,
+        withEnv(
+          "OPENCODE_PURE",
+          "1",
+          Effect.gen(function* () {
+            const config = yield* getTuiConfig(test.directory)
+            expect(config.plugin).toBeUndefined()
+            expect(config.plugin_origins).toBeUndefined()
+          }),
+        ),
+      )
     }),
   ),
 )

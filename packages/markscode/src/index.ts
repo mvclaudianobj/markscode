@@ -33,6 +33,8 @@ import { MemoryCommand } from "./cli/cmd/memory"
 import { DbCommand } from "./cli/cmd/db"
 import { MarkspanelCommand } from "./cli/cmd/markspanel"
 import { MemoriesCommand } from "./cli/cmd/memories"
+import { BrainCommand } from "./cli/cmd/brain"
+import { RtkCommand } from "./cli/cmd/rtk"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { JsonMigration } from "@/storage/json-migration"
@@ -193,6 +195,8 @@ const cli = yargs(args)
   .command(PrCommand)
   .command(SessionCommand)
   .command(MemoriesCommand)
+  .command(BrainCommand)
+  .command(RtkCommand)
   .command(PluginCommand)
   .command(DbCommand)
   .command(MarkspanelCommand)

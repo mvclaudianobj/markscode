@@ -41,6 +41,7 @@ import { ConfigReference } from "./reference"
 import { ConfigServer } from "./server"
 import { ConfigSkills } from "./skills"
 import { ConfigVariable } from "./variable"
+import { ConfigGlobal } from "./global"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { setRemoteMemoryConfig } from "@/memory-config"
@@ -349,9 +350,12 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Co
 export const use = serviceUse(Service)
 
 function globalConfigFile() {
-  const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-    path.join(Global.Path.config, file),
-  )
+  const candidates = [
+    ...(process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? []
+      : [path.join(ConfigGlobal.markscodeGlobalConfigDir(), "markscode.json")]),
+    ...["opencode.jsonc", "opencode.json", "config.json"].map((file) => path.join(Global.Path.config, file)),
+  ]
   for (const file of candidates) {
     if (existsSync(file)) return file
   }
@@ -454,6 +458,9 @@ export const layer = Layer.effect(
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
       let result: Info = {}
+      if (process.env.NODE_ENV !== "test" && process.env.BUN_ENV !== "test") {
+        yield* Effect.promise(() => ConfigGlobal.ensureDefaultPlugins()).pipe(Effect.catch(() => Effect.void))
+      }
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
       if (!Flag.OPENCODE_CONFIG && !Flag.OPENCODE_CONFIG_DIR && !Flag.OPENCODE_CONFIG_CONTENT) {
@@ -463,6 +470,9 @@ export const layer = Layer.effect(
             .writeWithDirs(file, JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2))
             .pipe(Effect.catch(() => Effect.void))
         }
+      }
+      if (process.env.NODE_ENV !== "test" && process.env.BUN_ENV !== "test") {
+        result = mergeConfig(result, yield* loadFile(path.join(ConfigGlobal.markscodeGlobalConfigDir(), "markscode.json"), env))
       }
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.json"), env))

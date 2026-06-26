@@ -1,5 +1,6 @@
 import { Database as SQLiteDatabase } from "bun:sqlite"
 import { Global } from "@opencode-ai/core/global"
+import { MarkscodePath } from "@/markscode-path"
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "fs"
 import os from "os"
 import path from "path"
@@ -47,7 +48,7 @@ export const registryPath = () => path.join(Global.Path.state, "db-registry.json
 export function normalizePath(candidate: string | undefined) {
   if (!candidate || candidate === ":memory:") return
   const expanded = candidate.startsWith("~/") ? path.join(os.homedir(), candidate.slice(2)) : candidate
-  return path.resolve(path.isAbsolute(expanded) ? expanded : path.join(Global.Path.data, expanded))
+  return path.resolve(path.isAbsolute(expanded) ? expanded : path.join(MarkscodePath.dataDir(), expanded))
 }
 
 export function canonical(candidate: string) {
@@ -80,43 +81,43 @@ function envDirs() {
 function candidateRoots(input: { currentPath?: string } = {}) {
   const home = os.homedir()
   return uniq([
-    Global.Path.data,
+    MarkscodePath.dataDir(),
     input.currentPath ? path.dirname(input.currentPath) : undefined,
-    normalizePath(process.env.OPENCODE_DB) ? path.dirname(normalizePath(process.env.OPENCODE_DB)!) : undefined,
     normalizePath(process.env.MARKSCODE_DB) ? path.dirname(normalizePath(process.env.MARKSCODE_DB)!) : undefined,
-    path.join(home, ".local/share/opencode"),
+    normalizePath(process.env.OPENCODE_DB) ? path.dirname(normalizePath(process.env.OPENCODE_DB)!) : undefined,
     path.join(home, ".local/share/markscode"),
-    path.join(home, ".config/opencode"),
+    path.join(home, ".local/share/opencode"),
     path.join(home, ".config/markscode"),
-    "/root/.local/share/opencode",
+    path.join(home, ".config/opencode"),
     "/root/.local/share/markscode",
-    "/root/.config/opencode",
+    "/root/.local/share/opencode",
     "/root/.config/markscode",
+    "/root/.config/opencode",
     ...userDirs("/home").flatMap((dir) => [
-      path.join(dir, ".local/share/opencode"),
       path.join(dir, ".local/share/markscode"),
-      path.join(dir, ".config/opencode"),
+      path.join(dir, ".local/share/opencode"),
       path.join(dir, ".config/markscode"),
+      path.join(dir, ".config/opencode"),
     ]),
-    path.join(home, "Library/Application Support/opencode"),
     path.join(home, "Library/Application Support/markscode"),
+    path.join(home, "Library/Application Support/opencode"),
     ...userDirs("/Users").flatMap((dir) => [
-      path.join(dir, "Library/Application Support/opencode"),
       path.join(dir, "Library/Application Support/markscode"),
+      path.join(dir, "Library/Application Support/opencode"),
     ]),
-    ...envDirs().flatMap((dir) => (dir ? [path.join(dir, "opencode"), path.join(dir, "markscode")] : [])),
+    ...envDirs().flatMap((dir) => (dir ? [path.join(dir, "markscode"), path.join(dir, "opencode")] : [])),
     ...userDirs("/mnt/c/Users").flatMap((dir) => [
-      path.join(dir, "AppData/Local/opencode"),
       path.join(dir, "AppData/Local/markscode"),
-      path.join(dir, "AppData/Roaming/opencode"),
+      path.join(dir, "AppData/Local/opencode"),
       path.join(dir, "AppData/Roaming/markscode"),
+      path.join(dir, "AppData/Roaming/opencode"),
     ]),
-    "/var/lib/opencode",
     "/var/lib/markscode",
-    "/usr/local/share/opencode",
+    "/var/lib/opencode",
     "/usr/local/share/markscode",
-    "/opt/opencode",
+    "/usr/local/share/opencode",
     "/opt/markscode",
+    "/opt/opencode",
   ]).filter((dir) => existsSync(dir))
 }
 
@@ -243,8 +244,8 @@ export function createPath(name: string) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80)
   const finalName = safe || `novo-${Date.now()}`
-  mkdirSync(Global.Path.data, { recursive: true })
-  return path.join(Global.Path.data, `markscode-${finalName}.db`)
+  mkdirSync(MarkscodePath.dataDir(), { recursive: true })
+  return path.join(MarkscodePath.dataDir(), `markscode-${finalName}.db`)
 }
 
 export * as DbRegistry from "./db-registry"

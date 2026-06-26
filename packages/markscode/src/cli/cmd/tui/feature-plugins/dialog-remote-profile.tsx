@@ -62,6 +62,39 @@ function setKV(key: string, value: unknown) {
 
 const MARKSCODE_MASTER_KEY_NAME = 'marks-key-mestra'
 const MARKSCODE_MASTER_IDENTITY_FILE = '~/.ssh/marks-key-mestra'
+const expandMasterKeyPath = (value: string) => {
+  if (!value.startsWith('~/')) return value
+  const home = process.env.HOME || ''
+  return home ? home + '/' + value.slice(2) : value
+}
+const runMasterKeyCommand = async (cmd: string[]) => {
+  const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+  if (exitCode !== 0) throw new Error((stderr || stdout || cmd[0] + ' falhou').trim())
+  return stdout.trim()
+}
+const ensureMarksMasterKey = async () => {
+  const privateKey = expandMasterKeyPath(MARKSCODE_MASTER_IDENTITY_FILE)
+  const publicKey = privateKey + '.pub'
+  const sshDir = privateKey.slice(0, privateKey.lastIndexOf('/'))
+  await runMasterKeyCommand(['mkdir', '-p', sshDir])
+  await runMasterKeyCommand(['chmod', '700', sshDir])
+  const existed = await Bun.file(privateKey).exists()
+  if (!existed) await runMasterKeyCommand(['ssh-keygen', '-t', 'ed25519', '-N', '', '-C', MARKSCODE_MASTER_KEY_NAME, '-f', privateKey])
+  await runMasterKeyCommand(['chmod', '600', privateKey])
+  if (!(await Bun.file(publicKey).exists())) await Bun.write(publicKey, (await runMasterKeyCommand(['ssh-keygen', '-y', '-f', privateKey])) + '\n')
+  await runMasterKeyCommand(['chmod', '644', publicKey])
+  const fingerprint = await runMasterKeyCommand(['ssh-keygen', '-lf', publicKey])
+  setKV('remote_ssh_master_key_name', MARKSCODE_MASTER_KEY_NAME)
+  setKV('remote_ssh_master_identity_file', MARKSCODE_MASTER_IDENTITY_FILE)
+  return [
+    existed ? 'Chave privada existente validada; não foi sobrescrita.' : 'Chave mestra criada com sucesso.',
+    'Nome: ' + MARKSCODE_MASTER_KEY_NAME,
+    'Privada: ' + MARKSCODE_MASTER_IDENTITY_FILE,
+    'Pública: ' + MARKSCODE_MASTER_IDENTITY_FILE + '.pub',
+    'Fingerprint: ' + fingerprint,
+  ].join('\n')
+}
 const normalizeType = (value: unknown): RemoteProfileType => value === 'winrm' || value === 'powershell' || value === 'whm' ? value : 'ssh'
 const defaultPort = (type: RemoteProfileType) => type === 'whm' ? 2087 : type === 'winrm' || type === 'powershell' ? 5986 : 22
 const defaultTransport = (type: RemoteProfileType) => type === 'whm' || type === 'winrm' || type === 'powershell' ? 'https' : undefined
@@ -364,6 +397,7 @@ function View(_props: { api: TuiPluginApi; session_id: string }) {
         { title: 'Create WinRM/Windows profile', value: 'create-winrm-name', description: 'Wizard guiado para Windows via WinRM' },
         { title: 'Create PowerShell/Windows profile', value: 'create-powershell-name', description: 'Wizard guiado para PowerShell remoto direto' },
         { title: 'Create WHM/cPanel profile', value: 'create-whm-name', description: 'Wizard guiado para WHM/cPanel' },
+        { title: 'Criar/validar chave mestra Marks', value: 'master-key', description: 'Garante ~/.ssh/marks-key-mestra sem sobrescrever chave existente' },
         { title: 'Use profile', value: 'select-for-use', description: 'Ativar perfil salvo' },
         { title: 'Edit profile', value: 'select-for-edit', description: 'Editar perfil existente' },
         { title: 'Delete profile', value: 'select-for-delete', description: 'Remover perfil' },
@@ -372,6 +406,7 @@ function View(_props: { api: TuiPluginApi; session_id: string }) {
         { title: 'Close', value: 'close', description: 'Fechar' },
       ]} onSelect={(opt: DialogSelectOption<string>) => {
         if (opt.value === 'close') { dialog.clear(); return }
+        if (opt.value === 'master-key') { void ensureMarksMasterKey().then((message) => showAlert('Chave mestra Marks', message, () => setStep('menu'))).catch((error) => showAlert('Erro', error instanceof Error ? error.message : String(error), () => setStep('menu'))); return }
         setStep(opt.value as DialogStep)
       }} />
     }

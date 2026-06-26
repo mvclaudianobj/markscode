@@ -1024,6 +1024,140 @@ test("plugin keymap proxy preserves real keymap receiver", async () => {
   }
 })
 
+test("lists loaded and configured plugins without tui entrypoints", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const tui = path.join(dir, "tui-plugin.ts")
+      const serverOnly = path.join(dir, "server-only-plugin")
+      const configuredOnly = path.join(dir, "configured-only-plugin")
+      const themedServerOnly = path.join(dir, "themed-server-only-plugin")
+      await fs.mkdir(serverOnly, { recursive: true })
+      await fs.mkdir(configuredOnly, { recursive: true })
+      await fs.mkdir(themedServerOnly, { recursive: true })
+      await Bun.write(
+        tui,
+        `export default {
+  id: "demo.tui.plugin",
+  tui: async () => {},
+}
+`,
+      )
+      await Bun.write(
+        path.join(serverOnly, "package.json"),
+        JSON.stringify(
+          {
+            name: "demo-server-only-plugin",
+            exports: {
+              "./server": "./server.ts",
+            },
+          },
+          null,
+          2,
+        ),
+      )
+      await Bun.write(path.join(serverOnly, "server.ts"), `export default { server: async () => {} }\n`)
+      await Bun.write(
+        path.join(configuredOnly, "package.json"),
+        JSON.stringify(
+          {
+            name: "demo-configured-only-plugin",
+            exports: {
+              "./server": "./server.ts",
+            },
+          },
+          null,
+          2,
+        ),
+      )
+      await Bun.write(path.join(configuredOnly, "server.ts"), `export default { server: async () => {} }\n`)
+      await Bun.write(path.join(themedServerOnly, "theme.json"), JSON.stringify({ theme: { primary: "#101010" } }))
+      await Bun.write(
+        path.join(themedServerOnly, "package.json"),
+        JSON.stringify(
+          {
+            name: "demo-themed-server-only-plugin",
+            exports: {
+              "./server": "./server.ts",
+            },
+            "oc-themes": ["theme.json"],
+          },
+          null,
+          2,
+        ),
+      )
+      await Bun.write(path.join(themedServerOnly, "server.ts"), `export default { server: async () => {} }\n`)
+      return {
+        tui: pathToFileURL(tui).href,
+        serverOnly: pathToFileURL(serverOnly).href,
+        configuredOnly: pathToFileURL(configuredOnly).href,
+        themedServerOnly: pathToFileURL(themedServerOnly).href,
+      }
+    },
+  })
+
+  const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
+  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
+
+  try {
+    await TuiPluginRuntime.init({
+      api: createTuiPluginApi(),
+      config: createTuiResolvedConfig({
+        plugin: [tmp.extra.tui, tmp.extra.serverOnly, tmp.extra.configuredOnly, tmp.extra.themedServerOnly],
+        plugin_origins: [
+          { spec: tmp.extra.tui, scope: "global", source: path.join(tmp.path, "markscode.json") },
+          { spec: tmp.extra.serverOnly, scope: "global", source: path.join(tmp.path, "markscode.json") },
+          { spec: tmp.extra.configuredOnly, scope: "global", source: path.join(tmp.path, "markscode.json") },
+          { spec: tmp.extra.themedServerOnly, scope: "global", source: path.join(tmp.path, "markscode.json") },
+        ],
+      }),
+    })
+
+    const list = TuiPluginRuntime.list()
+    expect(list).toContainEqual({
+      id: "demo.tui.plugin",
+      source: "file",
+      spec: tmp.extra.tui,
+      target: tmp.extra.tui,
+      enabled: true,
+      active: true,
+      loadable: true,
+    })
+    expect(list).toContainEqual({
+      id: "server-only-plugin",
+      source: "file",
+      spec: tmp.extra.serverOnly,
+      target: "",
+      enabled: false,
+      active: false,
+      loadable: false,
+    })
+    expect(list).toContainEqual({
+      id: "configured-only-plugin",
+      source: "file",
+      spec: tmp.extra.configuredOnly,
+      target: "",
+      enabled: false,
+      active: false,
+      loadable: false,
+    })
+    expect(list).toContainEqual({
+      id: "demo-themed-server-only-plugin",
+      source: "file",
+      spec: tmp.extra.themedServerOnly,
+      target: tmp.extra.themedServerOnly,
+      enabled: false,
+      active: false,
+      loadable: false,
+    })
+    await expect(TuiPluginRuntime.activatePlugin("server-only-plugin")).resolves.toBe(false)
+    await expect(TuiPluginRuntime.activatePlugin("demo-themed-server-only-plugin")).resolves.toBe(false)
+  } finally {
+    await TuiPluginRuntime.dispose()
+    cwd.mockRestore()
+    wait.mockRestore()
+  }
+})
+
 test("auto-disposes plugin attention sound packs and resolves sound paths", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

@@ -1,4 +1,4 @@
 import path from "path"
-import { Global } from "@opencode-ai/core/global"
+import { dataDir } from "../markscode-path"
 
-export const TRUNCATION_DIR = path.join(Global.Path.data, "tool-output")
+export const TRUNCATION_DIR = path.join(dataDir(), "tool-output")

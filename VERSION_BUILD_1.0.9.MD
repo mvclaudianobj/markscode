@@ -22,7 +22,8 @@ A Onda 1 prepara a primeira tentativa consolidada do MarksCode com base na comun
 - **Layout alvo:** `packages/markscode/src/session/llm/request.ts` para patches de LLM/request; prompt runtime em `session/prompt.ts`; instruções em `session/instruction.ts`.
 - **Bun requerido:** `^1.3.14`, lido de `markscode/package.json` (`packageManager: bun@1.3.14`). O automator deve falhar cedo quando o Bun local for menor, sugerindo `./automator.sh bun-update --version 1.3.14` ou `AUTOMATOR_AUTO_BUN_UPDATE=1`.
 - **Patches adaptados ao 11510:** dialogs de importação, provider dialog com `useBindings`, updater/installation em `AppProcess`, comandos de memórias/browser antes de `sessionCommands`, seleção/cópia TUI com `keymap.intercept` e Hybrid Memory no novo array `system`.
-- **Hybrid Memory/Memvid:** documentação de referência criada em `docs/reference/` para arquitetura, runtime, Memvid, runbook operacional e mapa de ingestão.
+- **Hybrid Memory/Memvid:** documentação de referência criada em `docs/reference/` para arquitetura, runtime, Memvid, runbook operacional e mapa de ingestão; o Memvid nativo inicializa cápsula local automaticamente quando o sidecar oficial estiver disponível.
+- **RTK/Brain nativos:** comandos `markscode rtk <action>` e `markscode brain <action>` cobrem funcionalidades críticas sem depender dos plugins externos `openrtk` e `opencode-brain`; saídas longas usam RTK automático mantendo o output completo salvo em arquivo.
 
 ### Guardrails da Onda 1
 
@@ -104,6 +105,33 @@ cd /media/marcos/Arquivos/projetos/marks
 ```
 
 Use o caminho rápido para checar se a base, os patches e os providers continuam compatíveis antes de gerar artefatos finais.
+
+
+### Plugins globais + skill sessão-inteligente
+
+A release 1.0.9 deve instalar, junto com a skill `sessao-inteligente`, a lista padrão de plugins em `automator_files/plugins_and_skills/plugins.list` via:
+
+```bash
+./plugins_and_skills.sh
+```
+
+Plugins externos padrão esperados:
+
+- `@tarquinen/opencode-dcp@latest`
+- `@mohak34/opencode-notifier@latest`
+- `opencode-supermemory@latest`
+
+No primeiro load de config, o build do MarksCode deve garantir esses plugins externos em `${XDG_CONFIG_HOME:-~/.config}/markscode/markscode.json`, preservando configs existentes e sem migrar/remover `~/.config/opencode`.
+
+RTK e Brain são nativos no binário Markscode via `markscode rtk` e `markscode brain`; não instale `openrtk@latest` nem `opencode-brain@latest` como plugins padrão. Se já existirem em config local do usuário, remova apenas com autorização explícita.
+
+O RTK nativo comprime automaticamente saídas longas de ferramentas e reduz consumo de tokens, preservando a saída completa em `${XDG_DATA_HOME:-~/.local/share}/markscode/tool-output`. Pré-requisito operacional apenas quando usado em modo externo/legado:
+
+```bash
+cargo install rtk
+```
+
+O Brain nativo usa Hybrid Memory local-first, auto-inicializa a cápsula Memvid local no primeiro status/startup quando o sidecar oficial está disponível, e só deve chamar cloud quando houver chave/config explícita.
 
 ---
 

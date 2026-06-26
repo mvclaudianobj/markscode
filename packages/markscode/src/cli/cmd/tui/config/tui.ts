@@ -14,6 +14,7 @@ import { Global } from "@opencode-ai/core/global"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { CurrentWorkingDirectory } from "./cwd"
 import { ConfigPlugin } from "@/config/plugin"
+import { ConfigGlobal } from "@/config/global"
 import { TuiKeybind } from "./keybind"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
@@ -61,6 +62,10 @@ function pluginScope(file: string, ctx: { directory: string }): ConfigPlugin.Sco
   if (Filesystem.contains(ctx.directory, file)) return "local"
   // if (ctx.worktree !== "/" && Filesystem.contains(ctx.worktree, file)) return "local"
   return "global"
+}
+
+function pureMode() {
+  return Flag.OPENCODE_PURE || process.env.OPENCODE_PURE === "1" || process.env.OPENCODE_PURE === "true"
 }
 
 function normalize(raw: Record<string, unknown>) {
@@ -170,9 +175,46 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       return yield* load(text, filepath)
     })
 
-  const mergeFile = (acc: Acc, file: string) =>
+  const loadPluginOnlyFile = (filepath: string): Effect.Effect<Info> =>
     Effect.gen(function* () {
-      const data = yield* loadFile(file)
+      const text = yield* afs.readFileStringSafe(filepath).pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => {
+            const error = Cause.squash(cause)
+            const reason = FormatError(error) ?? FormatUnknownError(error)
+            log.warn("failed to read tui plugin config", {
+              path: filepath,
+              reason,
+            })
+            return undefined
+          }),
+        ),
+      )
+      if (!text) return {} as Info
+      const expanded = yield* Effect.promise(() =>
+        ConfigVariable.substitute({ text, type: "path", path: filepath, missing: "empty" }),
+      )
+      const data = ConfigParse.jsonc(expanded, filepath)
+      if (!isRecord(data) || !Array.isArray(data.plugin)) return {} as Info
+      const parsed = ConfigParse.schema(Info, { plugin: data.plugin }, filepath)
+      return yield* resolvePlugins(parsed, filepath)
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.sync(() => {
+          const error = Cause.squash(cause)
+          const reason = FormatError(error) ?? FormatUnknownError(error)
+          log.warn("skipping invalid tui plugin config", {
+            path: filepath,
+            reason,
+          })
+          return {} as Info
+        }),
+      ),
+    )
+
+  const mergeFile = (acc: Acc, file: string, read = loadFile, scope?: ConfigPlugin.Scope) =>
+    Effect.gen(function* () {
+      const data = yield* read(file)
       if (Object.keys(data).length) {
         appliedOrder += 1
         log.info("applying tui config", { path: file, order: appliedOrder })
@@ -180,10 +222,10 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       acc.result = mergeDeep(acc.result, data)
       if (!data.plugin?.length) return
 
-      const scope = pluginScope(file, ctx)
+      const hit = scope ?? pluginScope(file, ctx)
       const plugins = ConfigPlugin.deduplicatePluginOrigins([
         ...acc.plugin_origins,
-        ...data.plugin.map((spec) => ({ spec, scope, source: file })),
+        ...data.plugin.map((spec) => ({ spec, scope: hit, source: file })),
       ])
       acc.result.plugin = plugins.map((item) => item.spec)
       acc.plugin_origins = plugins
@@ -202,6 +244,10 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   }
 
   // 1. Global tui config (lowest precedence).
+  if (!pureMode()) {
+    yield* mergeFile(acc, path.join(ConfigGlobal.markscodeGlobalConfigDir(), "markscode.json"), loadPluginOnlyFile, "global")
+  }
+
   for (const file of ConfigPaths.fileInDirectory(Global.Path.config, "tui")) {
     yield* mergeFile(acc, file)
   }

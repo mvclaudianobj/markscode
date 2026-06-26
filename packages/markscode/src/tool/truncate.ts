@@ -9,6 +9,7 @@ import { Identifier } from "../id/id"
 import * as Log from "@opencode-ai/core/util/log"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
+import { compressRtkText } from "../rtk"
 
 const log = Log.create({ service: "truncation" })
 const RETENTION = Duration.days(7)
@@ -29,6 +30,10 @@ export interface Options {
 function hasTaskTool(agent?: Agent.Info) {
   if (!agent?.permission) return false
   return evaluate("task", "*", agent.permission).action !== "deny"
+}
+
+function rtkAutoEnabled() {
+  return !/^(0|false)$/i.test(process.env.MARKSCODE_RTK_AUTO || "") && !/^(1|true)$/i.test(process.env.OPENCODE_PURE || "")
 }
 
 export interface Interface {
@@ -130,6 +135,26 @@ export const layer = Layer.effect(
       const hint = hasTaskTool(agent)
         ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
         : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+
+      const rtk = rtkAutoEnabled()
+        ? yield* Effect.sync(() => compressRtkText({ text, max_lines: maxLines, max_chars: maxBytes })).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        : undefined
+
+      if (rtk?.text) {
+        return {
+          content: [
+            rtk.text,
+            "",
+            "RTK native compression applied",
+            `input: ${rtk.input.chars} chars / ${rtk.input.lines} lines`,
+            `output: ${rtk.output.chars} chars / ${rtk.output.lines} lines`,
+            "",
+            hint,
+          ].join("\n"),
+          truncated: true,
+          outputPath: file,
+        } as const
+      }
 
       return {
         content:

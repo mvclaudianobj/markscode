@@ -548,6 +548,42 @@ export function Session() {
   const MARKSCODE_MASTER_KEY_NAME = "marks-key-mestra"
   const MARKSCODE_MASTER_IDENTITY_FILE = "~/.ssh/marks-key-mestra"
 
+  const expandRemoteHomePath = (value: string) => {
+    if (!value.startsWith("~/")) return value
+    const home = process.env.HOME || ""
+    return home ? home + "/" + value.slice(2) : value
+  }
+
+  const runMasterKeyCommand = async (cmd: string[]) => {
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+    const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    if (exitCode !== 0) throw new Error((stderr || stdout || cmd[0] + " falhou").trim())
+    return stdout.trim()
+  }
+
+  const ensureMarksMasterKey = async () => {
+    const privateKey = expandRemoteHomePath(MARKSCODE_MASTER_IDENTITY_FILE)
+    const publicKey = privateKey + ".pub"
+    const sshDir = privateKey.slice(0, privateKey.lastIndexOf("/"))
+    await runMasterKeyCommand(["mkdir", "-p", sshDir])
+    await runMasterKeyCommand(["chmod", "700", sshDir])
+    const existed = await Bun.file(privateKey).exists()
+    if (!existed) await runMasterKeyCommand(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", MARKSCODE_MASTER_KEY_NAME, "-f", privateKey])
+    await runMasterKeyCommand(["chmod", "600", privateKey])
+    if (!(await Bun.file(publicKey).exists())) await Bun.write(publicKey, (await runMasterKeyCommand(["ssh-keygen", "-y", "-f", privateKey])) + "\n")
+    await runMasterKeyCommand(["chmod", "644", publicKey])
+    const fingerprint = await runMasterKeyCommand(["ssh-keygen", "-lf", publicKey])
+    kv.set("remote_ssh_master_key_name", MARKSCODE_MASTER_KEY_NAME)
+    kv.set("remote_ssh_master_identity_file", MARKSCODE_MASTER_IDENTITY_FILE)
+    return [
+      existed ? "Chave privada existente validada; não foi sobrescrita." : "Chave mestra criada com sucesso.",
+      "Nome: " + MARKSCODE_MASTER_KEY_NAME,
+      "Privada: " + MARKSCODE_MASTER_IDENTITY_FILE,
+      "Pública: " + MARKSCODE_MASTER_IDENTITY_FILE + ".pub",
+      "Fingerprint: " + fingerprint,
+    ].join("\n")
+  }
+
   const normalizeRemotePort = (value: string) => {
     const raw = Number.parseInt(value.trim(), 10)
     if (!Number.isFinite(raw) || raw <= 0 || raw > 65535) return 22
@@ -960,6 +996,7 @@ export function Session() {
       { title: "Create WinRM/Windows profile", value: "create-winrm", description: "Wizard guiado para Windows via WinRM" },
       { title: "Create PowerShell/Windows profile", value: "create-powershell", description: "Wizard guiado para PowerShell remoto direto no Windows" },
       { title: "Create WHM/cPanel profile", value: "create-whm", description: "Wizard guiado com credential_ref para token API" },
+      { title: "Criar/validar chave mestra Marks", value: "master", description: "Garante ~/.ssh/marks-key-mestra sem sobrescrever chave existente" },
       { title: "Use profile", value: "use", description: "Ativar um perfil remoto salvo" },
       { title: "Edit profile", value: "edit", description: "Editar JSON seguro de um perfil existente" },
       { title: "Delete profile", value: "delete", description: "Remover perfil salvo" },
@@ -977,7 +1014,11 @@ export function Session() {
     if (action === "create-winrm") { await runRemoteCreateWizard("winrm"); return }
     if (action === "create-powershell") { await runRemoteCreateWizard("powershell"); return }
     if (action === "create-whm") { await runRemoteCreateWizard("whm"); return }
-    if (action === "master") { await runRemoteCreateWizard("ssh"); return }
+    if (action === "master") {
+      await DialogAlert.show(dialog, "Chave mestra Marks", await ensureMarksMasterKey())
+      dialog.clear()
+      return
+    }
     if (action === "registry") {
       const registry = updateRemoteSSHProfilesRegistry()
       toast.show({ message: "Registry remoto atualizado: " + registry.names.length + " perfis / " + registry.aliases.length + " aliases", variant: "success" })
@@ -1283,6 +1324,8 @@ export function Session() {
     kv.set("memories_hybrid_capsule", String(local.capsule || status.capsule || local.path || ""))
     kv.set("memories_hybrid_local_count", Number.isFinite(local.count) ? String(local.count) : "")
     kv.set("memories_hybrid_local_reason", local.reason ? String(local.reason) : "")
+    kv.set("brainsystem_brain_plugin_active", "native")
+    kv.set("brainsystem_brain_plugin_label", "Brain nativo ativo")
 
     // BrainSystem diagnose
     try {

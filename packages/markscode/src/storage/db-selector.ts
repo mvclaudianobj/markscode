@@ -1,5 +1,5 @@
 import * as prompts from "@clack/prompts"
-import { Global } from "@opencode-ai/core/global"
+import { MarkscodePath } from "@/markscode-path"
 import { existsSync, mkdirSync } from "fs"
 import path from "path"
 import { DbRegistry } from "./db-registry"
@@ -7,7 +7,7 @@ import { DbRegistry } from "./db-registry"
 type Selection = "default" | "create" | "custom" | "refresh" | string
 
 function explicitDb() {
-  const value = process.env.OPENCODE_DB?.trim()
+  const value = process.env.MARKSCODE_DB?.trim() || process.env.OPENCODE_DB?.trim()
   return value ? value : undefined
 }
 
@@ -33,30 +33,26 @@ async function askCreate() {
   })
   if (prompts.isCancel(name)) return
   const target = DbRegistry.createPath(String(name))
-  process.env.OPENCODE_DB = target
+  process.env.MARKSCODE_DB = target
   return target
 }
 
 async function askCustom() {
   const value = await prompts.text({
     message: "Caminho do banco SQLite",
-    placeholder: path.join(Global.Path.data, "markscode-custom.db"),
+    placeholder: path.join(MarkscodePath.dataDir(), "markscode-custom.db"),
     validate: (item) => (String(item).trim() ? undefined : "Informe um caminho."),
   })
   if (prompts.isCancel(value)) return
   const target = DbRegistry.normalizePath(String(value).trim())
   if (!target) return
   mkdirSync(path.dirname(target), { recursive: true })
-  process.env.OPENCODE_DB = target
+  process.env.MARKSCODE_DB = target
   return target
 }
 
 export async function ensureSelected(input: { currentPath: string }) {
   if (explicitDb()) return { selected: explicitDb(), prompted: false }
-  if (process.env.MARKSCODE_DB?.trim()) {
-    process.env.OPENCODE_DB = process.env.MARKSCODE_DB.trim()
-    return { selected: process.env.OPENCODE_DB, prompted: false }
-  }
   let registry = DbRegistry.scan({ currentPath: input.currentPath, persist: true })
   const forced = process.env.MARKSCODE_DB_SELECTOR === "1" || process.env.MARKSCODE_DB_SELECT === "1"
   if (!shouldPrompt() || (!forced && registry.databases.filter((db) => db.status === "ok").length < 2)) {
@@ -74,7 +70,7 @@ export async function ensureSelected(input: { currentPath: string }) {
           hint: summary(db),
         })),
         { value: "default", label: "Usar banco padrão atual", hint: input.currentPath },
-        { value: "create", label: "Criar novo banco...", hint: path.join(Global.Path.data, "markscode-<nome>.db") },
+        { value: "create", label: "Criar novo banco...", hint: path.join(MarkscodePath.dataDir(), "markscode-<nome>.db") },
         { value: "custom", label: "Informar caminho customizado..." },
         { value: "refresh", label: "Atualizar varredura" },
       ],
@@ -90,7 +86,7 @@ export async function ensureSelected(input: { currentPath: string }) {
     }
     const target = selected === "create" ? await askCreate() : selected === "custom" ? await askCustom() : selected === "default" ? input.currentPath : selected
     if (!target) return { selected: input.currentPath, prompted: true }
-    if (target !== input.currentPath) process.env.OPENCODE_DB = target
+    if (target !== input.currentPath) process.env.MARKSCODE_DB = target
     if (target !== ":memory:" && !existsSync(path.dirname(target))) mkdirSync(path.dirname(target), { recursive: true })
     prompts.outro(`Banco ativo: ${target}`)
     return { selected: target, prompted: true }

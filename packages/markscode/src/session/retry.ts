@@ -150,6 +150,39 @@ export function retryable(error: Err, provider: string) {
   return undefined
 }
 
+export function isRateLimit(error: Err) {
+  if (MessageV2.APIError.isInstance(error)) {
+    if (error.data.statusCode === 429) return true
+    return rateLimitText(error.data.message) || rateLimitText(error.data.responseBody)
+  }
+  const msg = isRecord(error.data) ? error.data.message : undefined
+  if (rateLimitText(msg)) return true
+  const json = parseJSON(msg)
+  if (!json || typeof json !== "object") return false
+  if (json.type === "error" && json.error?.type === "too_many_requests") return true
+  if (json.type === "error" && typeof json.error?.code === "string" && json.error.code.includes("rate_limit")) {
+    return true
+  }
+  return typeof json.code === "string" && json.code.includes("rate_limit")
+}
+
+export function shouldFallbackToBigPickle(input: { agent?: string; assistantAgent?: string; alreadyUsed: boolean; error: Err }) {
+  if (input.alreadyUsed) return false
+  if (input.agent !== "orchestrator" && input.assistantAgent !== "orchestrator") return false
+  return isRateLimit(input.error)
+}
+
+function rateLimitText(value: unknown) {
+  if (typeof value !== "string") return false
+  const lower = value.toLowerCase()
+  return (
+    lower.includes("rate increased too quickly") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("too_many_requests")
+  )
+}
+
 function str(value: unknown) {
   if (value === undefined || value === null) return ""
   return String(value)
@@ -175,7 +208,13 @@ function parseJSON(value: unknown) {
 export function policy(opts: {
   provider: string
   parse: (error: unknown) => Err
-  set: (input: { attempt: number; message: string; action?: Retryable["action"]; next: number }) => Effect.Effect<void>
+  set: (input: {
+    attempt: number
+    message: string
+    action?: Retryable["action"]
+    next: number
+    error: Err
+  }) => Effect.Effect<void>
 }) {
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
@@ -190,6 +229,7 @@ export function policy(opts: {
           message: retry.message,
           action: retry.action,
           next: now + wait,
+          error,
         })
         return [meta.attempt, Duration.millis(wait)] as [number, Duration.Duration]
       })

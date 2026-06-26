@@ -30,14 +30,48 @@ function getLayerColor(status: string, theme: TuiThemeCurrent) {
   return theme.textMuted
 }
 
+function formatStatus(status: string) {
+  if (status === "ok") return "ok"
+  if (status === "warning") return "atenção"
+  if (status === "unavailable") return "indisponível"
+  if (status === "error") return "erro"
+  return status
+}
+
+function formatOverall(status: string) {
+  if (status === "healthy") return "saudável"
+  if (status === "degraded") return "atenção"
+  if (status === "critical") return "crítico"
+  return status
+}
+
+function compactReason(reason?: string) {
+  if (!reason) return ""
+  const value = reason.replace(/^.*\/([^/]+)$/, "$1")
+  if (value.length <= 42) return " — " + value
+  return " — " + value.slice(0, 39) + "..."
+}
+
 const LAYER_LABEL: Record<string, string> = {
-  cloud: "cloud",
-  local: "Memvid local",
-  memory_md: "MEMORY.md",
-  session_db: "Session DB",
-  remote_api: "Remote API",
-  compact: "compactaçao",
-  handoff: "hand-off",
+  cloud: "Memória remota",
+  local: "Memória local",
+  memory_md: "Memória do projeto",
+  project_tasks: "Tarefas do projeto",
+  session_db: "Histórico da sessão",
+  remote_api: "Memória remota",
+  compact: "Compactação",
+  handoff: "Continuidade",
+}
+
+const LAYER_DESCRIPTION: Record<string, string> = {
+  cloud: "API sincronizada",
+  local: "Memvid guarda contexto offline",
+  memory_md: "MEMORY.md encontrado",
+  project_tasks: "tarefas do projeto disponíveis",
+  session_db: "markscode.db ativo",
+  remote_api: "API sincronizada",
+  compact: "reduz contexto longo",
+  handoff: "hand-off preparado",
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
@@ -51,6 +85,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const count = createMemo(() => String(props.api.kv.get("memories_cloud_last_sync_count", "0") || ""))
   const at = createMemo(() => String(props.api.kv.get("memories_cloud_last_sync_at", "") || ""))
   const capsule = createMemo(() => String(props.api.kv.get("memories_hybrid_capsule", "") || ""))
+  const brainPluginActive = createMemo(() => String(props.api.kv.get("brainsystem_brain_plugin_active", "") || ""))
 
   const layers = createMemo<LayerEntry[]>(() => {
     return parseLayers(layersRaw())
@@ -68,25 +103,28 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <Show when={!collapsed()}>
         <Show when={overall()}>
           <text fg={overall() === "healthy" ? theme().success : overall() === "degraded" ? theme().warning : theme().error}>
-            {"overall: " + overall()}
+            {"BrainSystem: " + formatOverall(overall())}
           </text>
         </Show>
         <Show when={layers().length > 0}>
           <For each={layers()}>
             {(layer) => (
               <text fg={getLayerColor(layer.status, theme())}>
-                {(LAYER_LABEL[layer.name] ?? String(layer.name)) + ": " + String(layer.status) + (layer.reason ? " (" + String(layer.reason) + ")" : "")}
+                {(LAYER_LABEL[layer.name] ?? String(layer.name)) + ": " + formatStatus(layer.status) + " — " + (LAYER_DESCRIPTION[layer.name] ?? "camada disponível") + (layer.name === "local" ? compactReason(layer.reason) : "")}
               </text>
             )}
           </For>
         </Show>
         <Show when={layers().length === 0}>
-          <text fg={ok() ? theme().success : theme().textMuted}>{"cloud: " + (ok() ? "ok" : "checking...")}</text>
-          <text fg={local() ? theme().success : theme().textMuted}>{"local Memvid: " + (local() ? "ok" : "unavailable")}</text>
+          <text fg={ok() ? theme().success : theme().textMuted}>{"Memória remota: " + (ok() ? "ok — API sincronizada" : "verificando...")}</text>
+          <text fg={local() ? theme().success : theme().textMuted}>{"Memória local: " + (local() ? "ok — Memvid guarda contexto offline" : "indisponível")}</text>
         </Show>
+        <text fg={brainPluginActive() === "native" || brainPluginActive() === "1" ? theme().success : theme().textMuted}>
+          {"Brain nativo: " + (brainPluginActive() === "native" || brainPluginActive() === "1" ? "ativo — sem plugin externo" : "nativo")}
+        </text>
         <text fg={theme().textMuted}>{"items: " + (count() || "0") + " " + String.fromCharCode(0x00b7) + " sync: " + at()}</text>
         <Show when={capsule()}>
-          <text fg={theme().textMuted}>{"capsule: " + capsule()}</text>
+          <text fg={theme().textMuted}>{"cápsula: " + compactReason(capsule()).replace(/^ — /, "")}</text>
         </Show>
         <text fg={theme().textMuted}>search: /memory-search</text>
         <Show when={overall() && overall() !== "healthy"}>

@@ -5,12 +5,12 @@ export * from "drizzle-orm"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { LocalContext } from "@/util/local-context"
 import { Global } from "@opencode-ai/core/global"
+import { MarkscodePath } from "@/markscode-path"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import path from "path"
-import { readFileSync, readdirSync, existsSync } from "fs"
+import { readFileSync, readdirSync, existsSync, mkdirSync } from "fs"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
 import { init } from "#db"
 import { Effect, Schema } from "effect"
@@ -29,17 +29,18 @@ const readRuntimeFlags = () =>
   Effect.runSync(RuntimeFlags.Service.useSync((flags) => flags).pipe(Effect.provide(RuntimeFlags.defaultLayer)))
 
 export function getChannelPath(flags: Pick<DatabaseFlags, "disableChannelDb"> = readRuntimeFlags()) {
-  if (["latest", "beta", "prod"].includes(InstallationChannel) || flags.disableChannelDb)
-    return path.join(Global.Path.data, "opencode.db")
-  const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
-  return path.join(Global.Path.data, `opencode-${safe}.db`)
+  return path.join(MarkscodePath.dataDir(), "markscode.db")
 }
 
 export const getPath = (flags?: Pick<DatabaseFlags, "disableChannelDb">) => {
-  const selected = Flag.OPENCODE_DB || process.env.MARKSCODE_DB
-  if (selected) {
-    if (selected === ":memory:" || path.isAbsolute(selected)) return selected
-    return path.join(Global.Path.data, selected)
+  if (process.env.MARKSCODE_DB) {
+    if (process.env.MARKSCODE_DB === ":memory:" || path.isAbsolute(process.env.MARKSCODE_DB)) return process.env.MARKSCODE_DB
+    return path.join(MarkscodePath.dataDir(), process.env.MARKSCODE_DB)
+  }
+  const opencodeDb = Flag.OPENCODE_DB || process.env.OPENCODE_DB
+  if (opencodeDb) {
+    if (opencodeDb === ":memory:" || path.isAbsolute(opencodeDb)) return opencodeDb
+    return path.join(Global.Path.data, opencodeDb)
   }
   return getChannelPath(flags)
 }
@@ -99,6 +100,7 @@ export const Client = Object.assign(
 
     const dbPath = getPath(flags)
     log.info("opening database", { path: dbPath })
+    if (dbPath !== ":memory:") mkdirSync(path.dirname(dbPath), { recursive: true })
 
     const db = init(dbPath)
 

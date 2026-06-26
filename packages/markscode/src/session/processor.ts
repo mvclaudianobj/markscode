@@ -17,7 +17,7 @@ import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
-import type { Provider } from "@/provider/provider"
+import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import * as Log from "@opencode-ai/core/util/log"
@@ -29,6 +29,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import * as DateTime from "effect/DateTime"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { ModelID, ProviderID } from "@/provider/schema"
 
 const DOOM_LOOP_THRESHOLD = 3
 const log = Log.create({ service: "session.processor" })
@@ -94,6 +95,7 @@ export const layer = Layer.effect(
     const snapshot = yield* Snapshot.Service
     const agents = yield* Agent.Service
     const llm = yield* LLM.Service
+    const provider = yield* Provider.Service
     const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
     const summary = yield* SessionSummary.Service
@@ -121,6 +123,7 @@ export const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+      let orchestratorRateLimitFallbackUsed = false
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
 
       const parse = (e: unknown) =>
@@ -802,17 +805,29 @@ export const layer = Layer.effect(
         yield* status.set(ctx.sessionID, { type: "idle" })
       })
 
+      const fallbackModel = Effect.fn("SessionProcessor.fallbackModel")(function* () {
+        const direct = yield* provider
+          .getModel(ProviderID.make("zen"), ModelID.make("big-pickle"))
+          .pipe(Effect.option)
+        if (Option.isSome(direct)) return direct.value
+        const providers = yield* provider.list().pipe(Effect.catch(() => Effect.succeed({} as Record<ProviderID, Provider.Info>)))
+        return Object.values(providers)
+          .flatMap((item) => Object.values(item.models))
+          .find((model) => model.providerID === "zen" && model.id.includes("big-pickle"))
+      })
+
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         slog.info("process")
         ctx.needsCompaction = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        let currentStreamInput = streamInput
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream(currentStreamInput)
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -834,33 +849,51 @@ export const layer = Layer.effect(
             ),
             Effect.retry(
               SessionRetry.policy({
-                provider: input.model.providerID,
+                provider: currentStreamInput.model.providerID,
                 parse,
-                set: (info) => {
-                  // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
-                  const event = flags.experimentalEventSystem
-                    ? events.publish(SessionEvent.Retried, {
-                        sessionID: ctx.sessionID,
-                        attempt: info.attempt,
-                        error: {
-                          message: info.message,
-                          isRetryable: true,
-                        },
-                        timestamp: DateTime.makeUnsafe(Date.now()),
-                      })
-                    : Effect.void
-                  return event.pipe(
-                    Effect.andThen(
-                      status.set(ctx.sessionID, {
-                        type: "retry",
-                        attempt: info.attempt,
-                        message: info.message,
-                        action: info.action,
-                        next: info.next,
-                      }),
-                    ),
-                  )
-                },
+                set: (info) =>
+                  Effect.gen(function* () {
+                    const shouldFallback = SessionRetry.shouldFallbackToBigPickle({
+                      agent: currentStreamInput.agent.name,
+                      assistantAgent: ctx.assistantMessage.agent,
+                      alreadyUsed: orchestratorRateLimitFallbackUsed,
+                      error: info.error,
+                    })
+                    const fallback = shouldFallback ? yield* fallbackModel() : undefined
+                    if (fallback) {
+                      orchestratorRateLimitFallbackUsed = true
+                      ctx.model = fallback
+                      currentStreamInput = { ...currentStreamInput, model: fallback }
+                      ctx.assistantMessage.providerID = fallback.providerID
+                      ctx.assistantMessage.modelID = fallback.id
+                      yield* session.updateMessage(ctx.assistantMessage)
+                      slog.info("orchestrator rate limit fallback", { providerID: fallback.providerID, modelID: fallback.id })
+                    }
+                    const message = fallback ? `${info.message}; switched Orchestrator to zen/big-pickle` : info.message
+                    // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
+                    const event = flags.experimentalEventSystem
+                      ? events.publish(SessionEvent.Retried, {
+                          sessionID: ctx.sessionID,
+                          attempt: info.attempt,
+                          error: {
+                            message,
+                            isRetryable: true,
+                          },
+                          timestamp: DateTime.makeUnsafe(Date.now()),
+                        })
+                      : Effect.void
+                    return event.pipe(
+                      Effect.andThen(
+                        status.set(ctx.sessionID, {
+                          type: "retry",
+                          attempt: info.attempt,
+                          message,
+                          action: info.action,
+                          next: info.next,
+                        }),
+                      ),
+                    )
+                  }),
               }),
             ),
             Effect.catch(halt),
@@ -893,6 +926,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Snapshot.defaultLayer),
     Layer.provide(Agent.defaultLayer),
     Layer.provide(LLM.defaultLayer),
+    Layer.provide(Provider.defaultLayer),
     Layer.provide(Permission.defaultLayer),
     Layer.provide(Plugin.defaultLayer),
     Layer.provide(SessionSummary.defaultLayer),

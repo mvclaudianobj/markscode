@@ -9,6 +9,10 @@ import { useBindings } from "../../keymap"
 const id = "internal:plugin-manager"
 
 function state(api: TuiPluginApi, item: TuiPluginStatus) {
+  if (item.loadable === false) {
+    return <span style={{ fg: api.theme.current.textMuted }}>configured</span>
+  }
+
   if (!item.enabled) {
     return <span style={{ fg: api.theme.current.textMuted }}>disabled</span>
   }
@@ -26,6 +30,11 @@ function source(spec: string) {
 }
 
 function meta(item: TuiPluginStatus, width: number) {
+  if (item.loadable === false) {
+    if (width >= 120) return `${item.spec} (server-only)`
+    return "server-only"
+  }
+
   if (item.source === "internal") {
     if (width >= 120) return "Built-in plugin"
     return "Built-in"
@@ -33,6 +42,10 @@ function meta(item: TuiPluginStatus, width: number) {
   const next = source(item.spec)
   if (next) return next
   return item.spec
+}
+
+function toggleable(item: TuiPluginStatus) {
+  return item.id !== id && item.loadable !== false
 }
 
 function Install(props: { api: TuiPluginApi }) {
@@ -181,6 +194,7 @@ function View(props: { api: TuiPluginApi }) {
     if (lock()) return
     const item = list().find((entry) => entry.id === x)
     if (!item) return
+    if (!toggleable(item)) return
     setLock(true)
     const task = item.active ? props.api.plugins.deactivate(x) : props.api.plugins.activate(x)
     void task

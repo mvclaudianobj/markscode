@@ -22,6 +22,8 @@ import {
   readPackageThemes,
   readPluginId,
   readV1Plugin,
+  parsePluginSpecifier,
+  pluginSource,
   resolvePluginId,
   type PluginPackage,
   type PluginSource,
@@ -56,6 +58,7 @@ type PluginLoad = {
   origin: ConfigPlugin.Origin
   plugin_root: string
   theme_files: string[]
+  loadable: boolean
 }
 
 type Api = HostPluginApi
@@ -113,6 +116,7 @@ type RuntimeState = {
   slots: HostSlots
   plugins: PluginEntry[]
   plugins_by_id: Map<string, PluginEntry>
+  configured: ConfigPlugin.Origin[]
   pending: Map<string, ConfigPlugin.Origin>
   dispose_timeout_ms: number
 }
@@ -378,6 +382,7 @@ function loadInternalPlugin(item: InternalTuiPlugin): PluginLoad {
     },
     plugin_root: process.cwd(),
     theme_files: [],
+    loadable: true,
   }
 }
 
@@ -509,15 +514,55 @@ function writePluginEnabledState(api: Api, id: string, enabled: boolean) {
   })
 }
 
+function pluginIdentity(source: PluginSource, spec: string) {
+  if (source === "file") return spec
+  return parsePluginSpecifier(spec).pkg
+}
+
+function configuredPluginId(source: PluginSource, spec: string) {
+  if (source === "npm") return parsePluginSpecifier(spec).pkg
+  if (spec.startsWith("file://")) return path.basename(fileURLToPath(spec)) || spec
+  return path.basename(spec) || spec
+}
+
+function configuredPluginStatus(origin: ConfigPlugin.Origin): TuiPluginStatus {
+  const spec = ConfigPlugin.pluginSpecifier(origin.spec)
+  const source = pluginSource(spec)
+  return {
+    id: configuredPluginId(source, spec),
+    source,
+    spec,
+    target: "",
+    enabled: false,
+    active: false,
+    loadable: false,
+  }
+}
+
 function listPluginStatus(state: RuntimeState): TuiPluginStatus[] {
-  return state.plugins.map((plugin) => ({
-    id: plugin.id,
-    source: plugin.meta.source,
-    spec: plugin.meta.spec,
-    target: plugin.meta.target,
-    enabled: plugin.enabled,
-    active: plugin.scope !== undefined,
-  }))
+  const seen = new Set(
+    state.plugins.flatMap((plugin) => (plugin.load.source === "internal" ? [] : [pluginIdentity(plugin.load.source, plugin.load.spec)])),
+  )
+  return [
+    ...state.plugins.map((plugin) => ({
+      id: plugin.id,
+      source: plugin.meta.source,
+      spec: plugin.meta.spec,
+      target: plugin.meta.target,
+      enabled: plugin.enabled,
+      active: plugin.scope !== undefined,
+      loadable: plugin.load.loadable,
+    })),
+    ...state.configured
+      .filter((origin) => {
+        const spec = ConfigPlugin.pluginSpecifier(origin.spec)
+        const key = pluginIdentity(pluginSource(spec), spec)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .map(configuredPluginStatus),
+  ]
 }
 
 async function deactivatePluginEntry(state: RuntimeState, plugin: PluginEntry, persist: boolean) {
@@ -531,6 +576,7 @@ async function deactivatePluginEntry(state: RuntimeState, plugin: PluginEntry, p
 }
 
 async function activatePluginEntry(state: RuntimeState, plugin: PluginEntry, persist: boolean) {
+  if (!plugin.load.loadable) return false
   plugin.enabled = true
   if (persist) writePluginEnabledState(state.api, plugin.id, true)
   if (plugin.scope) return true
@@ -732,6 +778,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         origin,
         plugin_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
         theme_files,
+        loadable: true,
       }
     },
     missing: async (loaded, origin, retry) => {
@@ -759,6 +806,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         origin,
         plugin_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
         theme_files,
+        loadable: false,
       }
     },
     report: {
@@ -827,7 +875,7 @@ async function addExternalPluginEntries(state: RuntimeState, ready: PluginLoad[]
       meta: info,
       themes,
       plugin: entry.module.tui,
-      enabled: true,
+      enabled: entry.loadable,
     }
     if (!addPluginEntry(state, plugin)) {
       ok = false
@@ -1081,6 +1129,7 @@ async function load(input: { api: Api; config: TuiConfig.Resolved; dispose?: () 
     slots,
     plugins: [],
     plugins_by_id: new Map(),
+    configured: [],
     pending: new Map(),
     dispose_timeout_ms: input.disposeTimeoutMs ?? DISPOSE_TIMEOUT_MS,
   }
@@ -1092,6 +1141,7 @@ async function load(input: { api: Api; config: TuiConfig.Resolved; dispose?: () 
       }).pipe(Effect.provide(RuntimeFlags.defaultLayer)),
     )
     const records = Flag.OPENCODE_PURE ? [] : (config.plugin_origins ?? [])
+    next.configured = records
     if (Flag.OPENCODE_PURE && config.plugin_origins?.length) {
       log.info("skipping external tui plugins in pure mode", { count: config.plugin_origins.length })
     }

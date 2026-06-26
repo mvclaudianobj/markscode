@@ -2,7 +2,6 @@ import { intro, log, outro, spinner } from "@clack/prompts"
 import { Effect } from "effect"
 
 import { ConfigPaths } from "@/config/paths"
-import { Global } from "@opencode-ai/core/global"
 import { installPlugin, patchPluginConfig, readPluginManifest } from "../../plugin/install"
 import { resolvePluginTarget } from "../../plugin/shared"
 import { errorMessage } from "../../util/error"
@@ -11,6 +10,7 @@ import { Process } from "@/util/process"
 import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { InstanceRef } from "@/effect/instance-ref"
+import { ConfigGlobal } from "@/config/global"
 
 type Spin = {
   start: (msg: string) => void
@@ -28,7 +28,7 @@ export type PlugDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
-  files: (dir: string, name: "opencode" | "tui") => string[]
+  files: (dir: string, name: "markscode" | "tui") => string[]
   global: string
 }
 
@@ -42,6 +42,10 @@ export type PlugCtx = {
   vcs?: string
   worktree: string
   directory: string
+}
+
+export function markscodeGlobalConfigDir(env: NodeJS.ProcessEnv = process.env) {
+  return ConfigGlobal.markscodeGlobalConfigDir(env)
 }
 
 const defaultPlugDeps: PlugDeps = {
@@ -58,7 +62,7 @@ const defaultPlugDeps: PlugDeps = {
   },
   exists: (file) => Filesystem.exists(file),
   files: (dir, name) => ConfigPaths.fileInDirectory(dir, name),
-  global: Global.Path.config,
+  global: markscodeGlobalConfigDir(),
 }
 
 function cause(err: unknown) {

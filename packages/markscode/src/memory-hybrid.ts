@@ -157,6 +157,24 @@ interface MemvidWriteResult {
   errors?: string[]
 }
 
+export interface EnsureMemvidCapsuleInput {
+  capsule?: string
+  seed?: string
+  projectRoot?: string
+}
+
+export interface EnsureMemvidCapsuleResult {
+  ok: boolean
+  available: boolean
+  capsule: string
+  status: "created" | "exists" | "skipped" | "unavailable" | "fallback"
+  cli?: string
+  count?: number
+  export_path?: string
+  warning?: string
+  reason?: string
+}
+
 const PROVIDERS = new Set<MemoryProvider>(["cloud", "local", "hybrid"])
 const INGEST_SOURCES = ["markscode-legacy-json", "marksclaw-sqlite", "marksclaw-markdown", "memories-api-sqlite", "markscode-session-db", "opencode-session-db"]
 const REPO_ROOT = "/media/marcos/Arquivos/projetos/marks"
@@ -212,7 +230,7 @@ function memoryUserID(value?: string) {
 }
 
 function cloudMemoryAvailable() {
-  return Boolean(resolveMemoryConfig().memories.api_key || process.env.MARKSCODE_MEMORIES_URL || process.env.MEMORIES_URL)
+  return Boolean(resolveMemoryConfig().memories.api_key)
 }
 
 function expandHybridMemoryCue(cue: string) {
@@ -266,6 +284,10 @@ function dataHome() {
 
 function defaultMemvidCapsulePath() {
   return process.env.MARKSCODE_MEMVID_CAPSULE?.trim() || join(dataHome(), "markscode/memory/hybrid.mv2")
+}
+
+function memvidAutoInitEnabled() {
+  return !/^(0|false)$/i.test(process.env.MARKSCODE_MEMVID_AUTO_INIT || "")
 }
 
 function sqliteJSON(db: string, sql: string) {
@@ -979,6 +1001,39 @@ function exportMemvidJSONL(capsulePath: string, items: HybridIngestItem[], reaso
   return { available: false, path: capsulePath, method: "jsonl-export", planned_count: items.length, written: items.length, item_count: items.length, export_path: exportPath, reason: [reason, detail].filter(Boolean).join(": ") }
 }
 
+function memvidSeedItems(input: EnsureMemvidCapsuleInput, capsulePath: string): HybridIngestItem[] {
+  return [baseItem({ user_id: memoryUserID(), source: "markscode-memvid-auto-init" }, "markscode-memvid-auto-init", [
+    input.seed?.trim() || "MarksCode BrainSystem native Memvid capsule initialized automatically.",
+    "Identity: MarksCode BrainSystem local-first hybrid memory.",
+    "Date: " + new Date().toISOString(),
+    "Capsule: " + capsulePath,
+    input.projectRoot ? "Project root: " + input.projectRoot : "",
+    "Guidance: prefer local recall first; use cloud only when explicitly configured.",
+  ].filter(Boolean).join("\n"), {
+    title: "MarksCode BrainSystem native Memvid seed",
+    subject: "markscode-brainsystem",
+    tags: ["markscode", "brainsystem", "memvid", "local-first", "auto-init"],
+    metadata: { auto_init: true, project_root: input.projectRoot, capsule: capsulePath },
+  })]
+}
+
+export function ensureMemvidCapsule(input: EnsureMemvidCapsuleInput = {}): EnsureMemvidCapsuleResult {
+  const capsule = input.capsule || defaultMemvidCapsulePath()
+  if (!memvidAutoInitEnabled()) return { ok: true, available: existsSync(capsule), capsule, status: "skipped", reason: "MARKSCODE_MEMVID_AUTO_INIT disabled" }
+
+  const local = detectLocalMemvid({ capsule })
+  if (existsSync(capsule)) return { ok: true, available: true, capsule, status: "exists", cli: local.cli, count: capsuleItemCount(local.cli, capsule) }
+  if (!local.official_cli || !local.cli) return { ok: false, available: false, capsule, status: "unavailable", reason: local.reason || "No official markscode-memvid sidecar/CLI contract v1 found" }
+
+  mkdirSync(dirname(capsule), { recursive: true })
+  const items = memvidSeedItems(input, capsule)
+  const cliResult = tryWriteMemvidWithCLI(local.cli, capsule, items)
+  if (cliResult?.verified || existsSync(capsule)) return { ok: true, available: true, capsule, status: "created", cli: local.cli, count: capsuleItemCount(local.cli, capsule) ?? cliResult?.item_count ?? items.length }
+
+  const fallback = exportMemvidJSONL(capsule, items, "memvid-cli-create-unsupported", cliResult?.reason)
+  return { ok: false, available: false, capsule, status: "fallback", cli: local.cli, count: fallback.item_count, export_path: fallback.export_path, warning: "Official markscode-memvid sidecar found, but create/ingest was unsupported; wrote JSONL seed fallback", reason: fallback.reason }
+}
+
 const RUST_MEMVID_HELPER = [
   "use std::{env, fs, path::PathBuf};",
   "",
@@ -1057,6 +1112,7 @@ const RUST_MEMVID_HELPER = [
 ].join("\n")
 
 export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unknown> {
+  const auto_init = ensureMemvidCapsule({ capsule: input?.capsule, projectRoot: process.cwd() })
   const local = detectLocalMemvid(input)
   const memoryConfig = resolveMemoryConfig()
   const embeddedCLI = embeddedMemvidCandidates().find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
@@ -1065,9 +1121,10 @@ export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unk
     hybrid_prompt_enabled: /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || ""),
     local_available: local.available,
     local,
+    auto_init,
     embedded_cli: embeddedCLI,
     capsule: input?.capsule || defaultMemvidCapsulePath(),
-    cloud_available: Boolean(memoryConfig.memories.api_key || process.env.MARKSCODE_MEMORIES_URL || process.env.MEMORIES_URL),
+    cloud_available: cloudMemoryAvailable(),
     cloud_url: memoryConfig.memories.url,
     defaults: {
       user_id: memoryConfig.user_id,
@@ -1107,6 +1164,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
   const local = detectLocalMemvid()
   const expandedCue = expandHybridMemoryCue(input.cue)
   const recallInput = expandedCue === input.cue ? input : { ...input, cue: expandedCue }
+  const cloudAvailable = cloudMemoryAvailable()
 
   const localMemories = provider !== "cloud"
     ? await recallLocalMemvid(recallInput, local).catch((err: unknown) => {
@@ -1115,7 +1173,9 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
       })
     : []
 
-  const cloudMemories = provider !== "local"
+  if (provider === "cloud" && !cloudAvailable) errors.push("cloud: Memories API key not configured")
+
+  const cloudMemories = provider !== "local" && cloudAvailable
       ? await recallHumanMemories({
           user_id: userID,
           session_id: input.session_id,
@@ -1133,7 +1193,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
   return {
     provider,
     local_available: local.available,
-    cloud_available: provider === "local" ? false : !errors.some((x) => x.startsWith("cloud:")),
+    cloud_available: provider === "local" ? false : cloudAvailable && !errors.some((x) => x.startsWith("cloud:")),
     errors,
     memories: [...localMemories, ...cloudMemories]
       .filter((memory) => memory.content.trim())

@@ -164,6 +164,39 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: msg })
   })
 
+  test("detects orchestrator big-pickle fallback eligibility once for rate limits", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "Rate limit exceeded",
+        isRetryable: true,
+        statusCode: 429,
+      }).toObject(),
+    )
+
+    expect(
+      SessionRetry.shouldFallbackToBigPickle({
+        agent: "orchestrator",
+        alreadyUsed: false,
+        error,
+      }),
+    ).toBe(true)
+    expect(
+      SessionRetry.shouldFallbackToBigPickle({
+        agent: "orchestrator",
+        alreadyUsed: true,
+        error,
+      }),
+    ).toBe(false)
+    expect(
+      SessionRetry.shouldFallbackToBigPickle({
+        agent: "build",
+        assistantAgent: "build",
+        alreadyUsed: false,
+        error,
+      }),
+    ).toBe(false)
+  })
+
   test("retries transport timeout errors", () => {
     const request = MessageV2.fromError(new ProviderError.HeaderTimeoutError(10000), { providerID })
     expect(MessageV2.APIError.isInstance(request)).toBe(true)
