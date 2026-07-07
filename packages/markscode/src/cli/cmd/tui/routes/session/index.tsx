@@ -109,7 +109,7 @@ import { SessionRetry } from "@/session/retry"
 import { Account } from "@/account/account"
 import { AppRuntime } from "@/effect/app-runtime"
 import { loadMemory } from "@/memory"
-import { hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
+import { ensureMemvidCapsule, hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
 import { listRemoteSSHProfiles, replaceRemoteSSHProfiles } from "@/remote/profile-repo"
 import { diagnoseBrainSystem } from "@/memory-diagnose"
 import { Database } from "@/storage/db"
@@ -3198,6 +3198,10 @@ export function Session() {
             return
           }
           try {
+            const ensure = ensureMemvidCapsule({
+              capsule: capsulePath || undefined,
+              projectRoot,
+            })
             const result = await ingestHybridMemories({
               user_id: memoriesUserID,
               session_id: route.sessionID || undefined,
@@ -3208,7 +3212,8 @@ export function Session() {
             })
             await refreshHybridMemoryStatus().catch(() => undefined)
             const memvid = result.memvid && typeof result.memvid === "object" ? result.memvid as Record<string, unknown> : {}
-            await DialogAlert.show(dialog, "Memvid repair concluído", "Itens analisados: " + String(result.count || 0) + "\nEscritos: " + String(memvid.written ?? memvid.item_count ?? 0) + "\nAvisos: " + String((result.warnings || []).join("; ") || "nenhum") + "\nErros: " + String((result.errors || []).join("; ") || "nenhum"))
+            const partial = ensure.status === "fallback" || memvid.method === "jsonl-export"
+            await DialogAlert.show(dialog, partial ? "Memvid repair parcial concluído" : "Memvid repair concluído", "Ensure status: " + ensure.status + "\nEnsure aviso: " + String(ensure.warning || "nenhum") + "\nEnsure export_path: " + String(ensure.export_path || "nenhum") + "\nEnsure reason: " + String(ensure.reason || "nenhum") + "\nItens analisados: " + String(result.count || 0) + "\nEscritos: " + String(memvid.written ?? memvid.item_count ?? 0) + "\nFallback export_path: " + String(memvid.export_path || "nenhum") + "\nAvisos: " + String((result.warnings || []).join("; ") || "nenhum") + "\nErros: " + String((result.errors || []).join("; ") || "nenhum"))
           } catch (err) {
             await DialogAlert.show(dialog, "Memvid repair falhou", err instanceof Error ? err.message : String(err))
           }

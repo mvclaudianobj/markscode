@@ -721,6 +721,10 @@ export const layer = Layer.effect(
               for (const providerID of Object.keys(next.provider ?? {})) {
                 consoleManagedProviders.add(providerID)
               }
+              if (Object.keys(next.provider ?? {}).length > 0) {
+                result.provider = {}
+                result.enabled_providers = next.enabled_providers ?? Object.keys(next.provider ?? {})
+              }
               yield* merge(source, next, "global")
             }
           }).pipe(

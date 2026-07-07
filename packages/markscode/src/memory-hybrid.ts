@@ -911,11 +911,6 @@ function writeMemvidCapsule(items: HybridIngestItem[], warnings: string[], error
     return { available: local.available, path: capsulePath, method: "none", planned_count: 0, written: 0, item_count: 0, reason: "no items" }
   }
 
-  if (!local.available) {
-    warnings.push("Memvid unavailable; wrote deterministic JSONL export instead of .mv2 capsule")
-    return exportMemvidJSONL(capsulePath, items, "memvid-unavailable", local.reason)
-  }
-
   const cliResult = local.cli ? tryWriteMemvidWithCLI(local.cli, capsulePath, items) : undefined
   if (cliResult?.written) return cliResult
   if (cliResult) warnings.push("Memvid CLI write unavailable or unsupported: " + (cliResult.errors || []).join("; "))
@@ -928,8 +923,8 @@ function writeMemvidCapsule(items: HybridIngestItem[], warnings: string[], error
     return exportMemvidJSONL(capsulePath, items, "rust-helper-failed", helperResult.reason)
   }
 
-  warnings.push("Memvid CLI contract unsupported and no local Rust core detected; wrote deterministic JSONL export instead")
-  return exportMemvidJSONL(capsulePath, items, "cli-unsupported", cliResult?.reason)
+  warnings.push((local.cli ? "Memvid CLI contract unsupported" : "No usable Memvid CLI") + " and no local Rust core detected; wrote deterministic JSONL export instead")
+  return exportMemvidJSONL(capsulePath, items, local.cli ? "cli-unsupported" : "memvid-unavailable", cliResult?.reason || local.reason)
 }
 
 function writeMemvidInputJSON(path: string, items: HybridIngestItem[]) {
@@ -1005,7 +1000,7 @@ function memvidSeedItems(input: EnsureMemvidCapsuleInput, capsulePath: string): 
   return [baseItem({ user_id: memoryUserID(), source: "markscode-memvid-auto-init" }, "markscode-memvid-auto-init", [
     input.seed?.trim() || "MarksCode BrainSystem native Memvid capsule initialized automatically.",
     "Identity: MarksCode BrainSystem local-first hybrid memory.",
-    "Date: " + new Date().toISOString(),
+    "Seed: deterministic JSONL fallback compatible with markscode-memvid sidecar bootstrap.",
     "Capsule: " + capsulePath,
     input.projectRoot ? "Project root: " + input.projectRoot : "",
     "Guidance: prefer local recall first; use cloud only when explicitly configured.",
@@ -1023,15 +1018,19 @@ export function ensureMemvidCapsule(input: EnsureMemvidCapsuleInput = {}): Ensur
 
   const local = detectLocalMemvid({ capsule })
   if (existsSync(capsule)) return { ok: true, available: true, capsule, status: "exists", cli: local.cli, count: capsuleItemCount(local.cli, capsule) }
-  if (!local.official_cli || !local.cli) return { ok: false, available: false, capsule, status: "unavailable", reason: local.reason || "No official markscode-memvid sidecar/CLI contract v1 found" }
 
   mkdirSync(dirname(capsule), { recursive: true })
   const items = memvidSeedItems(input, capsule)
+  if (!local.official_cli || !local.cli) {
+    const fallback = exportMemvidJSONL(capsule, items, "memvid-sidecar-unavailable", local.reason)
+    return { ok: true, available: false, capsule, status: "fallback", count: fallback.item_count, export_path: fallback.export_path, warning: "Official markscode-memvid sidecar unavailable; wrote deterministic JSONL seed fallback", reason: local.reason || fallback.reason }
+  }
+
   const cliResult = tryWriteMemvidWithCLI(local.cli, capsule, items)
   if (cliResult?.verified || existsSync(capsule)) return { ok: true, available: true, capsule, status: "created", cli: local.cli, count: capsuleItemCount(local.cli, capsule) ?? cliResult?.item_count ?? items.length }
 
   const fallback = exportMemvidJSONL(capsule, items, "memvid-cli-create-unsupported", cliResult?.reason)
-  return { ok: false, available: false, capsule, status: "fallback", cli: local.cli, count: fallback.item_count, export_path: fallback.export_path, warning: "Official markscode-memvid sidecar found, but create/ingest was unsupported; wrote JSONL seed fallback", reason: fallback.reason }
+  return { ok: true, available: false, capsule, status: "fallback", cli: local.cli, count: fallback.item_count, export_path: fallback.export_path, warning: "Official markscode-memvid sidecar found, but create/ingest was unsupported; wrote JSONL seed fallback", reason: fallback.reason }
 }
 
 const RUST_MEMVID_HELPER = [

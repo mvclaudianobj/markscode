@@ -54,6 +54,7 @@ function compactReason(reason?: string) {
 
 const LAYER_LABEL: Record<string, string> = {
   cloud: "Memória remota",
+  "Cápsula Memvid": "Cápsula Memvid",
   local: "Memória local",
   memory_md: "Memória do projeto",
   project_tasks: "Tarefas do projeto",
@@ -65,6 +66,7 @@ const LAYER_LABEL: Record<string, string> = {
 
 const LAYER_DESCRIPTION: Record<string, string> = {
   cloud: "API sincronizada",
+  "Cápsula Memvid": "Memvid guarda contexto offline",
   local: "Memvid guarda contexto offline",
   memory_md: "MEMORY.md encontrado",
   project_tasks: "tarefas do projeto disponíveis",

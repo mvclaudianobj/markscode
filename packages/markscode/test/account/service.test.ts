@@ -1,4 +1,4 @@
-import { expect } from "bun:test"
+import { expect, test } from "bun:test"
 import { Duration, Effect, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
 
@@ -66,6 +66,47 @@ const deviceTokenClient = (body: unknown, status = 400) =>
 
 const poll = (body: unknown, status = 400) =>
   Account.Service.use((s) => s.poll(login())).pipe(Effect.provide(live(deviceTokenClient(body, status))))
+
+test("filterRemoteConfigForFreePlan removes explicitly paid models for free quota", () => {
+  expect(
+    Account.filterRemoteConfigForFreePlan(
+      {
+        memories: { enabled: true },
+        provider: {
+          markspanel: {
+            models: {
+              "gpt-plus": { tier: "plus" },
+              "gpt-pro": { name: "GPT Pro" },
+              "big-pickle": { name: "Big Pickle" },
+              "llama-free": { access: "free" },
+              zero: { cost: { input: 0, output: 0 } },
+              unmarked: { name: "Unmarked" },
+            },
+          },
+          paid: { models: { premium: { plan: "premium" }, team: { required_plan: "team" }, enterprise: { availability: "enterprise" } } },
+        },
+      },
+      { tier: "free", hard_limit: true },
+    ),
+  ).toEqual({
+    memories: { enabled: true },
+    provider: {
+      markspanel: {
+        models: {
+          "big-pickle": { name: "Big Pickle" },
+          "llama-free": { access: "free" },
+          zero: { cost: { input: 0, output: 0 } },
+          unmarked: { name: "Unmarked" },
+        },
+      },
+    },
+  })
+})
+
+test("filterRemoteConfigForFreePlan preserves config for paid quota", () => {
+  const config = { provider: { markspanel: { models: { "gpt-plus": { tier: "plus" } } } } }
+  expect(Account.filterRemoteConfigForFreePlan(config, { tier: "plus", hard_limit: false })).toBe(config)
+})
 
 it.live("login normalizes trailing slashes in the provided server URL", () =>
   Effect.gen(function* () {
@@ -337,10 +378,9 @@ it.live("config sends the selected org header", () =>
     const seen: { auth?: string; org?: string } = {}
     const client = HttpClient.make((req) =>
       Effect.gen(function* () {
-        seen.auth = req.headers.authorization
-        seen.org = req.headers["x-org-id"]
-
         if (req.url === "https://one.example.com/api/config") {
+          seen.auth = req.headers.authorization
+          seen.org = req.headers["x-org-id"]
           return json(req, { config: { theme: "light", seats: 5 } })
         }
 

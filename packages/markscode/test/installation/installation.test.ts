@@ -48,6 +48,12 @@ function jsonResponse(body: unknown) {
   })
 }
 
+function marksResponse(request: HttpClientRequest.HttpClientRequest, value: string) {
+  expect(request.headers["user-agent"]).toContain("updater")
+  if (request.url.endsWith("latest.json")) return jsonResponse({ version: value })
+  return new Response(value, { status: 200, headers: { "content-type": "text/plain" } })
+}
+
 function testLayer(
   httpHandler: (request: HttpClientRequest.HttpClientRequest) => Response,
   spawnHandler?: (cmd: string, args: readonly string[]) => string | { code: number; stdout?: string; stderr?: string },
@@ -58,8 +64,8 @@ function testLayer(
 
 describe("installation", () => {
   describe("latest", () => {
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v1.2.3" }))).effect(
-      "reads release version from GitHub releases",
+    testEffect(testLayer((request) => marksResponse(request, "v1.2.3"))).effect(
+      "reads release version from Marks latest endpoints",
       () =>
         Effect.gen(function* () {
           const result = yield* Installation.use.latest("unknown")
@@ -67,13 +73,29 @@ describe("installation", () => {
         }),
     )
 
-    testEffect(testLayer(() => jsonResponse({ tag_name: "v4.0.0-beta.1" }))).effect(
-      "strips v prefix from GitHub release tag",
+    testEffect(testLayer((request) => marksResponse(request, "v4.0.0-beta.1"))).effect(
+      "strips v prefix from Marks latest value",
       () =>
         Effect.gen(function* () {
           const result = yield* Installation.use.latest("curl")
           expect(result).toBe("4.0.0-beta.1")
         }),
+    )
+
+    testEffect(
+      testLayer((request) => {
+        expect(request.headers["user-agent"]).toContain("updater")
+        if (request.url.includes("marks.fenixsol.com.br/bin/latest.json")) return jsonResponse({ version: "not-a-version" })
+        if (request.url.includes("marks.fenixsol.com.br/bin/latest.txt")) {
+          return new Response("v4.0.1", { status: 200, headers: { "content-type": "text/plain" } })
+        }
+        return new Response("not found", { status: 404 })
+      }),
+    ).effect("ignores invalid Marks latest values and continues", () =>
+      Effect.gen(function* () {
+        const result = yield* Installation.use.latest("curl")
+        expect(result).toBe("4.0.1")
+      }),
     )
 
     const npmCalls: string[] = []

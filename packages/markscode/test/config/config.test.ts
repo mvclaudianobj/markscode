@@ -595,6 +595,59 @@ accountTokenIt.instance("resolves env templates in account config with account t
   }),
 )
 
+const accountProviderIt = configIt({
+  account: Layer.mock(Account.Service)({
+    active: () =>
+      Effect.succeed(
+        Option.some({
+          id: AccountID.make("account-1"),
+          email: "user@example.com",
+          url: "https://control.example.com",
+          active_org_id: OrgID.make("org-1"),
+        }),
+      ),
+    config: () =>
+      Effect.succeed(
+        Option.some({
+          enabled_providers: ["markspanel"],
+          provider: {
+            markspanel: {
+              name: "Markspanel",
+              models: {
+                authorized: { name: "Authorized" },
+              },
+            },
+          },
+        }),
+      ),
+    token: () => Effect.succeed(Option.none()),
+  }),
+})
+
+accountProviderIt.instance("replaces local providers when account config provides authorized providers", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(test.directory, {
+      $schema: "https://opencode.ai/config.json",
+      username: "local-user",
+      enabled_providers: ["legacy"],
+      provider: {
+        legacy: {
+          name: "Legacy",
+          models: {
+            blocked: { name: "Blocked" },
+          },
+        },
+      },
+    })
+    const config = yield* Config.use.get()
+    expect(config.username).toBe("local-user")
+    expect(config.enabled_providers).toEqual(["markspanel"])
+    expect(config.provider?.legacy).toBeUndefined()
+    expect(config.provider?.markspanel?.models?.authorized?.name).toBe("Authorized")
+  }),
+)
+
 it.instance("validates config schema and throws on invalid fields", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance

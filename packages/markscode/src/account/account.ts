@@ -10,6 +10,7 @@ import {
 
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { setRemoteMemoryConfig } from "@/memory-config"
+import { isRecord } from "@/util/record"
 import { AccountRepo, type AccountRow } from "./repo"
 import { normalizeServerUrl } from "./url"
 import {
@@ -217,6 +218,87 @@ const accountErrorFromCause = (cause: unknown, message: string): AccountError =>
   }
 
   return new AccountServiceError({ message, cause })
+}
+
+const freePattern = /free|livre/i
+const paidPattern = /(?:^|[-_\s:/])(?:plus|pro|premium)(?:$|[-_\s:/])/i
+const paidPlanPattern = /^(?:plus|pro|premium|paid|enterprise|team|restricted)$/i
+const paidPlanFields = ["tier", "plan", "access", "billing", "required_plan", "min_plan", "subscription", "availability"]
+
+const textIncludes = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value)
+
+const quotaLooksFree = (quota: MarkspanelQuota | null) => {
+  if (!quota) return false
+  if (quota.fallback_applied === true) return true
+  if (
+    [quota.tier, quota.tier_name, quota.effective_plan?.slug, quota.effective_plan?.name].some((value) =>
+      textIncludes(value, freePattern),
+    )
+  ) {
+    return true
+  }
+
+  return [quota.monthly, quota.monthly_requests].some((counter) => counter?.limit === 0)
+}
+
+const modelFieldLooksFree = (value: unknown) =>
+  value === true || (typeof value === "string" && freePattern.test(value))
+
+const modelHasZeroCost = (model: Record<string, unknown>) => {
+  const cost = model.cost
+  if (!isRecord(cost)) return false
+  return cost.input === 0 && cost.output === 0
+}
+
+const modelFieldLooksPaid = (value: unknown) => typeof value === "string" && paidPlanPattern.test(value)
+
+const modelHasPaidRestriction = (model: Record<string, unknown>) => paidPlanFields.some((field) => modelFieldLooksPaid(model[field]))
+
+const modelLooksFree = (id: string, value: unknown) => {
+  const model = isRecord(value) ? value : {}
+  const searchable = [id, model.id, model.name].filter((item): item is string => typeof item === "string")
+  if (modelHasPaidRestriction(model)) return false
+  if ([model.free, model.is_free, model.tier, model.plan, model.access, model.billing].some(modelFieldLooksFree)) return true
+  if (modelHasZeroCost(model)) return true
+  if (searchable.some((item) => freePattern.test(item) || /big-pickle/i.test(item))) return true
+  return !searchable.some((item) => paidPattern.test(item))
+}
+
+const filterModels = (models: unknown) => {
+  if (Array.isArray(models)) return models.filter((model) => modelLooksFree(isRecord(model) && typeof model.id === "string" ? model.id : "", model))
+  if (!isRecord(models)) return models
+  return Object.fromEntries(Object.entries(models).filter(([id, model]) => modelLooksFree(id, model)))
+}
+
+const filterProviderModels = (provider: unknown) => {
+  if (!isRecord(provider)) return provider
+  const entries = Object.entries(provider).map(([key, value]) =>
+    [key, ["model", "models"].includes(key) ? filterModels(value) : value] as const,
+  )
+  const result = Object.fromEntries(entries)
+  const modelValues = [result.model, result.models].filter(Boolean)
+  if (!modelValues.length) return result
+  if (modelValues.some((models) => (Array.isArray(models) ? models.length > 0 : isRecord(models) && Object.keys(models).length > 0))) {
+    return result
+  }
+}
+
+const filterProviders = (providers: unknown) => {
+  if (!isRecord(providers)) return providers
+  return Object.fromEntries(
+    Object.entries(providers)
+      .map(([key, provider]) => [key, filterProviderModels(provider)] as const)
+      .filter((entry): entry is readonly [string, unknown] => entry[1] !== undefined),
+  )
+}
+
+export function filterRemoteConfigForFreePlan(config: Record<string, unknown>, quota: MarkspanelQuota | null) {
+  if (!quotaLooksFree(quota)) return config
+  return Object.fromEntries(
+    Object.entries(config).map(([key, value]) =>
+      [key, ["provider", "providers"].includes(key) ? filterProviders(value) : ["model", "models"].includes(key) ? filterModels(value) : value] as const,
+    ),
+  )
 }
 
 export interface Interface {
@@ -457,8 +539,10 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       const parsed = yield* HttpClientResponse.schemaBodyJson(RemoteConfig)(ok).pipe(
         mapAccountServiceError("Failed to decode response"),
       )
-      setRemoteMemoryConfig(parsed.config.memories, `${account.url}/api/config`)
-      return Option.some(parsed.config)
+      const quotaResponse = yield* fetchQuota(account.url, accessToken)
+      const filteredConfig = filterRemoteConfigForFreePlan(parsed.config, quotaResponse)
+      setRemoteMemoryConfig(filteredConfig.memories, `${account.url}/api/config`)
+      return Option.some(filteredConfig)
     })
 
     const login = Effect.fn("Account.login")(function* (server: string) {
@@ -630,16 +714,9 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       ).pipe(Effect.ignore)
     })
 
-    const quota = Effect.fn("Account.quota")(function* (accountID: AccountID) {
-      const resolved = yield* resolveAccess(accountID).pipe(
-        Effect.catch(() => Effect.succeed(Option.none())),
-      )
-      if (Option.isNone(resolved)) return null
-
-      const { account, accessToken } = resolved.value
-
+    const fetchQuota = Effect.fnUntraced(function* (url: string, accessToken: AccessToken) {
       const response = yield* executeRead(
-        HttpClientRequest.get(`${account.url}/api/markscode/ai/quota`).pipe(
+        HttpClientRequest.get(`${url}/api/markscode/ai/quota`).pipe(
           HttpClientRequest.acceptJson,
           HttpClientRequest.bearerToken(accessToken),
         ),
@@ -649,7 +726,17 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       if (response.status !== 200) return null
 
       const json = yield* response.json.pipe(Effect.catch(() => Effect.succeed(null)))
-      return (json as any) ?? null
+      return (json as MarkspanelQuota | null) ?? null
+    })
+
+    const quota = Effect.fn("Account.quota")(function* (accountID: AccountID) {
+      const resolved = yield* resolveAccess(accountID).pipe(
+        Effect.catch(() => Effect.succeed(Option.none())),
+      )
+      if (Option.isNone(resolved)) return null
+
+      const { account, accessToken } = resolved.value
+      return yield* fetchQuota(account.url, accessToken)
     })
 
     const invalidateToken = Effect.fn("Account.invalidateToken")((accountID: AccountID) =>

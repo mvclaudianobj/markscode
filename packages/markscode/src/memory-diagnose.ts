@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "fs"
+import { accessSync, constants, existsSync, readFileSync } from "fs"
 import { execFileSync } from "child_process"
-import { join } from "path"
+import { dirname, join } from "path"
 import { homedir } from "os"
 import { resolveMemoryConfig } from "./memory-config"
 import { Database } from "./storage/db"
@@ -36,6 +36,39 @@ function memoryProbeRuntimeCandidates() {
   ].filter((runtime, index, runtimes): runtime is string => {
     return !!runtime && runtimes.indexOf(runtime) === index && (!runtime.includes("/") || existsSync(runtime))
   })
+}
+
+function isExecutable(path: string) {
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function commandPath(command: string) {
+  try {
+    return execFileSync("sh", ["-lc", `command -v ${command}`], { encoding: "utf-8", timeout: 1000 }).trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function uniquePaths(paths: (string | undefined)[]) {
+  return paths.filter((path, index, all): path is string => Boolean(path?.trim()) && all.indexOf(path) === index)
+}
+
+function findMarkscodeMemvidCli() {
+  const names = process.platform === "win32" ? ["markscode-memvid.exe", "markscode-memvid"] : ["markscode-memvid"]
+  return uniquePaths([
+    process.env.MARKSCODE_MEMVID_CLI?.trim(),
+    ...names.map((name) => join(homedir(), ".markscode/bin/vendor/memvid", name)),
+    ...names.map((name) => join("/root/.markscode/bin/vendor/memvid", name)),
+    ...names.map((name) => join(dirname(process.execPath), "vendor/memvid", name)),
+    ...names.map((name) => join("/usr/local/bin/vendor/memvid", name)),
+    commandPath("markscode-memvid"),
+  ]).find(isExecutable)
 }
 
 function memoryApiUrl(apiBaseUrl: string, path: string, params?: Record<string, string>) {
@@ -105,9 +138,9 @@ export function diagnoseBrainSystem(input?: {
 
   // Layer 1: Capsule Memvid
   const capsulePath = input?.capsulePath || join(homedir(), ".local/share/markscode/memory/hybrid.mv2")
-  const memvidCli = process.env.MARKSCODE_MEMVID_CLI || "/usr/local/bin/vendor/memvid/markscode-memvid"
+  const memvidCli = findMarkscodeMemvidCli()
 
-  if (existsSync(memvidCli) && existsSync(capsulePath)) {
+  if (memvidCli && existsSync(capsulePath)) {
     try {
       const output = execFileSync(memvidCli, ["contract", "--json"], { encoding: "utf-8", timeout: 2000 })
       const contract = JSON.parse(output) as Record<string, unknown>
@@ -117,7 +150,7 @@ export function diagnoseBrainSystem(input?: {
         layers.push({
           layer: "Cápsula Memvid",
           status: "ok",
-          details: `${officialV1 ? "Sidecar oficial v1" : "Sidecar legado v1"}, capsule: ${capsulePath}`,
+          details: `${officialV1 ? "Sidecar oficial v1" : "Sidecar legado v1"}; sidecar: ${memvidCli}; capsule: ${capsulePath}`,
         })
       } else {
         layers.push({
@@ -146,7 +179,7 @@ export function diagnoseBrainSystem(input?: {
     layers.push({
       layer: "Cápsula Memvid",
       status: "unavailable",
-      details: `Sidecar não encontrado: ${memvidCli}`,
+      details: "Sidecar markscode-memvid não encontrado",
       recommendation: "Instalar markscode-memvid",
     })
   }

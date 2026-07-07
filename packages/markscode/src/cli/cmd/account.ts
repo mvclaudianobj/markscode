@@ -206,16 +206,20 @@ export const markspanelLoginEffect = Effect.fn("markspanel.login")(function* (ur
   }
 
   const service = yield* Account.Service
-  const groups = yield* service.orgsByAccount()
   const active = yield* service.active()
-  const choices = groups.flatMap((group) => group.orgs.map((org) => ({ accountID: group.account.id, orgID: org.id, label: formatOrgChoiceLabel(group.account, org, false) })))
-  if (choices.length === 0) {
-    yield* println("Aviso: nenhuma organização ativa/encontrada no Markspanel; /api/config não carregará modelos sem active_org_id.")
-    return
-  }
   if (Option.isSome(active) && active.value.active_org_id) {
     yield* println("Organização ativa detectada; /api/config poderá carregar modelos Markspanel.")
     yield* verifyMarkspanelConfig(service, active.value.id, active.value.active_org_id)
+    return
+  }
+  if (Option.isNone(active)) {
+    yield* println("Aviso: nenhuma organização ativa/encontrada no Markspanel; /api/config não carregará modelos sem active_org_id.")
+    return
+  }
+  const orgs = yield* service.orgs(active.value.id)
+  const choices = orgs.map((org) => ({ accountID: active.value.id, orgID: org.id, label: formatOrgChoiceLabel(active.value, org, false) }))
+  if (choices.length === 0) {
+    yield* println("Aviso: nenhuma organização ativa/encontrada no Markspanel; /api/config não carregará modelos sem active_org_id.")
     return
   }
   if (choices.length === 1) {

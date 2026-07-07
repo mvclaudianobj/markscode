@@ -170,6 +170,19 @@ const targetPlatformArch = (item: { os: string; arch: string; abi?: "musl" }) =>
 
 const isCurrentRuntimeTarget = (item: { os: string; arch: string; abi?: "musl" }) => item.os === process.platform && item.arch === process.arch && item.abi === undefined
 
+const canExecuteMemvidTarget = (item: { os: string; arch: string; abi?: "musl" }) => item.os === process.platform && item.arch === process.arch
+
+const memvidRustTargets: Record<string, string> = {
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "linux-arm64": "aarch64-unknown-linux-gnu",
+  "linux-x64-musl": "x86_64-unknown-linux-musl",
+  "linux-arm64-musl": "aarch64-unknown-linux-musl",
+  "darwin-x64": "x86_64-apple-darwin",
+  "darwin-arm64": "aarch64-apple-darwin",
+  "win32-x64": "x86_64-pc-windows-msvc",
+  "win32-arm64": "aarch64-pc-windows-msvc",
+}
+
 function runMemvidCommand(args: string[], cwd?: string) {
   const result = Bun.spawnSync(args, { cwd, stdout: "pipe", stderr: "pipe" })
   return {
@@ -192,6 +205,18 @@ function compatibleOfficialMemvidCLI(file: string) {
   }
 }
 
+function existingMemvidSidecar(file: string) {
+  return fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size > 0
+}
+
+async function validateMemvidSidecar(file: string, item: { os: string; arch: string; abi?: "musl" }) {
+  if (canExecuteMemvidTarget(item)) {
+    if (!compatibleOfficialMemvidCLI(file)) throw new Error(`markscode-memvid failed contract validation at ${file}`)
+    return
+  }
+  if (!existingMemvidSidecar(file)) throw new Error(`markscode-memvid sidecar missing or empty at ${file}`)
+}
+
 function memvidSidecarCandidates(item: { os: string; arch: string; abi?: "musl" }, targetName: string) {
   return [
     process.env.MARKSCODE_MEMVID_CLI && isCurrentRuntimeTarget(item) ? process.env.MARKSCODE_MEMVID_CLI : undefined,
@@ -201,6 +226,42 @@ function memvidSidecarCandidates(item: { os: string; arch: string; abi?: "musl" 
 }
 
 const memvidSourceDir = process.env.MARKSCODE_MEMVID_SOURCE_DIR || process.env.MEMVID_DIR || "/media/marcos/Arquivos/projetos/marks/ecosystem/systems/memvid"
+const requireMemvid = process.env.MARKSCODE_REQUIRE_MEMVID === "1"
+
+function memvidErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function prepareMemvidVendorSidecars(items: { os: string; arch: string; abi?: "musl" }[]) {
+  if (process.env.MARKSCODE_PREPARE_MEMVID_VENDOR === "0") return
+  if (!fs.existsSync(path.join(memvidSourceDir, "Cargo.toml"))) return
+  const itemsByTarget = new Map(items.map((item) => [targetPlatformArch(item), item]))
+  for (const item of itemsByTarget.values()) {
+    const rustTarget = memvidRustTargets[targetPlatformArch(item)]
+    if (!rustTarget) continue
+    console.log(`Preparing Memvid vendor sidecar for ${targetPlatformArch(item)} using ${rustTarget}`)
+    const result = runMemvidCommand(["cargo", "build", "--release", "--bin", "markscode-memvid", "--target", rustTarget], memvidSourceDir)
+    if (!result.ok) {
+      const message = `Failed to build markscode-memvid vendor sidecar for ${targetPlatformArch(item)}${result.stderr.includes("rustup target add") ? `; hint: rustup target add ${rustTarget}` : ""}`
+      if (requireMemvid) throw new Error(`${message}: ${result.stderr || result.stdout}`)
+      console.warn(message)
+      continue
+    }
+    const source = path.join(memvidSourceDir, "target", rustTarget, "release", memvidBinaryName(item.os))
+    const destination = path.join(dir, "vendor/memvid", targetPlatformArch(item), memvidBinaryName(item.os))
+    try {
+      await validateMemvidSidecar(source, item)
+      await fs.promises.mkdir(path.dirname(destination), { recursive: true })
+      await fs.promises.copyFile(source, destination)
+      if (item.os !== "win32") await fs.promises.chmod(destination, 0o755)
+      await validateMemvidSidecar(destination, item)
+    } catch (error) {
+      const message = `Failed to prepare markscode-memvid vendor sidecar for ${targetPlatformArch(item)}: ${memvidErrorMessage(error)}`
+      if (requireMemvid) throw new Error(message)
+      console.warn(message)
+    }
+  }
+}
 
 async function buildNativeMemvidSidecar(item: { os: string; arch: string; abi?: "musl" }) {
   if (!isCurrentRuntimeTarget(item)) return undefined
@@ -215,10 +276,10 @@ async function buildNativeMemvidSidecar(item: { os: string; arch: string; abi?: 
 
 async function copyMemvidSidecar(item: { os: string; arch: string; abi?: "musl" }, targetName: string) {
   const builtSource = await buildNativeMemvidSidecar(item)
-  const source = builtSource || memvidSidecarCandidates(item, targetName).find(compatibleOfficialMemvidCLI)
+  const source = builtSource || memvidSidecarCandidates(item, targetName).find((candidate) => canExecuteMemvidTarget(item) ? compatibleOfficialMemvidCLI(candidate) : existingMemvidSidecar(candidate))
   if (!source) {
     const message = `Official Memvid sidecar not bundled for ${targetName}; set MARKSCODE_MEMVID_CLI to a compatible markscode-memvid or add vendor/memvid/${targetPlatformArch(item)}/${memvidBinaryName(item.os)}`
-    if (singleFlag && isCurrentRuntimeTarget(item) && process.env.MARKSCODE_REQUIRE_MEMVID !== "0") throw new Error(message)
+    if (process.env.MARKSCODE_REQUIRE_MEMVID === "1") throw new Error(message)
     console.warn(message)
     return
   }
@@ -227,83 +288,19 @@ async function copyMemvidSidecar(item: { os: string; arch: string; abi?: "musl" 
   await fs.promises.mkdir(path.dirname(destination), { recursive: true })
   await fs.promises.copyFile(source, destination)
   if (item.os !== "win32") await fs.promises.chmod(destination, 0o755)
-  if (!compatibleOfficialMemvidCLI(destination)) throw new Error(`Packaged markscode-memvid failed contract validation at ${destination}`)
+  await validateMemvidSidecar(destination, item)
   console.log(`Bundled Memvid sidecar for ${targetName}: ${source} -> ${destination}`)
 }
 
 await $`rm -rf dist`
+
+await prepareMemvidVendorSidecars(targets)
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

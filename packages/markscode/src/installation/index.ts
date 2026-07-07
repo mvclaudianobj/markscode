@@ -27,54 +27,77 @@ const INSTALL_WINDOWS_URLS = [
 ].filter(Boolean)
 
 const LATEST_URLS = [
-  process.env.MARKSCODE_LATEST_URL || "https://code.marks.ia.br/bin/latest.json",
-  "https://code.marks.ia.br/bin/latest.txt",
+  process.env.MARKSCODE_LATEST_URL,
   "https://marks.fenixsol.com.br/bin/latest.json",
   "https://marks.fenixsol.com.br/bin/latest.txt",
-].filter(Boolean)
+  "https://code.marks.ia.br/bin/latest.json",
+  "https://code.marks.ia.br/bin/latest.txt",
+].filter((url) => url !== undefined)
 
-const PROVIDERS_SYNC_URL = process.env.MARKS_PROVIDERS_URL || "https://marks.fenixsol.com.br/providers"
-const PROVIDERS_SYNC_ARGS =
-  process.env.MARKS_PROVIDERS_ARGS || "--preset main"
 const MARKSCODE_GITHUB_REPO = process.env.MARKSCODE_GITHUB_REPO || "mvclaudianobj/markscode"
 
 function normalizeMarksVersion(input: string) {
   return input.trim().replace(/^v/, "")
 }
 
-async function latestFromMarks() {
+export function isNewerVersion(current: string, latest: string) {
+  const normalizedCurrent = normalizeMarksVersion(current)
+  const normalizedLatest = normalizeMarksVersion(latest)
+  if (!semver.valid(normalizedLatest)) return false
+  if (!semver.valid(normalizedCurrent)) return false
+  return semver.gt(normalizedLatest, normalizedCurrent)
+}
+
+const responseText = (response: HttpClientResponse.HttpClientResponse) =>
+  response.stream.pipe(Stream.decodeText(), Stream.runFold(() => "", (acc, chunk) => acc + chunk))
+
+function latestValue(text: string, contentType: string) {
+  if (!text.trim()) return ""
+  if (contentType.includes("json") || text.trim().startsWith("{")) {
+    const body = JSON.parse(text) as Record<string, unknown>
+    return [body.version, body.latest, body.tag, body.tag_name].find((value) => typeof value === "string") ?? ""
+  }
+  return text.split(/\s+/)[0] || ""
+}
+
+const latestHeaders = { "User-Agent": userAgent("updater") }
+
+const latestFromMarks = Effect.fnUntraced(function* (httpOk: HttpClient.HttpClient) {
   for (const url of LATEST_URLS) {
-    const res = await fetch(url).catch(() => undefined)
-    if (!res || !res.ok) continue
-    const text = await res.text().catch(() => "")
-    if (!text.trim()) continue
-    let value = ""
-    const contentType = (res.headers.get("content-type") || "").toLowerCase()
-    if (contentType.includes("json") || text.trim().startsWith("{")) {
-      try {
-        const body = JSON.parse(text) as { version?: string; latest?: string; tag?: string; tag_name?: string }
-        value = body.version || body.latest || body.tag || body.tag_name || ""
-      } catch {}
-    } else {
-      value = text.split(/\s+/)[0] || ""
-    }
+    const response = yield* httpOk
+      .execute(HttpClientRequest.get(url).pipe(HttpClientRequest.acceptJson, HttpClientRequest.setHeaders(latestHeaders)))
+      .pipe(Effect.option)
+    if (response._tag === "None") continue
+    const text = yield* responseText(response.value).pipe(Effect.catch(() => Effect.succeed("")))
+    const value = yield* Effect.sync(() => latestValue(text, response.value.headers["content-type"]?.toLowerCase() || "")).pipe(
+      Effect.catch(() => Effect.succeed("")),
+    )
     const normalized = normalizeMarksVersion(value)
-    if (normalized) return normalized
+    if (semver.valid(normalized)) return normalized
   }
 
   const token = process.env.MARKSCODE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ""
   if (token) {
-    const res = await fetch("https://api.github.com/repos/" + MARKSCODE_GITHUB_REPO + "/releases/latest", {
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: "Bearer " + token,
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    }).catch(() => undefined)
-    if (res?.ok) {
-      const body = (await res.json().catch(() => undefined)) as { tag_name?: string; name?: string } | undefined
-      const normalized = normalizeMarksVersion(body?.tag_name || body?.name || "")
-      if (normalized) return normalized
+    const response = yield* httpOk
+      .execute(
+        HttpClientRequest.get("https://api.github.com/repos/" + MARKSCODE_GITHUB_REPO + "/releases/latest").pipe(
+          HttpClientRequest.setHeaders({
+            Accept: "application/vnd.github+json",
+            Authorization: "Bearer " + token,
+            "User-Agent": userAgent("updater"),
+            "X-GitHub-Api-Version": "2022-11-28",
+          }),
+        ),
+      )
+      .pipe(Effect.option)
+    if (response._tag === "Some") {
+      const body = yield* HttpClientResponse.schemaBodyJson(
+        Schema.Struct({ tag_name: Schema.optional(Schema.String), name: Schema.optional(Schema.String) }),
+      )(response.value).pipe(Effect.option)
+      if (body._tag === "Some") {
+        const normalized = normalizeMarksVersion(body.value.tag_name || body.value.name || "")
+        if (semver.valid(normalized)) return normalized
+      }
     }
   }
 
@@ -82,16 +105,8 @@ async function latestFromMarks() {
     "Could not determine latest MarksCode version from code.marks.ia.br/fallback. " +
       "Private GitHub fallback requires MARKSCODE_GITHUB_TOKEN, GITHUB_TOKEN or GH_TOKEN.",
   )
-}
+})
 
-async function syncProvidersAfterUpgrade() {
-  const disabled = process.env.MARKS_PROVIDERS_SYNC === "0" || process.env.MARKS_PROVIDERS_SYNC === "false"
-  if (disabled || process.platform === "win32") return
-  await Bun.spawn(["bash", "-lc", "curl -fsSL " + PROVIDERS_SYNC_URL + " | bash -s -- " + PROVIDERS_SYNC_ARGS], {
-    stdout: "ignore",
-    stderr: "ignore",
-  }).exited
-}
 // MARKSCODE_MARKS_UPDATER_END
 
 
@@ -249,7 +264,7 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         }
 
         for (const url of INSTALL_URLS) {
-          const cmd = "curl -fsSL " + url + " | bash -s -- --version " + target + " --preset main"
+          const cmd = "curl -fsSL " + url + " | bash -s -- --version " + target + " --force"
           const result = yield* run(["bash", "-lc", cmd])
           last = result
           if (result.code === 0) return result
@@ -305,7 +320,7 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         const detectedMethod = installMethod || (yield* result.method())
 
         if (detectedMethod === "curl" || detectedMethod === "unknown") {
-          return yield* Effect.tryPromise(() => latestFromMarks())
+          return yield* latestFromMarks(httpOk)
         }
 
         if (detectedMethod === "brew") {
@@ -411,13 +426,6 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProce
         if (!upgradeResult || upgradeResult.code !== 0) {
           return yield* new UpgradeFailedError({ stderr: upgradeFailure(m, upgradeResult) })
         }
-        yield* Effect.tryPromise(() => syncProvidersAfterUpgrade()).pipe(
-          Effect.catch((error: unknown) =>
-            Effect.sync(() => {
-              log.warn("providers sync failed", { error: error instanceof Error ? error.message : String(error) })
-            }),
-          ),
-        )
         log.info("upgraded", {
           method: m,
           target,
