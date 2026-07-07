@@ -934,6 +934,43 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
+    "clears stale tail_start_id when no current tail can be retained",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      yield* createUserMessage(session.id, "first")
+      yield* createUserMessage(session.id, "second")
+      yield* createSummaryCompaction(session.id)
+
+      let msgs = yield* ssn.messages({ sessionID: session.id })
+      let parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID: session.id,
+        auto: false,
+      })
+
+      yield* createUserMessage(session.id, "third")
+      yield* createSummaryCompaction(session.id)
+      msgs = MessageV2.filterCompacted(MessageV2.stream(session.id))
+      parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID: session.id,
+        auto: false,
+      })
+
+      const part = yield* readCompactionPart(session.id)
+      expect(part?.type).toBe("compaction")
+      expect(part?.tail_start_id).toBeUndefined()
+    }).pipe(withCompaction({ config: cfg({ tail_turns: 1, preserve_recent_tokens: 1 }) })),
+  )
+
+  itCompaction.instance(
     "shrinks retained tail to fit preserve token budget",
     Effect.gen(function* () {
       const ssn = yield* SessionNs.Service

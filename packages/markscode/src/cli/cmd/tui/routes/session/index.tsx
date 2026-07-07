@@ -99,6 +99,7 @@ import {
   continueSessionFromHandoff,
   getGlobalContext,
   searchAdvancedMemories,
+  ensureHumanMemoryLayers,
 } from "@/memories-api"
 import { useEvent } from "../../context/event"
 import { useProject } from "../../context/project"
@@ -260,7 +261,7 @@ export function Session() {
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", true)
   const [showAssistantMetadata, _setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
-  const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
+  const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", true)
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
@@ -795,9 +796,9 @@ export function Session() {
     if (deployRequested || isMasterKeyDeployProfile(profile)) {
       injectContext("[Remote master-key deploy requested]", [
         "AI deployment instruction: deploy/use MarksCode master key " + MARKSCODE_MASTER_KEY_NAME + " to " + profile.user + "@" + profile.host + ":" + String(cfg.port) + ".",
-        "Use saved encrypted_password only as bootstrap material when required; never reveal, echo, print, or log plaintext password or encoded secret.",
+        "Use saved encrypted_password only as bootstrap material when required; never reveal, echo, print, log, or send plaintext password or encoded secret to LLM context.",
         "After deployment, prefer SSH key auth using " + MARKSCODE_MASTER_IDENTITY_FILE + ".",
-        "Saved bootstrap password: " + (profile.encrypted_password ? "yes" : "no"),
+        "Initial bootstrap password captured: " + (profile.encrypted_password ? "yes, encoded for automation only" : "no"),
       ])
     }
   }
@@ -873,10 +874,10 @@ export function Session() {
     "Chave mestra: " + (profile.key_name === MARKSCODE_MASTER_KEY_NAME || deployMasterKey ? "sim" : "não"),
     "Identity file: " + String(profile.identity_file || "-"),
     "Credential ref: " + String(profile.credential_ref ? "***ref***" : "-"),
-    "Senha salva: " + (profile.encrypted_password ? "sim (mascarada/codificada para bootstrap)" : "não"),
+    "Senha inicial capturada: " + (profile.encrypted_password ? "sim (codificada para bootstrap/automação, nunca exibida)" : "não"),
     "Deploy chave mestra: " + (deployMasterKey ? "sim" : "não"),
     "",
-    profile.encrypted_password ? "Nenhum campo password/senha em texto puro será salvo; a senha fica mascarada/codificada para bootstrap/deploy." : "Nenhum campo password/senha em texto puro será salvo.",
+    profile.encrypted_password ? "Nenhum campo password/senha em texto puro será salvo; a senha inicial fica codificada apenas para bootstrap/deploy e nunca é exibida em prompt, log ou contexto LLM." : "Nenhum campo password/senha em texto puro será salvo.",
   ].join("\n")
 
   const promptRemoteRequired = async (title: string, placeholder: string, value = "") => {
@@ -925,8 +926,8 @@ export function Session() {
     if (!transport && isWindowsRemoteType(kind)) { dialog.clear(); return }
     const auth = await selectRemoteOption<RemoteProfileAuthChoice>(label + " auth method", kind === "ssh" ? [
       { title: "Deploy/use MarksCode master key", value: "master", description: "Usa marks-key-mestra e solicita deploy quando aplicável" },
-      { title: "Password saved for SSH bootstrap/deploy", value: "password", description: "Salva senha mascarada/codificada para primeiro acesso; não será exibida" },
-      { title: "Deploy master key using saved password", value: "master_password", description: "Salva senha para bootstrap e marca deploy da chave mestra" },
+      { title: "Password saved for SSH bootstrap/deploy", value: "password", description: "Captura senha inicial codificada para bootstrap; nunca será exibida" },
+      { title: "Deploy master key using bootstrap password", value: "master_password", description: "Captura senha inicial codificada e marca deploy da chave mestra" },
       { title: "Identity file", value: "identity", description: "Caminho local da chave privada" },
       { title: "Credential ref", value: "credential", description: "Referência segura existente, não senha" },
       { title: "Skip for now", value: "skip", description: "Salvar sem método de autenticação" },
@@ -939,7 +940,7 @@ export function Session() {
       { title: "Skip for now", value: "skip", description: "Salvar sem método de autenticação" },
     ])
     if (!auth) { dialog.clear(); return }
-    const authValue = auth === "identity" ? await promptRemoteRequired("Identity file", "~/.ssh/id_ed25519") : auth === "credential" ? await promptRemoteRequired(kind === "whm" ? "WHM API token credential ref" : label + " credential ref", "ex: cred://remote/prod-root") : auth === "password" || auth === "master_password" ? await promptRemoteRequired(label + " password (masked after save; do not share)", "senha para bootstrap/acesso remoto") : ""
+    const authValue = auth === "identity" ? await promptRemoteRequired("Identity file", "~/.ssh/id_ed25519") : auth === "credential" ? await promptRemoteRequired(kind === "whm" ? "WHM API token credential ref" : label + " credential ref", "ex: cred://remote/prod-root") : auth === "password" || auth === "master_password" ? await promptRemoteRequired(label + " initial bootstrap password (encoded after save; never shown)", "senha inicial para bootstrap/acesso remoto") : ""
     if (authValue === null) { dialog.clear(); return }
     const deployMasterKey = auth === "master" || auth === "master_password"
     const now = new Date().toISOString()
@@ -969,7 +970,7 @@ export function Session() {
       kv.set("remote_ssh_deploy_user", profile.user)
     }
     activateRemoteProfile(profile, { deployRequested: deployMasterKey })
-    await DialogAlert.show(dialog, label + " profile saved", warning ? "Perfil salvo em fallback de sessão e ativado. O DB não recebeu a gravação agora; o perfil aparecerá em Use/sidebar nesta sessão. " + warning : profile.encrypted_password ? "Perfil salvo e ativado. Nenhum campo password/senha em texto puro foi salvo; senha armazenada mascarada/codificada para bootstrap/acesso necessário." : "Perfil salvo e ativado com sucesso sem campos password/senha em texto puro.")
+    await DialogAlert.show(dialog, label + " profile saved", warning ? "Perfil salvo em fallback de sessão e ativado. O DB não recebeu a gravação agora; o perfil aparecerá em Use/sidebar nesta sessão. " + warning : profile.encrypted_password ? "Perfil salvo e ativado. Senha inicial capturada para bootstrap e armazenada codificada apenas para automação; nenhum campo password/senha em texto puro foi salvo ou será exibido." : "Perfil salvo e ativado com sucesso sem campos password/senha em texto puro.")
     dialog.clear()
   }
 
@@ -1480,6 +1481,7 @@ export function Session() {
   }
 
   const mapKeyFor = (sessionID: string) => "map_binding:" + sessionID
+  const mapAutoCheckpointKeyFor = (sessionID: string) => "map_auto_checkpoint:" + sessionID
 
   const getMapBinding = (sessionID?: string) => {
     if (!sessionID) return {}
@@ -1504,6 +1506,59 @@ export function Session() {
     }
     kv.set(mapKeyFor(sessionID), JSON.stringify(next))
     return next
+  }
+
+  const isQuietMapError = (error: unknown) => /authentication_required|unauthorized|401|missing.*key|api.*key/i.test(error instanceof Error ? error.message : String(error))
+
+  const autoMapSessionCheckpoint = async (sessionID: string) => {
+    const binding: any = getMapBinding(sessionID)
+    if (!binding.project_id && !binding.project_slug) return
+
+    await reloadMapContext().catch((error) => {
+      if (!isQuietMapError(error)) void debugUiLog("map:auto-context-reload:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+    })
+
+    if (!binding.task_id || !binding.task_title) return
+
+    const now = Date.now()
+    const last = Number(kv.get(mapAutoCheckpointKeyFor(sessionID)) || 0)
+    if (Number.isFinite(last) && now - last < 300_000) return
+
+    kv.set(mapAutoCheckpointKeyFor(sessionID), String(now))
+    const note = "Auto checkpoint de sessão MarksCode"
+    await progressMapSession({
+      project_id: binding.project_id,
+      project_slug: binding.project_slug,
+      module_id: binding.module_id,
+      module_slug: binding.module_slug,
+      task_id: binding.task_id,
+      title: binding.task_title,
+      host: mapHost,
+      actor: mapActor,
+      note,
+      progress: note,
+      event_type: "markscode_auto_session_checkpoint",
+      task_update: {
+        status: binding.task_status || "in_progress",
+        assignee: mapActor,
+      },
+      host_state: {
+        state: "busy",
+        note,
+      },
+    }).then((result) => {
+      const task: any = result?.task
+      setMapBinding(sessionID, {
+        task_id: task?.id || binding.task_id,
+        task_title: task?.title || binding.task_title,
+        task_status: task?.status || binding.task_status || "in_progress",
+        last_phase: result?.session?.phase || "progress",
+        last_progress_note: note,
+      })
+      void debugUiLog("map:auto-session-checkpoint:ok", { sessionID, task_id: task?.id || binding.task_id })
+    }).catch((error) => {
+      if (!isQuietMapError(error)) void debugUiLog("map:auto-session-checkpoint:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+    })
   }
 
   const clearMapModuleTask = (sessionID: string, patch: Record<string, unknown>) =>
@@ -3353,6 +3408,25 @@ export function Session() {
 
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
+  createEffect(
+    on(
+      () => {
+        const list = messages()
+        const last = list.at(-1)
+        return [route.sessionID, list.length, last?.id, last?.time && "completed" in last.time ? last.time.completed : undefined] as const
+      },
+      () => toBottom(),
+    ),
+  )
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => {
+        if (!sessionID) return
+        void autoMapSessionCheckpoint(sessionID)
+      },
+    ),
+  )
   // MARKSCODE_MEMORIES_AUTOSAVE_START
   createEffect(
     on(
@@ -3371,6 +3445,9 @@ export function Session() {
         }
 
         setActiveMemorySessionID(sessionID)
+        void ensureHumanMemoryLayers({ user_id: memoriesUserID, session_id: sessionID, source_name: "markscode" }).catch((error) => {
+          if (MARKSCODE_DEBUG_UI) console.error("memory layer bootstrap failed", error instanceof Error ? error.message : String(error))
+        })
         const initial = cachedMemorySnapshotFor(sessionID)
         setLastMemorySaveAt(Date.now())
         setLastMemoryChars(initial.length)

@@ -287,9 +287,12 @@ export const layer = Layer.effect(
       }
 
       if (!keep || keep.start === 0) return { head: input.messages, tail_start_id: undefined }
+      const tail = input.messages.slice(keep.start)
+      const tailStart = tail.some((msg) => msg.info.id === keep.id) ? keep.id : tail[0]?.info.id
+      if (!tailStart) return { head: input.messages, tail_start_id: undefined }
       return {
         head: input.messages.slice(0, keep.start),
-        tail_start_id: keep.id,
+        tail_start_id: tailStart,
       }
     })
 
@@ -467,7 +470,7 @@ export const layer = Layer.effect(
         return "stop"
       }
 
-      if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
+      if (compactionPart && compactionPart.tail_start_id !== selected.tail_start_id) {
         yield* session.updatePart({
           ...compactionPart,
           tail_start_id: selected.tail_start_id,

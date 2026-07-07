@@ -40,8 +40,23 @@ export interface MemoryRecord {
   retrieval_cues?: string[]
   mnemonic_techniques?: string[]
   visual_refs?: string[]
+  source_name?: string
   created_at: string
   updated_at: string
+}
+
+export interface EnsureHumanMemoryLayersInput {
+  user_id: string
+  session_id: string
+  source_name?: string
+}
+
+export interface EnsureHumanMemoryLayersResult {
+  ok: boolean
+  ensured: MemoryMode[]
+  created: MemoryMode[]
+  existing: MemoryMode[]
+  errors: string[]
 }
 
 export interface RecallInput {
@@ -91,6 +106,21 @@ export interface ContextSafetyResult {
 const DEFAULT_MEMORIES_URL = "http://api.marks.ia.br:8689"
 const DEFAULT_MEMORIES_API_KEY = ""
 const DEFAULT_MEMORIES_USER_ID = "marks-local"
+const HUMAN_MEMORY_LAYER_MODES: MemoryMode[] = ["short_term", "long_term", "visual"]
+const HUMAN_MEMORY_LAYER_MARKER_TAG = "markscode-system-memory-layer"
+const humanMemoryLayerEnsures = new Map<string, Promise<EnsureHumanMemoryLayersResult>>()
+
+function isHumanMemoryLayerMarker(memory: Partial<MemoryRecord> | undefined) {
+  return Boolean(memory?.tags?.includes(HUMAN_MEMORY_LAYER_MARKER_TAG) || memory?.source_name === "markscode-memory-layer-ensure")
+}
+
+function withoutHumanMemoryLayerMarkers(context: HumanContext): HumanContext {
+  return {
+    short_term: (context.short_term || []).filter((memory) => !isHumanMemoryLayerMarker(memory)),
+    long_term: (context.long_term || []).filter((memory) => !isHumanMemoryLayerMarker(memory)),
+    visual: (context.visual || []).filter((memory) => !isHumanMemoryLayerMarker(memory)),
+  }
+}
 
 function resolveBaseURL() {
   return resolveMemoryConfig().memories.url
@@ -151,7 +181,7 @@ async function request(path: string, init?: RequestInit & { timeout_ms?: number 
   return body
 }
 
-export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
+async function postHumanMemory(input: SaveMemoryInput): Promise<any> {
   return request("/memories/human", {
     method: "POST",
     body: JSON.stringify({
@@ -173,12 +203,65 @@ export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
   })
 }
 
+export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
+  const result = await postHumanMemory(input)
+  await ensureHumanMemoryLayers({ user_id: input.user_id, session_id: input.session_id, source_name: input.source_name }).catch(() => undefined)
+  return result
+}
+
+async function ensureHumanMemoryLayersOnce(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {
+  const errors: string[] = []
+  const context = await request(`/memories/human/context?${new URLSearchParams({ user_id: input.user_id, session_id: input.session_id }).toString()}`)
+    .catch((err) => {
+      errors.push(err instanceof Error ? err.message : String(err))
+      return undefined
+    }) as HumanContext | undefined
+  const existing = HUMAN_MEMORY_LAYER_MODES.filter((mode) => Array.isArray(context?.[mode]) && context[mode].length > 0)
+  const missing = HUMAN_MEMORY_LAYER_MODES.filter((mode) => !existing.includes(mode))
+  const created = (await Promise.all(missing.map(async (mode) => {
+    const saved = await postHumanMemory({
+      user_id: input.user_id,
+      session_id: input.session_id,
+      type: mode === "short_term" ? "episodic" : "semantic",
+      memory_mode: mode,
+      title: "MarksCode memory layer bootstrap: " + mode,
+      subject: "markscode-system-memory-layer",
+      content: "MarksCode system memory layer bootstrap placeholder for " + mode + ". Ignore in recall and user-facing context.",
+      importance: 0,
+      tags: [HUMAN_MEMORY_LAYER_MARKER_TAG, "system", "bootstrap", mode],
+      triggers: [],
+      retrieval_cues: [],
+      mnemonic_techniques: [],
+      visual_refs: [],
+      source_name: input.source_name || "markscode-memory-layer-ensure",
+    }).catch((err) => {
+      errors.push(mode + ": " + (err instanceof Error ? err.message : String(err)))
+      return undefined
+    })
+    return saved ? mode : undefined
+  }))).filter((mode): mode is MemoryMode => Boolean(mode))
+
+  return { ok: errors.length === 0, ensured: HUMAN_MEMORY_LAYER_MODES, created, existing, errors }
+}
+
+export async function ensureHumanMemoryLayers(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {
+  const key = [input.user_id, input.session_id, input.source_name || ""].join("\0")
+  const current = humanMemoryLayerEnsures.get(key)
+  if (current) return current
+  const next = ensureHumanMemoryLayersOnce(input)
+  humanMemoryLayerEnsures.set(key, next)
+  const result = await next
+  if (!result.ok) humanMemoryLayerEnsures.delete(key)
+  return result
+}
+
 export async function getHumanContext(input: { user_id: string; session_id: string }): Promise<HumanContext> {
+  await ensureHumanMemoryLayers(input).catch(() => undefined)
   const params = new URLSearchParams({
     user_id: input.user_id,
     session_id: input.session_id,
   })
-  return request(`/memories/human/context?${params.toString()}`)
+  return request(`/memories/human/context?${params.toString()}`).then(withoutHumanMemoryLayerMarkers)
 }
 
 export async function recallHumanMemories(input: RecallInput): Promise<RecallResult> {
@@ -194,9 +277,12 @@ export async function recallHumanMemories(input: RecallInput): Promise<RecallRes
   })
 
   if (Array.isArray(body?.memories) || Array.isArray(body?.scores)) {
+    const pairs = (Array.isArray(body?.memories) ? body.memories : [])
+      .map((memory: MemoryRecord, index: number) => ({ memory, score: Array.isArray(body?.scores) && typeof body.scores[index] === "number" ? body.scores[index] : 0 }))
+      .filter((entry: { memory: MemoryRecord; score: number }) => !isHumanMemoryLayerMarker(entry.memory))
     return {
-      memories: Array.isArray(body?.memories) ? body.memories : [],
-      scores: Array.isArray(body?.scores) ? body.scores : [],
+      memories: pairs.map((entry: { memory: MemoryRecord; score: number }) => entry.memory),
+      scores: pairs.map((entry: { memory: MemoryRecord; score: number }) => entry.score),
     }
   }
 
@@ -209,9 +295,10 @@ export async function recallHumanMemories(input: RecallInput): Promise<RecallRes
       return [{ item: item as MemoryRecord, score }]
     })
 
+    const filtered = mapped.filter((x) => !isHumanMemoryLayerMarker(x.item))
     return {
-      memories: mapped.map((x) => x.item),
-      scores: mapped.map((x) => x.score),
+      memories: filtered.map((x) => x.item),
+      scores: filtered.map((x) => x.score),
     }
   }
 
