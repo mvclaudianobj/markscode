@@ -41,7 +41,7 @@ test("does not duplicate existing plugin packages", async () => {
       {
         plugin: [
           "@tarquinen/opencode-dcp@1.0.0",
-          ["@mohak34/opencode-notifier@latest", { enabled: true }],
+          [ConfigGlobal.DEFAULT_MARKSCODE_PLUGINS[1], { enabled: true }],
           "opencode-supermemory@latest",
           "openrtk@0.1.0",
           "opencode-brain@latest",

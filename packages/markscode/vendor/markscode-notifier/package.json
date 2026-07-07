@@ -1,0 +1,37 @@
+{
+  "name": "markscode-notifier",
+  "version": "0.2.8",
+  "description": "MarksCode plugin that sends system notifications and plays sounds when permission is needed, generation completes, or errors occur",
+  "author": "mohak34",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "sounds",
+    "logos"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --external node-notifier",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "keywords": [
+    "markscode",
+    "markscode-plugin",
+    "notifications",
+    "sound",
+    "alerts"
+  ],
+  "dependencies": {
+    "is-wsl": "^3.1.0",
+    "node-notifier": "^10.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/node-notifier": "^8.0.5",
+    "typescript": "^5.0.0"
+  }
+}

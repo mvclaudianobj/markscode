@@ -2,6 +2,7 @@ export * as ConfigGlobal from "./global"
 
 import os from "os"
 import path from "path"
+import { fileURLToPath } from "url"
 import { parse as parseJsonc, type ParseError as JsoncParseError } from "jsonc-parser"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import * as Log from "@opencode-ai/core/util/log"
@@ -10,10 +11,11 @@ import { isRecord } from "@/util/record"
 import { parsePluginSpecifier } from "@/plugin/shared"
 
 const log = Log.create({ service: "config.global" })
+const MARKSCODE_NOTIFIER_PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../vendor/markscode-notifier")
 
 export const DEFAULT_MARKSCODE_PLUGINS = [
   "@tarquinen/opencode-dcp@latest",
-  "@mohak34/opencode-notifier@latest",
+  MARKSCODE_NOTIFIER_PLUGIN,
   "opencode-supermemory@latest",
 ] as const
 
