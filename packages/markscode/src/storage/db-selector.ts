@@ -11,6 +11,10 @@ function explicitDb() {
   return value ? value : undefined
 }
 
+function selectorDone() {
+  return process.env.MARKSCODE_DB_SELECTOR_DONE === "1"
+}
+
 export function shouldPrompt() {
   if (explicitDb()) return false
   if (!process.stdin.isTTY || !process.stderr.isTTY) return false
@@ -53,6 +57,8 @@ async function askCustom() {
 
 export async function ensureSelected(input: { currentPath: string }) {
   if (explicitDb()) return { selected: explicitDb(), prompted: false }
+  if (selectorDone()) return { selected: input.currentPath, prompted: false }
+  process.env.MARKSCODE_DB_SELECTOR_DONE = "1"
   let registry = DbRegistry.scan({ currentPath: input.currentPath, persist: true })
   const forced = process.env.MARKSCODE_DB_SELECTOR === "1" || process.env.MARKSCODE_DB_SELECT === "1"
   if (!shouldPrompt() || (!forced && registry.databases.filter((db) => db.status === "ok").length < 2)) {

@@ -407,7 +407,7 @@
     },
     "packages/markscode": {
       "name": "markscode",
-      "version": "1.15.12",
+      "version": "1.1.0",
       "bin": {
         "markscode": "./bin/markscode",
       },

@@ -79,7 +79,7 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
-const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context does not contain enough knowledge about the subject, use the available Hybrid Memory search/capability when available to look up relevant prior context. If Hybrid Memory is unavailable or fails, proceed with clear uncertainty instead of inventing details.`
+const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context lacks knowledge, use Hybrid Memory when available. For Markdown memory/context searches, consider files named with Memory, MEMORY, or memory, plus any .md/.MD in scanned directories that contains or references the search terms. If unavailable or failed, state uncertainty instead of inventing details.`
 
 
 const log = Log.create({ service: "session.prompt" })

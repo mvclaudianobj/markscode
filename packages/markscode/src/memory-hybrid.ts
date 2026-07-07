@@ -101,6 +101,7 @@ export interface HybridIngestInput {
   session_id?: string
   source?: string
   path?: string
+  query?: string
   source_name?: string
   subject?: string
   limit?: number
@@ -497,11 +498,44 @@ function marksclawSQLiteCandidates(input?: HybridIngestInput) {
 function marksclawMarkdownCandidates(input?: HybridIngestInput) {
   const bases = marksclawWorkspaces()
   const explicit = input?.source === "marksclaw-markdown" && input.path ? [input.path] : []
+  const scanBases = uniquePaths([...bases, ...explicit.filter((path) => existsSync(path) && statSync(path).isDirectory())])
+  const terms = markdownSearchTerms(input)
   return uniquePaths([
     ...explicit,
-    ...bases.flatMap((base) => [join(base, "MEMORY.md"), join(base, "MEMORY_SNAPSHOT.md")]),
-    ...bases.flatMap((base) => safeReadDir(join(base, "memory")).filter((file) => file.endsWith(".md")).map((file) => join(base, "memory", file))),
+    ...scanBases.flatMap((base) => [
+      "MEMORY.md",
+      "Memory.md",
+      "memory.md",
+      "MEMORY.MD",
+      "Memory.MD",
+      "memory.MD",
+      "MEMORY_SNAPSHOT.md",
+      "MEMORY_SNAPSHOT.MD",
+    ].map((file) => join(base, file))),
+    ...scanBases.flatMap((base) => markdownFilesInDirectory(base, terms)),
+    ...scanBases.flatMap((base) => markdownFilesInDirectory(join(base, "memory"), terms, true)),
   ]).filter((path) => !path.includes("/node_modules/") && !path.includes("/templates/"))
+}
+
+function markdownSearchTerms(input?: HybridIngestInput) {
+  return [input?.query, input?.subject]
+    .flatMap((value) => String(value || "").split(/\s+/))
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 2)
+}
+
+function markdownFileMatchesTerms(path: string, terms: string[]) {
+  if (!terms.length) return false
+  if (!existsSync(path) || !statSync(path).isFile()) return false
+  const content = readFileSync(path, "utf8").toLowerCase()
+  return terms.some((term) => content.includes(term))
+}
+
+function markdownFilesInDirectory(path: string, terms: string[], includeAll = false) {
+  return safeReadDir(path)
+    .filter((file) => /\.md$/i.test(file))
+    .map((file) => join(path, file))
+    .filter((candidate) => /memory/i.test(candidate.split("/").pop() || "") || includeAll || markdownFileMatchesTerms(candidate, terms))
 }
 
 function memoriesAPISQLiteCandidates(input?: HybridIngestInput) {

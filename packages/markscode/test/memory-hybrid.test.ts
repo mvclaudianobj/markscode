@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { chmodSync, existsSync, writeFileSync } from "fs"
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "./fixture/fixture"
-import { ensureMemvidCapsule, hybridMemoryStatus, ingestHybridMemories, recallHybridMemories } from "@/memory-hybrid"
+import { ensureMemvidCapsule, hybridMemoryStatus, ingestHybridMemories, previewHybridIngest, recallHybridMemories } from "@/memory-hybrid"
 
 function clearCloudMemoryEnv() {
   delete process.env.MARKSCODE_MEMORIES_API_KEY
@@ -87,5 +87,20 @@ exit 1
     expect(existsSync(capsule)).toBe(true)
     expect(memvid).toMatchObject({ available: true, method: "cli", written: 1 })
     expect("export_path" in memvid).toBe(false)
+  })
+
+  test("marksclaw markdown ingest discovers memory names and subject-matching MD files", async () => {
+    await using tmp = await tmpdir()
+    mkdirSync(join(tmp.path, "memory"))
+    writeFileSync(join(tmp.path, "ProjectMemory.MD"), "Project memory captures release alpha context.")
+    writeFileSync(join(tmp.path, "MemoryNotes.MD"), "Memory notes capture beta context.")
+    writeFileSync(join(tmp.path, "context.MD"), "Generic markdown references orbital-subject for lookup.")
+
+    const result = await previewHybridIngest({ source: "marksclaw-markdown", path: tmp.path, subject: "orbital-subject" })
+    const paths = result.items.map((item) => item.source_path)
+
+    expect(paths).toContain(join(tmp.path, "ProjectMemory.MD"))
+    expect(paths).toContain(join(tmp.path, "MemoryNotes.MD"))
+    expect(paths).toContain(join(tmp.path, "context.MD"))
   })
 })
