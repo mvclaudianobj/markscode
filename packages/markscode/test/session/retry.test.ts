@@ -164,7 +164,7 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: msg })
   })
 
-  test("detects orchestrator big-pickle fallback eligibility once for rate limits", () => {
+  test("detects orchestrator fallback eligibility once for provider limits", () => {
     const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
       new MessageV2.APIError({
         message: "Rate limit exceeded",
@@ -174,21 +174,21 @@ describe("session.retry.retryable", () => {
     )
 
     expect(
-      SessionRetry.shouldFallbackToBigPickle({
+      SessionRetry.shouldFallbackModel({
         agent: "orchestrator",
         alreadyUsed: false,
         error,
       }),
     ).toBe(true)
     expect(
-      SessionRetry.shouldFallbackToBigPickle({
+      SessionRetry.shouldFallbackModel({
         agent: "orchestrator",
         alreadyUsed: true,
         error,
       }),
     ).toBe(false)
     expect(
-      SessionRetry.shouldFallbackToBigPickle({
+      SessionRetry.shouldFallbackModel({
         agent: "build",
         assistantAgent: "build",
         alreadyUsed: false,

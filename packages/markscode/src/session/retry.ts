@@ -166,10 +166,36 @@ export function isRateLimit(error: Err) {
   return typeof json.code === "string" && json.code.includes("rate_limit")
 }
 
-export function shouldFallbackToBigPickle(input: { agent?: string; assistantAgent?: string; alreadyUsed: boolean; error: Err }) {
+export function shouldFallbackModel(input: { agent?: string; assistantAgent?: string; alreadyUsed: boolean; error: Err }) {
   if (input.alreadyUsed) return false
   if (input.agent !== "orchestrator" && input.assistantAgent !== "orchestrator") return false
-  return isRateLimit(input.error)
+  return isProviderLimit(input.error)
+}
+
+export function isProviderLimit(error: Err) {
+  if (MessageV2.APIError.isInstance(error)) {
+    const status = error.data.statusCode
+    if (status === 429 || status === 402 || status === 403) return true
+    if (typeof error.data.responseBody === "string" && limitText(error.data.responseBody)) return true
+    if (typeof error.data.message === "string" && limitText(error.data.message)) return true
+  }
+  if (isRecord(error) && typeof (error as Record<string, unknown>).statusCode === "number") {
+    const sc = (error as Record<string, unknown>).statusCode as number
+    if (sc === 429 || sc === 402 || sc === 403) return true
+    if (typeof (error as Record<string, unknown>).responseBody === "string" && limitText((error as Record<string, unknown>).responseBody as string)) return true
+    if (typeof (error as Record<string, unknown>).message === "string" && limitText((error as Record<string, unknown>).message as string)) return true
+  }
+  const dataErr = isRecord(error.data) ? error.data : (isRecord(error) ? error : undefined)
+  const msg = isRecord(dataErr) ? (dataErr as Record<string, unknown>).message : undefined
+  if (typeof msg === "string" && limitText(msg)) return true
+  const body = parseJSON(msg) as Record<string, unknown> | undefined
+  if (!body || typeof body !== "object") return false
+  const code = typeof body.code === "string" ? (body.code as string) : ""
+  if (code.includes("rate_limit") || code.includes("exhausted") || code.includes("insufficient_quota") || code.includes("usage_not_included") || code.includes("timeout")) return true
+  const err = body.error
+  const errCode = typeof err === "object" && err !== null ? (err as Record<string, unknown>).code : undefined
+  if (typeof errCode === "string" && (errCode.includes("rate_limit") || errCode.includes("insufficient_quota") || errCode.includes("exhausted") || errCode.includes("timeout") || errCode.includes("usage_not_included"))) return true
+  return false
 }
 
 function rateLimitText(value: unknown) {
@@ -180,6 +206,28 @@ function rateLimitText(value: unknown) {
     lower.includes("rate limit") ||
     lower.includes("too many requests") ||
     lower.includes("too_many_requests")
+  )
+}
+
+function limitText(value: string) {
+  const lower = value.toLowerCase()
+  return (
+    lower.includes("rate increased too quickly") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("too_many_requests") ||
+    lower.includes("quota") ||
+    lower.includes("insufficient_quota") ||
+    lower.includes("usage limit") ||
+    lower.includes("usage_not_included") ||
+    lower.includes("token limit") ||
+    lower.includes("tokens exhausted") ||
+    lower.includes("exhausted") ||
+    lower.includes("credit") ||
+    lower.includes("billing") ||
+    lower.includes("time limit") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out")
   )
 }
 

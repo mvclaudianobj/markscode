@@ -805,15 +805,25 @@ export const layer = Layer.effect(
         yield* status.set(ctx.sessionID, { type: "idle" })
       })
 
-      const fallbackModel = Effect.fn("SessionProcessor.fallbackModel")(function* () {
+      const fallbackModel = Effect.fn("SessionProcessor.fallbackModel")(function* (currentProviderID: string, currentModelID: string) {
+        const providers = yield* provider.list().pipe(Effect.catch(() => Effect.succeed({} as Record<ProviderID, Provider.Info>)))
+        const allModels = Object.values(providers).flatMap((item) => Object.values(item.models))
+        const isSame = (m: { providerID: string; id: string }) => m.providerID === currentProviderID && m.id === currentModelID
+
+        const autoOfCurrent = allModels.find((m) => !isSame(m) && m.providerID === currentProviderID && m.id.startsWith("auto/"))
+        if (autoOfCurrent) return autoOfCurrent
+
+        const autoAny = allModels.find((m) => !isSame(m) && m.id.startsWith("auto/"))
+        if (autoAny) return autoAny
+
+        const marks = allModels.find((m) => !isSame(m) && (m.id === "MarksAI-2.0.0" || m.id.includes("MarksAI-2.0.0")))
+        if (marks) return marks
+
         const direct = yield* provider
           .getModel(ProviderID.make("zen"), ModelID.make("big-pickle"))
           .pipe(Effect.option)
         if (Option.isSome(direct)) return direct.value
-        const providers = yield* provider.list().pipe(Effect.catch(() => Effect.succeed({} as Record<ProviderID, Provider.Info>)))
-        return Object.values(providers)
-          .flatMap((item) => Object.values(item.models))
-          .find((model) => model.providerID === "zen" && model.id.includes("big-pickle"))
+        return allModels.find((model) => model.providerID === "zen" && model.id.includes("big-pickle"))
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
@@ -853,13 +863,13 @@ export const layer = Layer.effect(
                 parse,
                 set: (info) =>
                   Effect.gen(function* () {
-                    const shouldFallback = SessionRetry.shouldFallbackToBigPickle({
+                    const shouldFallback = SessionRetry.shouldFallbackModel({
                       agent: currentStreamInput.agent.name,
                       assistantAgent: ctx.assistantMessage.agent,
                       alreadyUsed: orchestratorRateLimitFallbackUsed,
                       error: info.error,
                     })
-                    const fallback = shouldFallback ? yield* fallbackModel() : undefined
+                    const fallback = shouldFallback ? yield* fallbackModel(currentStreamInput.model.providerID, currentStreamInput.model.id) : undefined
                     if (fallback) {
                       orchestratorRateLimitFallbackUsed = true
                       ctx.model = fallback
@@ -869,7 +879,7 @@ export const layer = Layer.effect(
                       yield* session.updateMessage(ctx.assistantMessage)
                       slog.info("orchestrator rate limit fallback", { providerID: fallback.providerID, modelID: fallback.id })
                     }
-                    const message = fallback ? `${info.message}; switched Orchestrator to zen/big-pickle` : info.message
+                    const message = fallback ? `${info.message}; switched orchestrator to ${fallback.providerID}/${fallback.id}` : info.message
                     // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
                     const event = flags.experimentalEventSystem
                       ? events.publish(SessionEvent.Retried, {
