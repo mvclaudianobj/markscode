@@ -3,6 +3,8 @@ import { homedir, tmpdir } from "os"
 import { dirname, join } from "path"
 import { resolveMemoryConfig } from "./memory-config"
 import { importMemories, recallHumanMemories, type MemoryMode, type MemoryType } from "./memories-api"
+import { brainRecall } from "./brain-client"
+import { isBrainEnabled, getBrainConfig } from "./brain-config"
 
 export type MemoryProvider = "cloud" | "local" | "hybrid"
 
@@ -14,6 +16,7 @@ export interface HybridRecallInput {
   max_chars?: number
   provider?: MemoryProvider
   capsule?: string
+  token?: string
 }
 
 export interface HybridStatusInput {
@@ -22,7 +25,7 @@ export interface HybridStatusInput {
 
 export interface HybridRecallItem {
   id?: string
-  source: "cloud" | "local"
+  source: "cloud" | "local" | "brain"
   content: string
   score?: number
   title?: string
@@ -35,6 +38,7 @@ export interface HybridRecallResult {
   provider: MemoryProvider
   local_available: boolean
   cloud_available: boolean
+  brain_available: boolean
   errors: string[]
 }
 
@@ -57,7 +61,7 @@ export interface HybridSourcesResult {
 
 export interface HybridRecentTopic {
   topic: string
-  source: "cloud" | "local"
+  source: "cloud" | "local" | "brain"
   content_preview: string
   title?: string
   subject?: string
@@ -107,8 +111,10 @@ export interface HybridIngestInput {
   limit?: number
   write_cloud?: boolean
   write_memvid?: boolean
+  write_brain?: boolean
   dry_run?: boolean
   capsule?: string
+  token?: string
 }
 
 export interface HybridIngestPreviewResult {
@@ -1159,6 +1165,11 @@ export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unk
     capsule: input?.capsule || defaultMemvidCapsulePath(),
     cloud_available: cloudMemoryAvailable(),
     cloud_url: memoryConfig.memories.url,
+    brain: {
+      enabled: isBrainEnabled(),
+      base_url: getBrainConfig()?.base_url,
+      graphfy_enabled: getBrainConfig()?.graphfy_enabled ?? false,
+    },
     defaults: {
       user_id: memoryConfig.user_id,
       limit: saneLimit(),
@@ -1222,13 +1233,33 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
         })
     : []
 
+  const brainResult = (isBrainEnabled() && input.token)
+    ? await brainRecall(input.token, {
+        q: expandedCue,
+        user_id: input.user_id,
+        session_id: input.session_id,
+        limit,
+      }).catch(() => null)
+    : null
+
+  const brainItems: HybridRecallItem[] = brainResult?.items?.map((item) => ({
+    id: item.id,
+    source: "brain" as const,
+    content: (item.content as string | undefined) ?? "",
+    score: item.score,
+    title: item.title as string | undefined,
+    subject: item.subject as string | undefined,
+    tags: item.tags as string[] | undefined,
+  })) ?? []
+
   const maxChars = saneMaxChars(input.max_chars)
   return {
     provider,
     local_available: local.available,
     cloud_available: provider === "local" ? false : cloudAvailable && !errors.some((x) => x.startsWith("cloud:")),
+    brain_available: brainResult?.ok === true,
     errors,
-    memories: [...localMemories, ...cloudMemories]
+    memories: [...localMemories, ...cloudMemories, ...brainItems]
       .filter((memory) => memory.content.trim())
       .slice(0, limit)
       .map((memory) => ({

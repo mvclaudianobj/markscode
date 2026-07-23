@@ -158,6 +158,81 @@ export function Prompt(props: PromptProps) {
   const dimensions = useTerminalDimensions()
   const { theme, syntax } = useTheme()
   const kv = useKV()
+  const remoteProfileAutoContextMarkers = [
+    "[Remote profile auto-context]",
+    "[Remote profile active]",
+    "[Remote profile candidates]",
+    "remote_ssh_profiles_registry",
+  ]
+
+  const remoteProfileValue = (value: unknown) => (typeof value === "string" ? value.trim() : "")
+  const remoteProfileString = (value: unknown) => {
+    const text = remoteProfileValue(value)
+    return text || undefined
+  }
+  const remoteProfileTokenPattern = (token: string) =>
+    new RegExp(
+      `(^|[^\\p{L}\\p{N}_-])${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}\\p{N}_-])`,
+      "iu",
+    )
+  const remoteProfileMatchedTokens = (input: string, profile: Record<string, unknown>) =>
+    [profile.name, profile.host_alias, profile.host]
+      .map(remoteProfileValue)
+      .filter((value, index, values) => value && values.indexOf(value) === index)
+      .filter((value) => remoteProfileTokenPattern(value).test(input))
+  const remoteProfilePasswordSaved = (value: unknown) =>
+    value === true || value === 1 || (typeof value === "string" && /^(yes|true|1)$/i.test(value.trim()))
+  const remoteProfileAutoContext = (input: string) => {
+    if (remoteProfileAutoContextMarkers.some((marker) => input.includes(marker))) return input
+    const registry = kv.get("remote_ssh_profiles_registry", [])
+    if (!Array.isArray(registry)) return input
+    const matches = registry
+      .filter((profile): profile is Record<string, unknown> => profile && typeof profile === "object")
+      .map((profile) => ({ profile, tokens: remoteProfileMatchedTokens(input, profile) }))
+      .filter((match) => match.tokens.length > 0)
+    const unique = matches.filter(
+      (match, index) =>
+        matches.findIndex(
+          (item) => remoteProfileString(item.profile.id) === remoteProfileString(match.profile.id) || item.profile === match.profile,
+        ) === index,
+    )
+    if (unique.length === 0) return input
+    if (unique.length > 1) {
+      if (new Set(unique.flatMap((match) => match.tokens.map((token) => token.toLowerCase()))).size <= 1) return input
+      return [
+        "[Remote profile candidates]",
+        ...unique.slice(0, 5).map((match) => {
+          const profile = match.profile
+          return `- ${remoteProfileString(profile.name) || remoteProfileString(profile.id) || "unnamed"} (${remoteProfileString(profile.type) || "ssh"}) host=${remoteProfileString(profile.host) || "unknown"} user=${remoteProfileString(profile.user) || "unknown"} port=${remoteProfileString(profile.port) || "unknown"}`
+        }),
+        "- Instruction: multiple saved remote profiles were cited; ask the user to confirm the intended profile before connecting.",
+        "",
+        input,
+      ].join("\n")
+    }
+    const profile = unique[0].profile
+    return [
+      "[Remote profile auto-context]",
+      `- Trigger: ${unique[0].tokens[0]}`,
+      `- Profile: ${remoteProfileString(profile.name) || remoteProfileString(profile.id) || "unnamed"}`,
+      `- Type: ${remoteProfileString(profile.type) || remoteProfileString(profile.protocol) || "ssh"}`,
+      `- Host: ${remoteProfileString(profile.host) || ""}`,
+      `- User: ${remoteProfileString(profile.user) || ""}`,
+      `- Port: ${remoteProfileString(profile.port) || ""}`,
+      remoteProfileString(profile.transport) ? `- Transport: ${remoteProfileString(profile.transport)}` : undefined,
+      remoteProfileString(profile.host_alias) ? `- Alias: ${remoteProfileString(profile.host_alias)}` : undefined,
+      remoteProfileString(profile.identity_file) ? `- Identity file: ${remoteProfileString(profile.identity_file)}` : undefined,
+      remoteProfileString(profile.key_name) ? `- Key name: ${remoteProfileString(profile.key_name)}` : undefined,
+      remoteProfileString(profile.master_key_ref) ? `- Master key ref: ${remoteProfileString(profile.master_key_ref)}` : undefined,
+      remoteProfileString(profile.auth_method) ? `- Auth method: ${remoteProfileString(profile.auth_method)}` : undefined,
+      `- Saved password available to automation: ${remoteProfilePasswordSaved(profile.password_saved) ? "yes (secret not exposed)" : "no"}`,
+      "- Instruction: use this profile connection data for the cited host/profile; do not reveal saved passwords or encoded secrets.",
+      "",
+      input,
+    ]
+      .filter((line): line is string => typeof line === "string")
+      .join("\n")
+  }
   // MARKSCODE_MEMORY_HINTS_HELPERS_START
   const memoryHintsEnabled = /^(1|true|on)$/i.test(process.env.MARKSCODE_MEMORY_HINTS || "")
   const memoryHintsScope = process.env.MARKSCODE_MEMORY_HINTS_SCOPE === "global" ? "global" : "session"
@@ -1212,11 +1287,11 @@ export function Prompt(props: PromptProps) {
       })
     } else {
       // MARKSCODE_MEMORY_HINTS_PREP_START
-      let promptText = inputText
+      let promptText = remoteProfileAutoContext(inputText)
       if (memoryHintsEnabled && props.sessionID) {
         const rows = await memoryHintsRows(inputText, sessionID)
         if (rows.length) {
-          promptText = ["[Memory hints]", ...rows.map((x) => "- " + x), "", inputText].join("\n")
+          promptText = ["[Memory hints]", ...rows.map((x) => "- " + x), "", promptText].join("\n")
         }
       }
       // MARKSCODE_MEMORY_HINTS_PREP_END

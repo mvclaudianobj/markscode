@@ -6,7 +6,7 @@ import { ensureMasterKeyPair, setupKeyForHost, encryptCredential } from "./pki"
 
 export type RemoteSSHProfileRow = typeof RemoteSSHProfileTable.$inferSelect
 export type RemoteSSHProfileInput = Omit<RemoteSSHProfileRow, "time_created" | "time_updated">
-export type RemoteProfileProtocol = "ssh" | "winrm" | "whm" | "custom"
+export type RemoteProfileProtocol = "ssh" | "winrm" | "powershell" | "whm" | "custom"
 
 const now = () => Date.now()
 

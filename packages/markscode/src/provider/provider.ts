@@ -1301,7 +1301,7 @@ export const layer = Layer.effect(
             env: provider.env ?? existing?.env ?? [],
             options: mergeDeep(existing?.options ?? {}, provider.options ?? {}),
             source: "config",
-            models: existing?.models ?? {},
+            models: provider.models ? {} : existing?.models ?? {},
           }
 
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {

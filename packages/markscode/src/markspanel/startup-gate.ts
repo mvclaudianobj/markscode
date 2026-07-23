@@ -152,37 +152,6 @@ export const ensureParentGate = Effect.fn("markspanel.startup.ensure")(function*
   yield* Prompt.log.success(
     `Perfil carregado: ${stats.providers} provider${stats.providers !== 1 ? "s" : ""}, ${stats.models} modelo${stats.models !== 1 ? "s" : ""}`,
   )
-
-  // Verificar quota disponível (fire-and-forget — não bloqueia startup)
-  yield* Effect.gen(function* () {
-    const quotaResult = yield* service.quota(active.value.id).pipe(Effect.catch(() => Effect.succeed(null)))
-    if (!quotaResult) return
-    const contractedPlan = quotaResult.contracted_plan?.name ?? quotaResult.contracted_plan?.slug ?? "não informado"
-    const effectivePlan = quotaResult.effective_plan?.name ?? quotaResult.effective_plan?.slug ?? quotaResult.tier_name ?? quotaResult.tier
-    yield* Prompt.log.info(`Plano Markspanel contratado: ${contractedPlan}`)
-    yield* Prompt.log.info(`Plano Markspanel efetivo: ${effectivePlan}`)
-    if (quotaResult.billing_state) {
-      yield* Prompt.log.info(`Status de cobrança Markspanel: ${quotaResult.billing_state}`)
-    }
-    if (quotaResult.fallback_applied) {
-      yield* Prompt.log.warn(
-        `⚠️  ${quotaResult.message ?? "Status de cobrança pendente/inativo; plano free aplicado até regularização."}`,
-      )
-      yield* Prompt.log.warn("   Plano free aplicado sem deslogar; regularize a cobrança para restaurar o plano contratado.")
-    }
-    if (quotaResult.monthly?.exhausted && quotaResult.hard_limit) {
-      yield* Prompt.log.warn(
-        `⚠️  Limite mensal de tokens Markspanel atingido. O uso pode estar bloqueado pelo servidor.`,
-      )
-      yield* Prompt.log.warn(
-        `   Tier: ${quotaResult.tier} | Usado: ${quotaResult.monthly.used.toLocaleString()} / ${quotaResult.monthly.limit.toLocaleString()} tokens`,
-      )
-    } else if (quotaResult.monthly?.warning) {
-      yield* Prompt.log.warn(
-        `⚠️  Atenção: ${quotaResult.monthly.pct.toFixed(0)}% da quota mensal Markspanel utilizada.`,
-      )
-    }
-  }).pipe(Effect.ignore)
 })
 
 export const ensureWorkerGate = Effect.fn("markspanel.startup.providers")(function* (input: {
@@ -215,7 +184,14 @@ export const ensureWorkerGate = Effect.fn("markspanel.startup.providers")(functi
       if (!selectedProvider || !selectedProvider.models[parsed.modelID]) {
         return yield* failure(`Modelo solicitado não autorizado ou indisponível: ${input.model}`)
       }
-    }),
+    }).pipe(
+      Effect.timeout(5000),
+      Effect.catch((error) =>
+        Prompt.log.warn(
+          `Aviso: validação de providers/modelos não concluída no boot; abrindo TUI sem bloquear. ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      ),
+    ),
   )
 })
 

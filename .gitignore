@@ -32,3 +32,11 @@ tsconfig.tsbuildinfo
 
 # Release artifacts
 _release/
+
+# MarksCode 1.1.2 — Graphfy artifacts (local-only)
+graphify-out/
+**/graphify-out/
+
+# BrainSystem runtime artifacts (local-only)
+.backups/
+_source_backups/

@@ -20,7 +20,8 @@
     "zen",
     "kil",
     "openai",
-    "local-proxy"
+    "local-proxy",
+    "local-proxy2"
   ],
   "provider": {
     "opencode": {
@@ -7905,6 +7906,35 @@
           "tool_call": true,
           "reasoning": false,
           "attachment": true
+        }
+      }
+    },
+    "local-proxy2": {
+      "id": "local-proxy2",
+      "name": "Local Proxy 2 (Kimi)",
+      "api": "http://127.0.0.1:18082/v1",
+      "npm": "@ai-sdk/openai-compatible",
+      "env": [],
+      "options": {
+        "baseURL": "http://127.0.0.1:18082/v1",
+        "apiKey": "local-proxy2"
+      },
+      "models": {
+        "k2d6": {
+          "id": "k2d6",
+          "name": "K2.6 Instant"
+        },
+        "k2d6-thinking": {
+          "id": "k2d6-thinking",
+          "name": "K2.6 Thinking"
+        },
+        "k2d6-agent": {
+          "id": "k2d6-agent",
+          "name": "K2.6 Agent"
+        },
+        "k2d6-agent-ultra": {
+          "id": "k2d6-agent-ultra",
+          "name": "K2.6 Agent Swarm"
         }
       }
     }

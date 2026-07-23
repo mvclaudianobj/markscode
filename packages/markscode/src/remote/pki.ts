@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "fs"
-import { execSync } from "child_process"
+import { execFileSync, spawnSync } from "child_process"
 import { homedir } from "os"
 import { join } from "path"
 
@@ -12,9 +12,9 @@ export function ensureMasterKeyPair(): { privateKeyPath: string; publicKeyPath: 
     return { privateKeyPath: MASTER_KEY_PATH, publicKeyPath: MASTER_PUB_PATH }
   }
 
-  execSync(`ssh-keygen -t ed25519 -f "${MASTER_KEY_PATH}" -N "" -C "${MASTER_KEY_NAME}"`, { stdio: "inherit" })
-  execSync(`chmod 600 "${MASTER_KEY_PATH}"`, { stdio: "inherit" })
-  execSync(`chmod 644 "${MASTER_PUB_PATH}"`, { stdio: "inherit" })
+  execFileSync("ssh-keygen", ["-t", "ed25519", "-f", MASTER_KEY_PATH, "-N", "", "-C", MASTER_KEY_NAME], { stdio: "inherit" })
+  execFileSync("chmod", ["600", MASTER_KEY_PATH], { stdio: "inherit" })
+  execFileSync("chmod", ["644", MASTER_PUB_PATH], { stdio: "inherit" })
 
   return { privateKeyPath: MASTER_KEY_PATH, publicKeyPath: MASTER_PUB_PATH }
 }
@@ -46,12 +46,17 @@ export function decryptCredential(ciphertext: string, keyPath?: string): string 
 export function setupKeyForHost(host: string, user: string, port = 22): void {
   const keys = ensureMasterKeyPair()
   const pubKey = getMasterPublicKey()
+  const safePort = Number.isInteger(port) && port > 0 && port <= 65535 ? String(port) : undefined
+
+  if (!safePort) throw new Error("Invalid SSH port")
+  if (!/^[A-Za-z0-9._:-]+$/.test(host)) throw new Error("Invalid SSH host")
+  if (!/^[A-Za-z0-9._-]+$/.test(user)) throw new Error("Invalid SSH user")
 
   try {
-    execSync(`ssh-copy-id -i "${keys.publicKeyPath}" -p ${port} "${user}@${host}"`, { stdio: "inherit" })
+    execFileSync("ssh-copy-id", ["-i", keys.publicKeyPath, "-p", safePort, `${user}@${host}`], { stdio: "inherit" })
   } catch (err) {
-    const fallback = `ssh "${user}@${host}" -p ${port} "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${pubKey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"`
-    execSync(fallback, { stdio: "inherit" })
+    const proc = spawnSync("ssh", ["-p", safePort, `${user}@${host}`, "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"], { input: pubKey + "\n", stdio: ["pipe", "inherit", "inherit"] })
+    if (proc.status !== 0) throw err
   }
 }
 

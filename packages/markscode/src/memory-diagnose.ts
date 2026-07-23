@@ -4,6 +4,7 @@ import { dirname, join } from "path"
 import { homedir } from "os"
 import { resolveMemoryConfig } from "./memory-config"
 import { Database } from "./storage/db"
+import { getGraphfyStatus } from "./graphfy"
 
 export type BrainLayerStatus = {
   layer: string
@@ -136,7 +137,21 @@ export function diagnoseBrainSystem(input?: {
 }): BrainSystemDiagnosis {
   const layers: BrainLayerStatus[] = []
 
-  // Layer 1: Capsule Memvid
+  const projectRoot = input?.projectRoot || process.cwd()
+  const graphfy = getGraphfyStatus({ projectRoot })
+  const graphfyHasCounts = graphfy.nodes !== undefined || graphfy.edges !== undefined
+  layers.push({
+    layer: "Graphfy Knowledge Graph",
+    status: !graphfy.enabled || !graphfy.available ? "unavailable" : graphfy.graph_path && graphfyHasCounts ? "ok" : graphfy.cli && !graphfy.graph_path ? "warning" : graphfy.graph_path ? "warning" : "unavailable",
+    details: graphfy.graph_path
+      ? `${graphfy.reason || "Artefato Graphify local encontrado"}${graphfyHasCounts ? `; nodes=${graphfy.nodes ?? 0}; edges=${graphfy.edges ?? 0}` : ""}`
+      : graphfy.cli
+        ? graphfy.reason || `CLI Graphify disponível em ${graphfy.cli}`
+        : graphfy.reason || "Graphify local indisponível",
+    recommendation: graphfy.recommendation || (graphfy.graph_path ? undefined : "Opcional: instalar com uv tool install \"graphifyy[openai,sql]\" --force e gerar com MARKSCODE_GRAPHFY_OPENAI_API_KEY/Marks API ou graphify extract . --no-viz --code-only"),
+  })
+
+  // Layer 2: Capsule Memvid
   const capsulePath = input?.capsulePath || join(homedir(), ".local/share/markscode/memory/hybrid.mv2")
   const memvidCli = findMarkscodeMemvidCli()
 
@@ -184,8 +199,7 @@ export function diagnoseBrainSystem(input?: {
     })
   }
 
-  // Layer 2: Memory MD
-  const projectRoot = input?.projectRoot || process.cwd()
+  // Layer 3: Memory MD
   const memoryMdCandidates = [
     join(projectRoot, "MEMORY.md"),
     join(projectRoot, ".markscode", "memory.md"),
@@ -209,7 +223,7 @@ export function diagnoseBrainSystem(input?: {
     })
   }
 
-  // Layer 3: Project Tasks
+  // Layer 4: Project Tasks
   const projectTasksDir = join(projectRoot, ".tasks")
   const projectTasksIndex = join(projectTasksDir, "index.md")
   const projectTasksTemplate = join(projectTasksDir, "template.md")
@@ -229,7 +243,7 @@ export function diagnoseBrainSystem(input?: {
     })
   }
 
-  // Layer 4: Session DB
+  // Layer 5: Session DB
   const sessionDbPath = input?.sessionDbPath || Database.getPath()
   if (existsSync(sessionDbPath)) {
     layers.push({
@@ -246,7 +260,7 @@ export function diagnoseBrainSystem(input?: {
     })
   }
 
-  // Layer 5: Remote API
+  // Layer 6: Remote API
   const memoryConfig = resolveMemoryConfig()
   const apiKey = input?.apiKey || memoryConfig.memories.api_key
   const apiBaseUrl = input?.apiBaseUrl || memoryConfig.memories.url || process.env.MEMORIES_API_BASE_URL || "http://api.marks.ia.br:8689"
@@ -310,14 +324,14 @@ export function diagnoseBrainSystem(input?: {
     })
   }
 
-  // Layer 6: Compactação
+  // Layer 7: Compactação
   layers.push({
     layer: "Compactação",
     status: "ok",
     details: "Sistema de compactação DCP ativo",
   })
 
-  // Layer 7: Hand-off
+  // Layer 8: Hand-off
   layers.push({
     layer: "Hand-off",
     status: "ok",

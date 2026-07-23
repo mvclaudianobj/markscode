@@ -181,9 +181,67 @@ function main() {
   )
 }
 
+
+function findInstaller() {
+  const candidates = platform === "windows"
+    ? [["uv", ["tool","install","graphifyy[openai,sql]","--force"]], ["pipx", ["install","graphifyy[openai,sql]","--force"]]]
+    : [
+        [process.env.HOME + "/.local/bin/uv", ["tool","install","graphifyy[openai,sql]","--force"]],
+        ["/usr/local/bin/uv", ["tool","install","graphifyy[openai,sql]","--force"]],
+      ]
+  for (const [cmd, args] of candidates) {
+    try {
+      childProcess.spawnSync(platform === "windows" ? "where" : "test", platform === "windows" ? [cmd] : ["-x", cmd], { encoding: "utf8", timeout: 2000 })
+      const result = childProcess.spawnSync(cmd, ["--version"], { encoding: "utf8", timeout: 2000, windowsHide: true })
+      if (result.status === 0) return { cmd, args }
+    } catch {}
+  }
+  // fallback: command -v uv / pipx
+  for (const [name, args] of [["uv", ["tool","install","graphifyy[openai,sql]","--force"]], ["pipx", ["install","graphifyy[openai,sql]","--force"]]]) {
+    try {
+      const r = childProcess.spawnSync(platform === "windows" ? "where" : "sh", platform === "windows" ? [name] : ["-lc", "command -v " + name], { encoding: "utf8", timeout: 2000 })
+      if (r.status === 0 && (r.stdout || "").trim()) return { cmd: (r.stdout || "").trim().split("\n")[0].trim() || name, args }
+    } catch {}
+  }
+  return null
+}
+
+function tryInstallGraphify() {
+  try {
+    // Skip if graphify already available
+    const check = childProcess.spawnSync(
+      platform === "windows" ? "where" : "sh",
+      platform === "windows" ? ["graphify"] : ["-lc", "command -v graphify"],
+      { encoding: "utf8", timeout: 2000, windowsHide: true }
+    )
+    if (check.status === 0 && (check.stdout || "").trim()) {
+      console.log("graphify already available, skipping install")
+      return
+    }
+    const installer = findInstaller()
+    if (!installer) {
+      console.log("graphify optional: uv/pipx not found, skipping auto-install (install uv to enable BrainSystem layer 1)")
+      return
+    }
+    console.log(`Installing graphifyy extras via ${installer.cmd}...`)
+    const result = childProcess.spawnSync(installer.cmd, installer.args, {
+      encoding: "utf8", timeout: 120000, windowsHide: true, stdio: "inherit"
+    })
+    if (result.status === 0) {
+      console.log("graphifyy extras installed successfully (BrainSystem layer 1 ready)")
+    } else {
+      console.log("graphifyy extras install failed (optional, skipping)")
+    }
+  } catch (err) {
+    console.log("graphifyy extras install skipped:", err.message)
+  }
+}
+
 try {
   main()
 } catch (error) {
   console.error(error.message)
   process.exit(1)
 }
+
+tryInstallGraphify()

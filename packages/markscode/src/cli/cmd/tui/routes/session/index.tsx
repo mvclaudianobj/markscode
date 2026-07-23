@@ -113,6 +113,10 @@ import { loadMemory } from "@/memory"
 import { ensureMemvidCapsule, hybridMemoryStatus, ingestHybridMemories, listHybridRecentTopics, recallHybridMemories } from "@/memory-hybrid"
 import { listRemoteSSHProfiles, replaceRemoteSSHProfiles } from "@/remote/profile-repo"
 import { diagnoseBrainSystem } from "@/memory-diagnose"
+import { runBrainIngestor } from "@/brain-ingestor"
+import { isBrainEnabled } from "@/brain-config"
+import { brainStatus, brainRecall, brainGraphQuery, brainGraphArtifact } from "@/brain-client"
+import { getGraphfyStatus, graphfyAutoSetup, graphfyExtract } from "@/graphfy"
 import { Database } from "@/storage/db"
 import { DialogRecentTopics } from "../../component/dialog-recent-topics"
 import { DialogAllSessionList } from "../../component/dialog-all-session-list"
@@ -120,6 +124,8 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { errorMessage } from "@/util/error"
 import { PathFormatterProvider, usePathFormatter } from "../../context/path-format"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
+import { MarksTTS } from "@/tts/marks"
+import { MarksSTT } from "@/stt/marks"
 import {
   OPENCODE_BASE_MODE,
   useBindings,
@@ -134,6 +140,7 @@ const GO_UPSELL_ACCOUNT_RATE_LIMIT_DONT_SHOW = "go_upsell_account_rate_limit_don
 const GO_UPSELL_WINDOW = 86_400_000 // 24 hrs
 const GO_UPSELL_PROVIDERS = new Set(["opencode", "opencode-go"])
 const MARKSCODE_DEBUG_UI = process.env.MARKSCODE_DEBUG_UI === "1"
+const MARKSCODE_TTS_VOICE_MODE = "markscode_tts_voice_mode"
 
 function goUpsellKeys(action: SessionRetry.Retryable["action"]) {
   if (!action) return
@@ -270,6 +277,7 @@ export function Session() {
   const [lastMemorySaveAt, setLastMemorySaveAt] = createSignal(0)
   const [lastMemoryChars, setLastMemoryChars] = createSignal(0)
   const [lastMemoryHash, setLastMemoryHash] = createSignal("")
+  const [lastBrainIngestAt, setLastBrainIngestAt] = createSignal(0)
   const [activeMemorySessionID, setActiveMemorySessionID] = createSignal<string | undefined>(undefined)
   const [overflowRecovering, setOverflowRecovering] = createSignal(false)
   const [autoSubmitDone, setAutoSubmitDone] = createSignal<string | undefined>(undefined)
@@ -430,6 +438,137 @@ export function Session() {
       .slice(0, 8)
   }
 
+  const marksTtsTextFromMessage = (messageID: string) =>
+    MarksTTS.textFromParts(sync.data.part[messageID] ?? [], { kv })
+
+  const marksTtsStreamableTextFromMessage = (messageID: string) =>
+    MarksTTS.streamableTextFromParts(sync.data.part[messageID] ?? [], { kv })
+
+  const marksTtsStreamingEnabled = () =>
+    /^(1|true|yes|on)$/i.test(String(kv.get("markscode_tts_streaming", process.env.MARKSCODE_TTS_STREAMING ?? "0")))
+
+  const runMarksTts = (messageID: string, text: string) => {
+    MarksTTS.speak(text, { kv, messageID }).catch((error: unknown) =>
+      toast.show({ message: error instanceof Error ? error.message : "Marks TTS failed", variant: "error", duration: 9000 }),
+    )
+  }
+
+  const insertPromptText = (text: string) => {
+    if (!prompt || !text.trim()) return
+    const cur = prompt.current
+    prompt.set({
+      input: cur.input ? cur.input + "\n" + text.trim() : text.trim(),
+      parts: cur.parts,
+    })
+    prompt.focus()
+  }
+
+  function showSpeechInsertDialog() {
+    dialog.replace(() => {
+      const [preview, setPreview] = createSignal("")
+      const [capturing, setCapturing] = createSignal(false)
+      const [busy, setBusy] = createSignal(false)
+      const [status, setStatus] = createSignal("Pronto para capturar")
+      const [capture, setCapture] = createSignal<Awaited<ReturnType<typeof MarksSTT.startCapture>>>()
+      const [increment, setIncrement] = createSignal(false)
+      const warn = (message: string) => {
+        setStatus(message)
+        toast.show({ message, variant: "warning", duration: 3000 })
+      }
+      const finishCapture = async () => {
+        const current = capture()
+        if (busy()) return warn("Aguarde a operação atual terminar")
+        if (!current) return warn("Nenhuma captura em andamento")
+        setBusy(true)
+        setStatus("Transcrevendo...")
+        try {
+          const text = await current.stop()
+          setPreview(increment() && preview().trim() ? (text.trim() ? preview().trimEnd() + "\n" + text.trim() : preview().trimEnd()) : text.trim())
+          setStatus(text.trim() ? "Captura concluída" : "Nada capturado")
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Marks STT failed"
+          if (/not found|no such file|ENOENT/i.test(message)) {
+            setStatus("Nada capturado")
+            return
+          }
+          toast.show({ message, variant: "error", duration: 9000 })
+          setStatus("Falha na captura")
+        } finally {
+          setCapture(undefined)
+          setCapturing(false)
+          setBusy(false)
+          setIncrement(false)
+        }
+      }
+      const startCapture = async (append: boolean) => {
+        if (busy()) return warn("Aguarde a operação atual terminar")
+        if (capturing()) return finishCapture()
+        setBusy(true)
+        setStatus("Iniciando captura...")
+        if (!append) setPreview("")
+        setIncrement(append)
+        try {
+          setCapture(await MarksSTT.startCapture({ kv }))
+          setCapturing(true)
+          setStatus("Capturando...")
+        } catch (error) {
+          toast.show({ message: error instanceof Error ? error.message : "Marks STT failed", variant: "error", duration: 9000 })
+          setStatus("Falha ao iniciar captura")
+        } finally {
+          setBusy(false)
+        }
+      }
+      const send = () => {
+        if (busy()) return warn("Aguarde a operação atual terminar")
+        if (capturing()) return warn("Pare a captura antes de enviar")
+        if (!preview().trim()) return warn("Nada capturado")
+        insertPromptText(preview())
+        dialog.clear()
+      }
+      return (
+        <DialogSelect
+          title="Inserir Fala"
+          renderFilter={false}
+          skipFilter
+          flat
+          options={[
+            {
+              title: capturing() ? "Parar captura" : "Iniciar captura",
+              value: "capture",
+              description: status(),
+              details: preview().trim() ? ["Prévia:", preview()] : [],
+              onSelect: () => void startCapture(false),
+            },
+            {
+              title: "Incrementar fala",
+              value: "increment",
+              description: busy()
+                ? "Aguarde a operação atual terminar"
+                : capturing()
+                  ? "Pare a captura atual antes de incrementar"
+                  : preview().trim()
+                    ? "Adiciona nova captura abaixo da prévia"
+                    : "Captura nova fala para anexar quando houver prévia",
+              onSelect: () => void startCapture(true),
+            },
+            {
+              title: "Enviar para sessão",
+              value: "send",
+              description: busy()
+                ? "Aguarde a operação atual terminar"
+                : capturing()
+                  ? "Pare a captura antes de enviar"
+                  : preview().trim()
+                    ? "Insere a prévia no prompt atual e fecha"
+                    : "Nada capturado para enviar",
+              onSelect: send,
+            },
+          ]}
+        />
+      )
+    })
+  }
+
   const loadCompactContextRows = async (sessionID: string, limit = 5) => {
     const compact = await getSessionCompactContext({
       user_id: memoriesUserID,
@@ -457,6 +596,11 @@ export function Session() {
       value,
     )
 
+  const isMarkspanelQuotaError = (value: string) =>
+    /(markspanel|marks\.ia\.br|markscode\/ai\/quota|billing-quota-status|Limite de tokens Markspanel)/i.test(
+      value,
+    ) && /(insufficient_quota|quota|limite|limit|exceeded|excedida|token)/i.test(value)
+
   const debugMemoryLog = async (label: string, payload?: unknown) => {
     try {
       const fs = await import("node:fs/promises")
@@ -472,10 +616,17 @@ export function Session() {
   const errorTextFromMessage = (message: any) => {
     const error = message?.error
     if (!error) return ""
-    if (typeof error === "string") return error
-    if (typeof error?.data?.message === "string") return error.data.message
-    if (typeof error?.message === "string") return error.message
-    return ""
+    const current =
+      typeof error === "string"
+        ? error
+        : typeof error?.data?.message === "string"
+          ? error.data.message
+          : typeof error?.message === "string"
+            ? error.message
+            : ""
+    return [current, error?.data?.responseBody, error?.responseBody]
+      .filter((value) => typeof value === "string" && value.length > 0)
+      .join("\n")
   }
 
 
@@ -613,7 +764,7 @@ export function Session() {
     pki_enabled?: number
   }
 
-  type RemoteSSHProfileAction = "list" | "use" | "save" | "master" | "registry" | "edit" | "delete" | "import"
+  type RemoteSSHProfileAction = "list" | "use" | "save" | "master" | "assign-master" | "deploy-command" | "registry" | "edit" | "delete" | "import"
 
   const normalizeRemoteType = (value: unknown): RemoteProfileType => value === "winrm" || value === "powershell" || value === "whm" ? value : "ssh"
   const normalizeRemoteTransport = (value: unknown): "http" | "https" | undefined => value === "http" ? "http" : value === "https" ? "https" : undefined
@@ -780,7 +931,8 @@ export function Session() {
       ...(cfg.key_name ? ["Key name: " + cfg.key_name] : []),
       ...(cfg.master_key_ref ? ["Master key ref: " + cfg.master_key_ref] : []),
       ...(cfg.auth_method ? ["Auth method: " + cfg.auth_method] : []),
-      "Password saved: " + (cfg.encrypted_password ? "yes" : "no"),
+      "Saved password available to automation: " + (cfg.encrypted_password ? "yes (secret not exposed)" : "no"),
+      ...(cfg.master_key_ref || cfg.pki_enabled ? ["Master key/deploy hint: use " + MARKSCODE_MASTER_IDENTITY_FILE + " or generate the master-key deploy command from Remote profiles."] : []),
       ...(isWindowsRemoteType(profileType) ? [
         "WinRM/PowerShell: use SSH tool normally; MarksCode must route via local pwsh/WinRM/PowerShell.",
         "PowerShell remoto direto: perfil powershell executa comandos Windows via PowerShell/Invoke-Command, não SSH Linux.",
@@ -798,7 +950,7 @@ export function Session() {
         "AI deployment instruction: deploy/use MarksCode master key " + MARKSCODE_MASTER_KEY_NAME + " to " + profile.user + "@" + profile.host + ":" + String(cfg.port) + ".",
         "Use saved encrypted_password only as bootstrap material when required; never reveal, echo, print, log, or send plaintext password or encoded secret to LLM context.",
         "After deployment, prefer SSH key auth using " + MARKSCODE_MASTER_IDENTITY_FILE + ".",
-        "Initial bootstrap password captured: " + (profile.encrypted_password ? "yes, encoded for automation only" : "no"),
+        "Saved password available to automation: " + (profile.encrypted_password ? "yes (secret not exposed)" : "no"),
       ])
     }
   }
@@ -859,6 +1011,23 @@ export function Session() {
     const blocked = ["password", "senha", "plain_password", "plaintext_password"]
     const found = blocked.filter((key) => data[key] !== undefined && data[key] !== null && String(data[key]).trim() !== "")
     if (found.length) throw new Error("Perfil remoto não pode salvar senha em texto puro: " + found.join(", "))
+  }
+  const validateRemoteCommandTarget = (profile: RemoteSSHProfile) => {
+    const user = validateRemoteUser(profile.user)
+    const host = validateRemoteHost(profile.host)
+    const port = validateRemotePortStrict(profile.port || 22, 22)
+    if (!/^[A-Za-z0-9._-]+$/.test(user)) throw new Error("Usuário contém caracteres inválidos para comando copyable")
+    if (!/^[A-Za-z0-9._:-]+$/.test(host)) throw new Error("Host contém caracteres inválidos para comando copyable")
+    return { user, host, port }
+  }
+  const masterKeyDeployCommandText = (profile: RemoteSSHProfile) => {
+    const target = validateRemoteCommandTarget(profile)
+    const destination = target.user + "@" + target.host
+    return [
+      "ssh-copy-id -i ~/.ssh/marks-key-mestra.pub" + (target.port === 22 ? " " : " -p " + String(target.port) + " ") + destination,
+      "Se não tiver ssh-copy-id:",
+      "cat ~/.ssh/marks-key-mestra.pub | ssh" + (target.port === 22 ? " " : " -p " + String(target.port) + " ") + destination + " 'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys'",
+    ].join("\n")
   }
   const safeRemoteProfileJSON = (profile: RemoteSSHProfile) => JSON.stringify({ id: profile.id, name: profile.name, type: profile.type || "ssh", protocol: profile.protocol || profile.type || "ssh", host: profile.host, user: profile.user, port: profile.port, transport: profile.transport, identity_file: profile.identity_file, key_name: profile.key_name, host_alias: profile.host_alias, credential_ref: profile.credential_ref ? "***ref***" : undefined, auth_method: profile.auth_method || undefined, master_key_ref: profile.master_key_ref, password_saved: profile.encrypted_password ? "yes" : "no", pki_enabled: profile.pki_enabled ? "yes" : "no" }, null, 2)
   const reviewRemoteProfileText = (title: string, profile: RemoteSSHProfile, deployMasterKey = false) => [
@@ -991,6 +1160,22 @@ export function Session() {
     return picked ? list.find((profile) => profile.id === picked) : undefined
   }
 
+  const pickMasterKeyDeployProfile = async () => {
+    const list = readRemoteSSHProfiles().filter((profile) => normalizeRemoteType(profile.protocol || profile.type) === "ssh")
+    if (!list.length) {
+      await DialogAlert.show(dialog, "Implantar chave-mestra", "Nenhum perfil SSH cadastrado.")
+      dialog.clear()
+      return undefined
+    }
+    const targets = list.map((profile) => ({ profile, target: validateRemoteCommandTarget(profile) }))
+    const picked = await selectRemoteOption<string>("Implantar chave-mestra", targets.slice(0, 80).map((item) => ({
+      title: String(item.profile.name),
+      value: item.profile.id,
+      description: item.target.user + "@" + item.target.host + (item.target.port === 22 ? "" : ":" + String(item.target.port)),
+    })))
+    return picked ? list.find((profile) => profile.id === picked) : undefined
+  }
+
   const showRemoteSSHProfilesDialog = async (presetAction?: RemoteSSHProfileAction) => {
     const action = presetAction || await selectRemoteOption<RemoteSSHProfileAction | "create-ssh" | "create-winrm" | "create-powershell" | "create-whm" | "export" | "close">("Gerenciar Perfis Remotos", [
       { title: "Create SSH/Linux profile", value: "create-ssh", description: "Wizard guiado: nome, host, usuário, porta, autenticação e revisão" },
@@ -998,6 +1183,8 @@ export function Session() {
       { title: "Create PowerShell/Windows profile", value: "create-powershell", description: "Wizard guiado para PowerShell remoto direto no Windows" },
       { title: "Create WHM/cPanel profile", value: "create-whm", description: "Wizard guiado com credential_ref para token API" },
       { title: "Criar/validar chave mestra Marks", value: "master", description: "Garante ~/.ssh/marks-key-mestra sem sobrescrever chave existente" },
+      { title: "Atribuir deploy da chave mestra a perfil SSH", value: "assign-master", description: "Marca perfil SSH para usar marks-key-mestra sem expor senha" },
+      { title: "Implantar chave-mestra", value: "deploy-command", description: "Exibe comandos copiáveis sem senha; não executa" },
       { title: "Use profile", value: "use", description: "Ativar um perfil remoto salvo" },
       { title: "Edit profile", value: "edit", description: "Editar JSON seguro de um perfil existente" },
       { title: "Delete profile", value: "delete", description: "Remover perfil salvo" },
@@ -1057,8 +1244,25 @@ export function Session() {
       dialog.clear()
       return
     }
+    if (action === "deploy-command") {
+      const profile = await pickMasterKeyDeployProfile()
+      if (!profile) { dialog.clear(); return }
+      await DialogPrompt.show(dialog, "Implantar chave-mestra", { placeholder: "Copie os comandos; Enter para fechar", value: masterKeyDeployCommandText(profile) })
+      dialog.clear()
+      return
+    }
     const profile = await pickRemoteSSHProfileSimple()
     if (!profile) { dialog.clear(); return }
+    if (action === "assign-master") {
+      if (normalizeRemoteType(profile.type) !== "ssh") { await DialogAlert.show(dialog, "Perfil incompatível", "Selecione um perfil SSH/Linux."); dialog.clear(); return }
+      await ensureMarksMasterKey()
+      const updated = normalizeRemoteProfile({ ...profile, identity_file: MARKSCODE_MASTER_IDENTITY_FILE, key_name: MARKSCODE_MASTER_KEY_NAME, master_key_ref: MARKSCODE_MASTER_KEY_NAME, pki_enabled: 1, auth_method: profile.encrypted_password ? "key_with_password_bootstrap" : "key" })
+      const warning = saveRemoteProfile(updated)
+      activateRemoteProfile(updated, { deployRequested: true })
+      await DialogAlert.show(dialog, "Chave mestra atribuída", (warning ? warning + "\n\n" : "") + "Perfil SSH atualizado e ativado para deploy. Senha salva disponível internamente: " + (updated.encrypted_password ? "sim (segredo não exibido)." : "não."))
+      dialog.clear()
+      return
+    }
     if (action === "delete") { writeRemoteSSHProfiles(readRemoteSSHProfiles().filter((item) => item.id !== profile.id)); toast.show({ message: "Perfil remoto excluído", variant: "success" }); dialog.clear(); return }
     if (action === "export") { await DialogPrompt.show(dialog, "Export/copy JSON seguro", { placeholder: "Enter para fechar", value: safeRemoteProfileJSON(profile) }); dialog.clear(); return }
     if (action === "edit") {
@@ -1262,6 +1466,7 @@ export function Session() {
     setLastMemorySaveAt(Date.now())
     setLastMemoryChars(text.length)
     setLastMemoryHash(memoryHash(text))
+    triggerAutoIngest()
     return true
   }
 
@@ -1290,7 +1495,38 @@ export function Session() {
       visual_refs: [],
       source_name: "markscode-tui-topic",
     })
+    triggerAutoIngest()
     return true
+  }
+
+  const triggerAutoIngest = () => {
+    if (!isBrainEnabled()) return
+    const now = Date.now()
+    if (now - lastBrainIngestAt() < 5 * 60 * 1000) return
+    setLastBrainIngestAt(now)
+    const token = String(process.env.MARKSCODE_BRAIN_TOKEN || process.env.BRAIN_TOKEN || "")
+    void runBrainIngestor({
+      token,
+      user_id: memoriesUserID,
+      session_id: route.sessionID || undefined,
+      sources: ["md", "sessions", "graphfy"],
+    }).catch(() => undefined)
+  }
+
+  const resolveBrainValidationToken = async (): Promise<{ token: string; source: string }> => {
+    if (process.env.MARKSCODE_BRAIN_TOKEN?.trim()) return { token: process.env.MARKSCODE_BRAIN_TOKEN.trim(), source: "MARKSCODE_BRAIN_TOKEN" }
+    if (process.env.BRAIN_TOKEN?.trim()) return { token: process.env.BRAIN_TOKEN.trim(), source: "BRAIN_TOKEN" }
+
+    return AppRuntime.runPromise(
+      Effect.gen(function* () {
+        const service = yield* Account.Service
+        const active = yield* service.active()
+        if (Option.isNone(active)) return { token: "", source: "missing" }
+        const token = yield* service.token(active.value.id)
+        if (Option.isNone(token)) return { token: "", source: "missing" }
+        return { token: String(token.value), source: "account" }
+      }).pipe(Effect.catch(() => Effect.succeed({ token: "", source: "missing" }))),
+    ).catch(() => ({ token: "", source: "missing" }))
   }
 
   const recentTopicRows = async () => {
@@ -1327,6 +1563,10 @@ export function Session() {
     kv.set("memories_hybrid_local_reason", local.reason ? String(local.reason) : "")
     kv.set("brainsystem_brain_plugin_active", "native")
     kv.set("brainsystem_brain_plugin_label", "Brain nativo ativo")
+    const brain = status.brain && typeof status.brain === "object" ? status.brain as Record<string, unknown> : {}
+    kv.set("brainsystem_brain_enabled", brain.enabled ? "1" : "0")
+    kv.set("brainsystem_brain_base_url", String(brain.base_url || ""))
+    kv.set("brainsystem_brain_graphfy_enabled", brain.graphfy_enabled ? "1" : "0")
 
     // BrainSystem diagnose
     try {
@@ -1462,6 +1702,35 @@ export function Session() {
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
+  // Graphfy auto-setup: aguarda TUI montar completamente antes de abrir dialog
+  onMount(() => {
+    setTimeout(() => {
+      void (async () => {
+        const graphfyAsked = kv.get("graphfy_autosetup_asked")
+        if (graphfyAsked) return
+        const graphfyStatus = getGraphfyStatus({ projectRoot: process.cwd() })
+        if (graphfyStatus.available) return
+        if (process.env.MARKSCODE_GRAPHFY_ENABLED === "0" || process.env.MARKSCODE_GRAPHIFY_ENABLED === "0") return
+        kv.set("graphfy_autosetup_asked", "1")
+        const platform = process.platform
+        const installerHint = platform === "win32" ? "uv ou pipx (Windows)" : platform === "darwin" ? "uv ou pipx (macOS)" : "uv ou pipx (Linux)"
+        const ok = await DialogConfirm.show(
+          dialog,
+          "Instalar Graphfy (BrainSystem camada 1)?",
+          `Graphify não encontrado (${installerHint}).\nInstalar automaticamente e gerar grafo local? Melhora contexto e economiza tokens.`,
+        )
+        if (!ok) return
+        toast.show({ message: "Instalando graphifyy e gerando grafo local… aguarde.", variant: "info", duration: 10000 })
+        const result = await graphfyAutoSetup(process.cwd())
+        if (result.success) {
+          toast.show({ message: "Graphify instalado! BrainSystem camada 1 ativa.", variant: "success", duration: 8000 })
+        } else {
+          toast.show({ message: `Graphify setup: ${result.message}`, variant: "warning", duration: 12000 })
+        }
+        await refreshHybridMemoryStatus().catch(() => undefined)
+      })()
+    }, 3000)
+  })
   // MARKSCODE_MAP_HELPERS_START
   const mapHost = String(process.env.MARKSCODE_MAP_HOST || process.env.HOSTNAME || "markscode")
   const mapActor = String(process.env.MARKSCODE_MAP_ACTOR || process.env.USER || "markscode")
@@ -2026,6 +2295,68 @@ export function Session() {
   }
 
   const sessionCommandList = createMemo(() => [
+    {
+      title: "Ativar TTS modo de voz",
+      value: "marks.tts.voice.toggle",
+      category: "Marks",
+      slash: {
+        name: "marks-tts-voice",
+      },
+      run: () => {
+        const enabled = !kv.get(MARKSCODE_TTS_VOICE_MODE, false)
+        kv.set(MARKSCODE_TTS_VOICE_MODE, enabled)
+        toast.show({ message: `Marks TTS voice mode ${enabled ? "enabled" : "disabled"}`, variant: "success" })
+        dialog.clear()
+      },
+    },
+    {
+      title: "Inserir Fala",
+      value: "marks.stt.record.prompt",
+      category: "Marks",
+      slash: {
+        name: "marks-stt",
+      },
+      run: () => {
+        showSpeechInsertDialog()
+      },
+    },
+    {
+      title: "Parar áudio TTS",
+      value: "marks.tts.stop",
+      category: "Marks",
+      slash: {
+        name: "marks-tts-stop",
+      },
+      run: () => {
+        MarksTTS.stop()
+        toast.show({ message: "Áudio TTS interrompido", variant: "success" })
+        dialog.clear()
+      },
+    },
+    {
+      title: "Ouvir última interação",
+      value: "marks.tts.listen.last",
+      category: "Marks",
+      slash: {
+        name: "marks-tts-last",
+      },
+      run: () => {
+        const message = messages().findLast((item) => item.role === "assistant" && item.time.completed)
+        if (!message) {
+          toast.show({ message: "Nenhuma resposta concluída para ouvir", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        const text = marksTtsTextFromMessage(message.id)
+        if (!text) {
+          toast.show({ message: "Nenhum texto encontrado na última resposta", variant: "warning" })
+          dialog.clear()
+          return
+        }
+        runMarksTts(`${message.id}-manual-${Date.now()}`, text)
+        dialog.clear()
+      },
+    },
     {
       title: "All Sessions",
       value: "all-sessions",
@@ -2794,6 +3125,12 @@ export function Session() {
             : "⚠️ Auto-handoff: inativo (MEMORIES_AUTO_HANDOFF_ENABLED=0)",
         )
 
+        lines.push(
+          isBrainEnabled()
+            ? "✅ BrainSystem: ativo"
+            : "⚠️ BrainSystem: não configurado (requer conta Markspanel)",
+        )
+
         kv.set("memories_hybrid_local_available", sidecarOk ? "1" : "0")
         kv.set("memories_hybrid_local_count", capsuleCount)
         kv.set("memories_hybrid_local_reason", sidecarReason)
@@ -3331,6 +3668,130 @@ export function Session() {
         dialog.clear()
       },
     },
+    {
+      title: "MarksCode: Validar BrainSystem",
+      name: "markscode.brain.validate",
+      category: "MarksCode",
+      slashName: "brain-validate",
+      run: async () => {
+        toast.show({ message: "Validando BrainSystem...", variant: "info" })
+        try {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
+          const status = (await hybridMemoryStatus().catch(() => ({}))) as Record<string, unknown>
+          const localStatus = status.local && typeof status.local === "object" ? status.local as Record<string, unknown> : {}
+          const capsulePath = String(localStatus.capsule || status.capsule || "")
+          const diagnosis = diagnoseBrainSystem({ capsulePath, projectRoot: process.cwd(), sessionDbPath: Database.getPath() })
+          const tokenResult = await resolveBrainValidationToken()
+          const sessionID = route.sessionID || undefined
+          const lines: string[] = [
+            "[Brain Validate Report]",
+            "timestamp: " + new Date().toISOString(),
+            "project_root: " + process.cwd(),
+            "session_id: " + String(sessionID || ""),
+            "user_id: " + memoriesUserID,
+            "brain_enabled: " + String(isBrainEnabled()),
+            "token_source: " + tokenResult.source,
+            "",
+            "layers:",
+          ]
+          const layerOrder = [
+            ["Graphfy", /graphfy/i],
+            ["Cápsula", /cápsula|capsula|memvid/i],
+            ["Memory MD", /memory md/i],
+            ["Project Tasks", /project tasks/i],
+            ["Session DB", /session db/i],
+            ["Memória Remota/Remote", /memória remota|remote/i],
+            ["Compactação", /compactação|compactacao/i],
+            ["Hand-off", /hand-off|handoff/i],
+          ] as const
+          layerOrder.forEach((entry, index) => {
+            const layer = diagnosis.layers.find((item) => entry[1].test(item.layer))
+            lines.push("Camada " + String(index + 1) + ": " + entry[0] + ": " + String(layer?.status || "unavailable") + " — " + String(layer?.details || "não retornado"))
+          })
+          lines.push("", "checks:")
+
+          const dryRun = await runBrainIngestor({
+            token: tokenResult.token,
+            user_id: memoriesUserID,
+            session_id: sessionID,
+            sources: ["md", "sessions", "graphfy"],
+            dry_run: true,
+          }).catch((err) => ({ ok: false, sources_collected: [], total_items: 0, errors: [err instanceof Error ? err.message : String(err)] }))
+          lines.push("brain_ingest_dry_run: " + (dryRun.ok ? "ok" : "fail") + " — total_items=" + String(dryRun.total_items) + "; sources=" + dryRun.sources_collected.join(",") + "; errors=" + dryRun.errors.join(" | "))
+
+          if (!isBrainEnabled() || !tokenResult.token) {
+            const reason = !isBrainEnabled() ? "brain disabled" : "missing token"
+            lines.push("brain_status: skipped — " + reason)
+            lines.push("brain_recall: skipped — " + reason)
+            lines.push("brain_graph_query: skipped — " + reason)
+            lines.push("brain_graph_artifact: skipped — " + reason)
+          } else {
+            const statusCheck = await brainStatus(tokenResult.token).catch((err) => ({ ok: false, brain: null, error: err instanceof Error ? err.message : String(err) }))
+            lines.push("brain_status: " + (statusCheck.ok ? "ok" : "fail") + " — " + (statusCheck.error || "status retornado"))
+            const recallCheck = await brainRecall(tokenResult.token, { q: "BrainSystem", user_id: memoriesUserID, session_id: sessionID, limit: 3 }).catch((err) => ({ ok: false, items: [], sources: {}, error: err instanceof Error ? err.message : String(err) }))
+            lines.push("brain_recall: " + (recallCheck.ok ? "ok" : "fail") + " — items=" + String(recallCheck.items?.length || 0) + (recallCheck.error ? "; error=" + recallCheck.error : ""))
+            const graphCheck = await brainGraphQuery(tokenResult.token, { q: "BrainSystem", user_id: memoriesUserID, session_id: sessionID, limit: 3 }).catch((err) => ({ ok: false, items: [], error: err instanceof Error ? err.message : String(err) }))
+            lines.push("brain_graph_query: " + (graphCheck.ok ? "ok" : "fail") + " — items=" + String(graphCheck.items?.length || 0) + (graphCheck.error ? "; error=" + graphCheck.error : ""))
+            const artifactCheck = await brainGraphArtifact(tokenResult.token).catch((err) => ({ ok: false, artifact: null, error: err instanceof Error ? err.message : String(err) }))
+            const artifactItems = Array.isArray(artifactCheck.artifact?.items) ? artifactCheck.artifact.items.length : Array.isArray(artifactCheck.artifact?.nodes) ? artifactCheck.artifact.nodes.length : 0
+            lines.push("brain_graph_artifact: " + (artifactCheck.ok ? "ok" : "fail") + " — items=" + String(artifactItems) + (artifactCheck.error ? "; error=" + artifactCheck.error : ""))
+          }
+
+          injectContext("[Brain Validate Report]", lines)
+          toast.show({ message: "BrainSystem validado", variant: "success", duration: 8000 })
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao validar BrainSystem", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "Graphfy: Gerar grafo do diretório atual",
+      name: "markscode.graphfy.extract",
+      category: "MarksCode",
+      slashName: "graphfy-extract",
+      run: async () => {
+        const root = process.cwd()
+        toast.show({ message: "Graphfy: gerando grafo em " + root + "...", variant: "info", duration: 600000 })
+        try {
+          const result = await graphfyExtract(root)
+          if (result.success) {
+            toast.show({ message: "Graphfy gerado com sucesso em " + root, variant: "success", duration: 8000 })
+            await refreshHybridMemoryStatus().catch(() => undefined)
+          } else {
+            toast.show({ message: result.step === "detect_cli" ? result.message + " Tente /brain-validate." : result.message, variant: result.step === "detect_cli" ? "warning" : "error", duration: 10000 })
+          }
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao gerar Graphfy", variant: "error", duration: 10000 })
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: "MarksCode: Ingestão BrainSystem",
+      name: "markscode.brain.ingest",
+      category: "MarksCode",
+      slashName: "brain-ingest",
+      run: async () => {
+        toast.show({ message: "Iniciando ingestão BrainSystem...", variant: "info" })
+        try {
+          const token = String(process.env.MARKSCODE_BRAIN_TOKEN || process.env.BRAIN_TOKEN || "")
+          const result = await runBrainIngestor({
+            token,
+            user_id: memoriesUserID,
+            session_id: route.sessionID || undefined,
+          })
+          if (result.ok) {
+            toast.show({ message: "BrainSystem: " + String(result.ingested ?? result.total_items) + " itens ingeridos de " + result.sources_collected.join(", "), variant: "success", duration: 8000 })
+          } else {
+            toast.show({ message: "BrainSystem erro: " + (result.errors[0] || "falha desconhecida"), variant: "error", duration: 8000 })
+          }
+        } catch (err) {
+          toast.show({ message: err instanceof Error ? err.message : "Erro ao executar brain-ingest", variant: "error" })
+        }
+        dialog.clear()
+      },
+    },
 // MARKSCODE_MEMORIES_COMMANDS_END
     {
       title: "MarksCode: Login Markspanel",
@@ -3406,6 +3867,11 @@ export function Session() {
     }
   })
 
+  const marksTtsSpokenMessageIDs = new Set<string>()
+  const marksTtsStreamedTextByMessageID = new Map<string, string>()
+  const marksTtsStreamIndexByMessageID = new Map<string, number>()
+  const marksTtsStreamLastSpokenAtByMessageID = new Map<string, number>()
+
   // snap to bottom when session changes
   createEffect(on(() => route.sessionID, toBottom))
   createEffect(
@@ -3416,6 +3882,58 @@ export function Session() {
         return [route.sessionID, list.length, last?.id, last?.time && "completed" in last.time ? last.time.completed : undefined] as const
       },
       () => toBottom(),
+    ),
+  )
+  createEffect(
+    on(
+      () => {
+        const list = messages()
+        const last = list.at(-1)
+        const messageID = last?.role === "assistant" && !last.time.completed ? last.id : undefined
+        return [route.sessionID, messageID, messageID ? marksTtsStreamableTextFromMessage(messageID) : ""] as const
+      },
+      ([, messageID, text]) => {
+        if (!kv.get(MARKSCODE_TTS_VOICE_MODE, false)) return
+        if (!marksTtsStreamingEnabled()) return
+        if (!messageID || !text) return
+        const spoken = marksTtsStreamedTextByMessageID.get(messageID) || ""
+        if (spoken && !text.startsWith(spoken)) return
+        if (text.length <= spoken.length) return
+        const next = text.slice(spoken.length).trim()
+        if (!next) return
+        const now = Date.now()
+        const interval = Math.max(1, Number(kv.get("markscode_tts_stream_interval_ms", process.env.MARKSCODE_TTS_STREAM_INTERVAL_MS ?? 15000)) || 15000)
+        if (now - (marksTtsStreamLastSpokenAtByMessageID.get(messageID) || 0) < interval) return
+        const index = (marksTtsStreamIndexByMessageID.get(messageID) || 0) + 1
+        marksTtsStreamIndexByMessageID.set(messageID, index)
+        marksTtsStreamedTextByMessageID.set(messageID, text)
+        marksTtsStreamLastSpokenAtByMessageID.set(messageID, now)
+        runMarksTts(`${messageID}-stream-${index}`, next)
+      },
+    ),
+  )
+  createEffect(
+    on(
+      () => {
+        const list = messages()
+        const last = list.at(-1)
+        return [route.sessionID, last?.id, last?.role, last?.time && "completed" in last.time ? last.time.completed : undefined] as const
+      },
+      ([, messageID, role, completed]) => {
+        if (!kv.get(MARKSCODE_TTS_VOICE_MODE, false)) return
+        if (!messageID || role !== "assistant" || !completed) return
+        if (marksTtsSpokenMessageIDs.has(messageID)) return
+        const text = marksTtsTextFromMessage(messageID)
+        if (!text) return
+        const streamed = marksTtsStreamedTextByMessageID.get(messageID) || ""
+        const remaining = streamed && text.startsWith(streamed) ? text.slice(streamed.length).trim() : text
+        if (!remaining) {
+          marksTtsSpokenMessageIDs.add(messageID)
+          return
+        }
+        marksTtsSpokenMessageIDs.add(messageID)
+        runMarksTts(messageID, remaining)
+      },
     ),
   )
   createEffect(
@@ -3508,17 +4026,20 @@ export function Session() {
   // MARKSCODE_MEMORIES_OVERFLOW_END
 
   // MARKSCODE_QUOTA_WARNING_START
+  const markspanelQuotaWarningMessageIDs = new Set<string>()
+
   createEffect(() => {
     const list = messages()
     const candidate = [...list].reverse().find((item) => item.role === "assistant" && item.error)
     if (!candidate) return
+    if (markspanelQuotaWarningMessageIDs.has(candidate.id)) return
 
     const errorText = errorTextFromMessage(candidate)
     if (!errorText) return
 
-    const isQuotaError = /(quota|limit.*exceeded|exhausted|rate.limit|402|429|plano|billing)/i.test(errorText)
-    if (!isQuotaError) return
+    if (!isMarkspanelQuotaError(errorText)) return
 
+    markspanelQuotaWarningMessageIDs.add(candidate.id)
     toast.show({
       message:
         "⚠️ Limite de tokens Markspanel atingido ou quota excedida. Aguarde a renovação mensal ou faça upgrade do plano.",

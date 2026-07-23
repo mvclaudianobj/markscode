@@ -38,6 +38,21 @@ export function loadSoundFile(file: string) {
   return task
 }
 
+export function loadSoundBytes(bytes: Uint8Array, key: string) {
+  const current = getAudio()
+  if (!current) return Promise.resolve(null)
+  const cached = sounds.get(key)
+  if (cached) return cached
+  const task = Promise.resolve()
+    .then(() => current.loadSound(bytes))
+    .catch((error: unknown) => {
+      log.debug("failed to load tui sound", { key, error })
+      return null
+    })
+  sounds.set(key, task)
+  return task
+}
+
 export function play(sound: AudioSound, options?: AudioPlayOptions) {
   const current = getAudio()
   if (!current) return null

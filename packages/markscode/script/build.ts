@@ -232,6 +232,36 @@ function memvidErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
+function graphifyEnvValue(keys: string[]) {
+  return keys.map((key) => process.env[key]?.trim()).find(Boolean)
+}
+
+function graphifyMarksOpenAI() {
+  const baseUrl = graphifyEnvValue([
+    "MARKSCODE_GRAPHFY_OPENAI_BASE_URL",
+    "MARKSCODE_GRAPHIFY_OPENAI_BASE_URL",
+    "MARKSCODE_MARKS_API_BASE_URL",
+    "MARKS_OPENAI_BASE_URL",
+  ]) || "https://api.marks.ia.br/v1"
+  const model = graphifyEnvValue([
+    "MARKSCODE_GRAPHFY_MODEL",
+    "MARKSCODE_GRAPHIFY_MODEL",
+    "MARKSCODE_MARKS_MODEL",
+    "MARKS_MODEL",
+  ]) || "MarksAI-3.0.0"
+  const apiKey = graphifyEnvValue([
+    "MARKSCODE_GRAPHFY_OPENAI_API_KEY",
+    "MARKSCODE_GRAPHIFY_OPENAI_API_KEY",
+    "MARKSCODE_API_KEY",
+    "MARKS_API_KEY",
+    "OPENAI_API_KEY",
+  ])
+  return {
+    args: apiKey ? ["extract", ".", "--no-viz", "--backend", "openai", "--model", model] : ["extract", ".", "--no-viz", "--code-only"],
+    env: apiKey ? { ...process.env, OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: model, OPENAI_API_KEY: apiKey } : process.env,
+  }
+}
+
 async function prepareMemvidVendorSidecars(items: { os: string; arch: string; abi?: "musl" }[]) {
   if (process.env.MARKSCODE_PREPARE_MEMVID_VENDOR === "0") return
   if (!fs.existsSync(path.join(memvidSourceDir, "Cargo.toml"))) return
@@ -292,6 +322,59 @@ async function copyMemvidSidecar(item: { os: string; arch: string; abi?: "musl" 
   console.log(`Bundled Memvid sidecar for ${targetName}: ${source} -> ${destination}`)
 }
 
+async function setupGraphify() {
+  const uvCandidates = [
+    process.env.UV_PATH,
+    path.join(process.env.HOME ?? "/root", ".local/bin/uv"),
+    "/usr/local/bin/uv",
+    "/usr/bin/uv",
+  ].filter(Boolean) as string[]
+
+  const uv = uvCandidates.find((p) => {
+    try { return fs.existsSync(p) } catch { return false }
+  })
+
+  if (!uv) {
+    console.warn("setupGraphify: uv not found; skipping graphify setup")
+    return
+  }
+
+  console.log(`setupGraphify: installing graphifyy extras via uv (${uv})`)
+  try {
+    await $`${uv} tool install graphifyy[openai,sql] --force --quiet`.quiet()
+    console.log("setupGraphify: graphifyy extras installed")
+  } catch {
+    console.warn("setupGraphify: uv tool install graphifyy extras failed; skipping")
+    return
+  }
+
+  const graphifyCandidates = [
+    path.join(process.env.HOME ?? "/root", ".local/bin/graphify"),
+    "/usr/local/bin/graphify",
+  ]
+  const graphify = graphifyCandidates.find((p) => {
+    try { return fs.existsSync(p) } catch { return false }
+  })
+
+  if (!graphify) {
+    console.warn("setupGraphify: graphify binary not found after install; skipping extract")
+    return
+  }
+
+  console.log(`setupGraphify: running graphify extract (${graphify})`)
+  try {
+    const graphifyOpenAI = graphifyMarksOpenAI()
+    const result = Bun.spawnSync([graphify, ...graphifyOpenAI.args], { cwd: dir, env: graphifyOpenAI.env, stdout: "pipe", stderr: "pipe" })
+    if (result.exitCode !== 0) {
+      console.warn(new TextDecoder().decode(result.stderr).trim() || "setupGraphify: graphify extract failed")
+      return
+    }
+    console.log("setupGraphify: graphify extract done")
+  } catch {
+    console.warn("setupGraphify: graphify extract failed (non-fatal)")
+  }
+}
+
 await $`rm -rf dist`
 
 await prepareMemvidVendorSidecars(targets)
@@ -301,6 +384,40 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -383,6 +500,7 @@ for (const item of targets) {
 
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
+    await setupGraphify()
     const binaryPath = `dist/${name}/bin/markscode`
     console.log(`Running smoke test: ${binaryPath} --version`)
     try {

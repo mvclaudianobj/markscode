@@ -10,6 +10,7 @@ import {
 
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { setRemoteMemoryConfig } from "@/memory-config"
+import { setBrainConfig } from "@/brain-config"
 import { isRecord } from "@/util/record"
 import { AccountRepo, type AccountRow } from "./repo"
 import { normalizeServerUrl } from "./url"
@@ -113,6 +114,7 @@ export type MarkspanelQuota = {
 
 class RemoteConfig extends Schema.Class<RemoteConfig>("RemoteConfig")({
   config: Schema.Record(Schema.String, Schema.Json),
+  brain: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
 }) {}
 
 const DurationFromSeconds = Schema.Number.pipe(
@@ -229,7 +231,7 @@ const textIncludes = (value: unknown, pattern: RegExp) => typeof value === "stri
 
 const quotaLooksFree = (quota: MarkspanelQuota | null) => {
   if (!quota) return false
-  if (quota.fallback_applied === true) return true
+  if (quota.fallback_applied === true && !quota.contracted_plan) return true
   if (
     [quota.tier, quota.tier_name, quota.effective_plan?.slug, quota.effective_plan?.name].some((value) =>
       textIncludes(value, freePattern),
@@ -238,7 +240,11 @@ const quotaLooksFree = (quota: MarkspanelQuota | null) => {
     return true
   }
 
-  return [quota.monthly, quota.monthly_requests].some((counter) => counter?.limit === 0)
+  if (quota.hard_limit === true) {
+    return [quota.monthly, quota.monthly_requests].some((counter) => counter?.exhausted === true && counter.limit === 0)
+  }
+
+  return false
 }
 
 const modelFieldLooksFree = (value: unknown) =>
@@ -542,6 +548,7 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       const quotaResponse = yield* fetchQuota(account.url, accessToken)
       const filteredConfig = filterRemoteConfigForFreePlan(parsed.config, quotaResponse)
       setRemoteMemoryConfig(filteredConfig.memories, `${account.url}/api/config`)
+      setBrainConfig(parsed.brain ?? filteredConfig.brain, account.url)
       return Option.some(filteredConfig)
     })
 

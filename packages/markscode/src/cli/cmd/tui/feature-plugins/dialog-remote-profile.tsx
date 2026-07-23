@@ -39,7 +39,7 @@ type DialogStep =
   | 'create-winrm-name' | 'create-winrm-host' | 'create-winrm-user' | 'create-winrm-port' | 'create-winrm-transport' | 'create-winrm-auth' | 'create-winrm-auth-value' | 'create-winrm-review'
   | 'create-powershell-name' | 'create-powershell-host' | 'create-powershell-user' | 'create-powershell-port' | 'create-powershell-transport' | 'create-powershell-auth' | 'create-powershell-auth-value' | 'create-powershell-review'
   | 'create-whm-name' | 'create-whm-host' | 'create-whm-user' | 'create-whm-port' | 'create-whm-auth' | 'create-whm-auth-value' | 'create-whm-review'
-  | 'select-for-use' | 'select-for-edit' | 'select-for-delete' | 'select-for-export'
+  | 'select-for-use' | 'select-for-edit' | 'select-for-delete' | 'select-for-export' | 'select-for-assign-master' | 'select-for-deploy-command'
   | 'edit-name' | 'edit-host' | 'edit-user' | 'edit-port'
   | 'delete-confirm'
   | 'import-json-input' | 'import-json-confirm'
@@ -120,6 +120,27 @@ const validatePort = (value: unknown, fallback: number) => {
 const rejectPlaintextSecretFields = (data: Record<string, unknown>) => {
   const found = ['password', 'senha', 'plain_password', 'plaintext_password'].filter((key) => data[key] !== undefined && data[key] !== null && clean(data[key]) !== '')
   if (found.length) throw new Error('Perfil remoto não pode salvar senha em texto puro: ' + found.join(', '))
+}
+
+const validateCommandTarget = (profile: RemoteSSHProfile) => {
+  const user = validateRequired('Usuário', profile.user)
+  const host = validateRequired('Host', profile.host)
+  const port = validatePort(profile.port || 22, 22)
+  if (!/^[A-Za-z0-9._-]+$/.test(user)) throw new Error('Usuário contém caracteres inválidos para comando copyable')
+  if (!/^[A-Za-z0-9._:-]+$/.test(host)) throw new Error('Host contém caracteres inválidos para comando copyable')
+  return { user, host, port }
+}
+
+const masterKeyDeployCommandText = (profile: RemoteSSHProfile) => {
+  const target = validateCommandTarget(profile)
+  return [
+    'ssh-copy-id -i ~/.ssh/marks-key-mestra.pub -p ' + String(target.port) + ' ' + target.user + '@' + target.host,
+    '',
+    'Fallback:',
+    "cat ~/.ssh/marks-key-mestra.pub | ssh -p " + String(target.port) + ' ' + target.user + '@' + target.host + " 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'",
+    '',
+    'Senha salva disponível internamente para bootstrap/deploy: ' + (profile.encrypted_password ? 'sim (segredo não exibido)' : 'não'),
+  ].join('\n')
 }
 
 function generateID(name: string): string {
@@ -370,6 +391,29 @@ function View(_props: { api: TuiPluginApi; session_id: string }) {
     showAlert('Perfil ativo', 'Perfil ' + String(p.name) + ' ativado para esta sessão.', () => setStep('menu'))
   }
 
+  const assignMasterKey = (profileId: string) => {
+    const p = findProfile(profileId)
+    if (!p) return
+    if (normalizeType(p.type) !== 'ssh') { showAlert('Perfil incompatível', 'Selecione um perfil SSH/Linux.', () => setStep('menu')); return }
+    void ensureMarksMasterKey().then(() => {
+      const profile = normalizeProfile({ ...p, identity_file: MARKSCODE_MASTER_IDENTITY_FILE, key_name: MARKSCODE_MASTER_KEY_NAME, master_key_ref: MARKSCODE_MASTER_KEY_NAME, pki_enabled: 1, auth_method: p.encrypted_password ? 'key_with_password_bootstrap' : 'key' })
+      const warning = saveProfiles([...loadProfiles().filter((item) => item.id !== profile.id && item.name !== profile.name), profile])
+      refreshProfiles()
+      setActiveProfile(profile.id)
+      setKV('remote_ssh_deploy_key', '1')
+      setKV('remote_ssh_deploy_host', profile.host)
+      setKV('remote_ssh_deploy_user', profile.user)
+      showAlert('Chave mestra atribuída', (warning ? warning + '\n\n' : '') + 'Perfil SSH atualizado e ativado para deploy. Senha salva disponível internamente: ' + (profile.encrypted_password ? 'sim (segredo não exibido).' : 'não.'), () => setStep('menu'))
+    }).catch((error) => showAlert('Erro', error instanceof Error ? error.message : String(error), () => setStep('menu')))
+  }
+
+  const showDeployCommand = (profileId: string) => {
+    const p = findProfile(profileId)
+    if (!p) return
+    if (normalizeType(p.type) !== 'ssh') { showAlert('Perfil incompatível', 'Selecione um perfil SSH/Linux.', () => setStep('menu')); return }
+    void ensureMarksMasterKey().then(() => showAlert('Comando de deploy da chave mestra', masterKeyDeployCommandText(p), () => setStep('menu'))).catch((error) => showAlert('Erro', error instanceof Error ? error.message : String(error), () => setStep('menu')))
+  }
+
   const importProfileJSON = (jsonStr: string) => {
     try {
       const data = JSON.parse(jsonStr) as Partial<RemoteSSHProfile> & Record<string, unknown>
@@ -398,6 +442,8 @@ function View(_props: { api: TuiPluginApi; session_id: string }) {
         { title: 'Create PowerShell/Windows profile', value: 'create-powershell-name', description: 'Wizard guiado para PowerShell remoto direto' },
         { title: 'Create WHM/cPanel profile', value: 'create-whm-name', description: 'Wizard guiado para WHM/cPanel' },
         { title: 'Criar/validar chave mestra Marks', value: 'master-key', description: 'Garante ~/.ssh/marks-key-mestra sem sobrescrever chave existente' },
+        { title: 'Atribuir deploy da chave mestra a perfil SSH', value: 'select-for-assign-master', description: 'Marca perfil SSH para usar marks-key-mestra sem expor senha' },
+        { title: 'Gerar comando de deploy da chave mestra', value: 'select-for-deploy-command', description: 'Exibe comandos copyable sem senha; não executa' },
         { title: 'Use profile', value: 'select-for-use', description: 'Ativar perfil salvo' },
         { title: 'Edit profile', value: 'select-for-edit', description: 'Editar perfil existente' },
         { title: 'Delete profile', value: 'select-for-delete', description: 'Remover perfil' },
@@ -452,6 +498,8 @@ function View(_props: { api: TuiPluginApi; session_id: string }) {
       }
     }
     if (s === 'select-for-use') return <DialogSelect title='Use profile' options={profileOptions()} onSelect={(opt: DialogSelectOption<string>) => setActiveProfile(opt.value)} />
+    if (s === 'select-for-assign-master') return <DialogSelect title='Atribuir chave mestra a perfil SSH' options={profileOptions()} onSelect={(opt: DialogSelectOption<string>) => assignMasterKey(opt.value)} />
+    if (s === 'select-for-deploy-command') return <DialogSelect title='Gerar comando de deploy da chave mestra' options={profileOptions()} onSelect={(opt: DialogSelectOption<string>) => showDeployCommand(opt.value)} />
     if (s === 'select-for-delete') return <DialogSelect title='Delete profile' options={profileOptions()} onSelect={(opt: DialogSelectOption<string>) => { setEditProfileId(opt.value); setStep('delete-confirm') }} />
     if (s === 'delete-confirm') {
       const p = findProfile(editProfileId())

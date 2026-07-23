@@ -53,27 +53,66 @@ function compactReason(reason?: string) {
 }
 
 const LAYER_LABEL: Record<string, string> = {
-  cloud: "Memória remota",
+  cloud: "Remote Memories API",
+  graphfy: "Graphfy Knowledge Graph",
+  "Graphfy Knowledge Graph": "Graphfy Knowledge Graph",
   "Cápsula Memvid": "Cápsula Memvid",
-  local: "Memória local",
-  memory_md: "Memória do projeto",
-  project_tasks: "Tarefas do projeto",
-  session_db: "Histórico da sessão",
-  remote_api: "Memória remota",
+  local: "Cápsula Memvid",
+  memory_md: "Memory MD",
+  "Memory MD": "Memory MD",
+  project_tasks: "Project Tasks",
+  "Project Tasks": "Project Tasks",
+  session_db: "Session DB",
+  "Session DB": "Session DB",
+  remote_api: "Remote Memories API",
+  "Remote Memories API": "Remote Memories API",
+  "Memória Remota API": "Remote Memories API",
   compact: "Compactação",
-  handoff: "Continuidade",
+  "Compactação": "Compactação",
+  handoff: "Hand-off",
+  "Hand-off": "Hand-off",
 }
 
 const LAYER_DESCRIPTION: Record<string, string> = {
-  cloud: "API sincronizada",
-  "Cápsula Memvid": "Memvid guarda contexto offline",
-  local: "Memvid guarda contexto offline",
-  memory_md: "MEMORY.md encontrado",
-  project_tasks: "tarefas do projeto disponíveis",
-  session_db: "markscode.db ativo",
-  remote_api: "API sincronizada",
-  compact: "reduz contexto longo",
-  handoff: "hand-off preparado",
+  cloud: "API de memórias remotas (Memories API)",
+  graphfy: "Grafo de conhecimento semântico",
+  "Graphfy Knowledge Graph": "Grafo de conhecimento semântico",
+  "Cápsula Memvid": "Memória compactada em vídeo/embedding",
+  local: "Memória compactada em vídeo/embedding",
+  memory_md: "Arquivos Markdown de memória por sessão",
+  "Memory MD": "Arquivos Markdown de memória por sessão",
+  project_tasks: "Tarefas e contexto de projetos ativos",
+  "Project Tasks": "Tarefas e contexto de projetos ativos",
+  session_db: "Banco de sessões e histórico de mensagens",
+  "Session DB": "Banco de sessões e histórico de mensagens",
+  remote_api: "API de memórias remotas (Memories API)",
+  "Remote Memories API": "API de memórias remotas (Memories API)",
+  "Memória Remota API": "API de memórias remotas (Memories API)",
+  compact: "Pipeline de compactação e deduplicação",
+  "Compactação": "Pipeline de compactação e deduplicação",
+  handoff: "Transferência de contexto entre sessões",
+  "Hand-off": "Transferência de contexto entre sessões",
+}
+
+const LAYER_ORDER: Record<string, number> = {
+  graphfy: 1,
+  "Graphfy Knowledge Graph": 1,
+  "Cápsula Memvid": 2,
+  local: 2,
+  memory_md: 3,
+  "Memory MD": 3,
+  project_tasks: 4,
+  "Project Tasks": 4,
+  session_db: 5,
+  "Session DB": 5,
+  cloud: 6,
+  remote_api: 6,
+  "Remote Memories API": 6,
+  "Memória Remota API": 6,
+  compact: 7,
+  "Compactação": 7,
+  handoff: 8,
+  "Hand-off": 8,
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
@@ -88,6 +127,8 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const at = createMemo(() => String(props.api.kv.get("memories_cloud_last_sync_at", "") || ""))
   const capsule = createMemo(() => String(props.api.kv.get("memories_hybrid_capsule", "") || ""))
   const brainPluginActive = createMemo(() => String(props.api.kv.get("brainsystem_brain_plugin_active", "") || ""))
+  const brainEnabled = createMemo(() => String(props.api.kv.get("brainsystem_brain_enabled", "") || "") === "1")
+  const brainGraphfyEnabled = createMemo(() => String(props.api.kv.get("brainsystem_brain_graphfy_enabled", "") || "") === "1")
 
   const layers = createMemo<LayerEntry[]>(() => {
     return parseLayers(layersRaw())
@@ -110,9 +151,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         </Show>
         <Show when={layers().length > 0}>
           <For each={layers()}>
-            {(layer) => (
+            {(layer, index) => (
               <text fg={getLayerColor(layer.status, theme())}>
-                {(LAYER_LABEL[layer.name] ?? String(layer.name)) + ": " + formatStatus(layer.status) + " — " + (LAYER_DESCRIPTION[layer.name] ?? "camada disponível") + (layer.name === "local" ? compactReason(layer.reason) : "")}
+                {"Camada " + String(LAYER_ORDER[layer.name] ?? index() + 1) + ": " + (LAYER_LABEL[layer.name] ?? String(layer.name)) + ": " + formatStatus(layer.status) + " — " + (LAYER_DESCRIPTION[layer.name] ?? "camada disponível") + (layer.name === "local" ? compactReason(layer.reason) : "")}
               </text>
             )}
           </For>
@@ -131,6 +172,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <text fg={theme().textMuted}>search: /memory-search</text>
         <Show when={overall() && overall() !== "healthy"}>
           <text fg={theme().warning}>repair: /memory-repair</text>
+        </Show>
+        <text fg={theme().textMuted}>ingest: /brain-ingest</text>
+        <Show when={brainEnabled()}>
+          <text fg={theme().success}>{"Brain: Graphfy " + (brainGraphfyEnabled() ? "\u2713" : "\u2717")}</text>
         </Show>
       </Show>
     </box>
