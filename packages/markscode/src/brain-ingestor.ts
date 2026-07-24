@@ -219,6 +219,9 @@ async function collectProfileItems(user_id: string, session_id?: string): Promis
       tags: ["profile", "remote", row.protocol],
       metadata: { profile_id: row.id, host: row.host, protocol: row.protocol },
     }))
+  } catch (err) {
+    if (err instanceof Error && /no such (table|column)|SQLITE_ERROR/i.test(err.message)) return []
+    throw err
   } finally {
     db.close()
   }
