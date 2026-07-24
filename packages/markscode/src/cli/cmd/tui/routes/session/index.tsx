@@ -1247,7 +1247,11 @@ export function Session() {
     if (action === "deploy-command") {
       const profile = await pickMasterKeyDeployProfile()
       if (!profile) { dialog.clear(); return }
-      await DialogPrompt.show(dialog, "Implantar chave-mestra", { placeholder: "Copie os comandos; Enter para fechar", value: masterKeyDeployCommandText(profile) })
+      const deployText = masterKeyDeployCommandText(profile)
+      Clipboard.copy(deployText)
+        .then(() => toast.show({ message: "Comandos de implantação copiados para a área de transferência!", variant: "success" }))
+        .catch(() => toast.show({ message: "Não foi possível copiar; selecione manualmente os comandos exibidos", variant: "warning" }))
+      await DialogAlert.show(dialog, "Implantar chave-mestra", deployText)
       dialog.clear()
       return
     }
