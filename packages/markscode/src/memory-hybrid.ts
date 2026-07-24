@@ -25,7 +25,7 @@ export interface HybridStatusInput {
 
 export interface HybridRecallItem {
   id?: string
-  source: "cloud" | "local" | "brain"
+  source: "cloud" | "local" | "brain" | "qdrant"
   content: string
   score?: number
   title?: string
@@ -39,6 +39,7 @@ export interface HybridRecallResult {
   local_available: boolean
   cloud_available: boolean
   brain_available: boolean
+  qdrant_available: boolean
   errors: string[]
 }
 
@@ -61,7 +62,7 @@ export interface HybridSourcesResult {
 
 export interface HybridRecentTopic {
   topic: string
-  source: "cloud" | "local" | "brain"
+  source: "cloud" | "local" | "brain" | "qdrant"
   content_preview: string
   title?: string
   subject?: string
@@ -112,6 +113,7 @@ export interface HybridIngestInput {
   write_cloud?: boolean
   write_memvid?: boolean
   write_brain?: boolean
+  write_qdrant?: boolean
   dry_run?: boolean
   capsule?: string
   token?: string
@@ -129,8 +131,21 @@ export interface HybridIngestResult {
   count: number
   imported_cloud?: unknown
   memvid?: unknown
+  qdrant?: unknown
   errors: string[]
   warnings: string[]
+}
+
+// Qdrant Tier 2
+interface QdrantPoint {
+  id: string
+  vector: number[]
+  payload: Record<string, unknown>
+}
+interface QdrantSearchResult {
+  id: string
+  score: number
+  payload: Record<string, unknown>
 }
 
 interface LocalMemoryStatus {
@@ -912,7 +927,7 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
   const errors: string[] = []
   const warnings = [...preview.warnings]
 
-  if (!input.write_cloud && !input.write_memvid) {
+  if (!input.write_cloud && !input.write_memvid && !input.write_qdrant) {
     warnings.push("No writes requested; pass --write-cloud and/or --write-memvid to ingest")
     return { source: preview.source, count: preview.count, errors, warnings }
   }
@@ -938,7 +953,8 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
     : undefined
 
   const memvid = input.write_memvid ? writeMemvidCapsule(preview.items, warnings, errors, input.capsule) : undefined
-  return { source: preview.source, count: preview.count, imported_cloud: importedCloud, memvid, errors, warnings }
+  const qdrant = input.write_qdrant ? await qdrantUpsert(preview.items).catch((err: unknown) => ({ written: 0, errors: [errorMessage(err)] })) : undefined
+  return { source: preview.source, count: preview.count, imported_cloud: importedCloud, memvid, qdrant, errors, warnings }
 }
 
 function writeMemvidCapsule(items: HybridIngestItem[], warnings: string[], errors: string[], capsule?: string): MemvidWriteResult {
@@ -1200,6 +1216,103 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
   }
 }
 
+function qdrantConfig() {
+  const host = process.env.MARKSCODE_QDRANT_HOST ?? "10.66.0.1"
+  const port = Number(process.env.MARKSCODE_QDRANT_PORT ?? "6333")
+  const apiKey = process.env.MARKSCODE_QDRANT_API_KEY ?? "Kenosis7!@#"
+  const collection = process.env.MARKSCODE_QDRANT_COLLECTION ?? "markscode-memory"
+  return { host, port, apiKey, collection, base: `http://${host}:${port}` }
+}
+
+function qdrantEnabled() {
+  const e = process.env.MARKSCODE_QDRANT_ENABLED
+  return e !== undefined ? /^(1|true|yes|on)$/i.test(e) : true
+}
+
+async function qdrantRequest(path: string, method = "GET", body?: unknown): Promise<unknown> {
+  const { base, apiKey } = qdrantConfig()
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(apiKey ? { "api-key": apiKey } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) throw new Error(`Qdrant ${method} ${path} → ${res.status}`)
+  return res.json()
+}
+
+async function qdrantEnsureCollection(): Promise<void> {
+  const { collection } = qdrantConfig()
+  try {
+    await qdrantRequest(`/collections/${collection}`)
+  } catch {
+    await qdrantRequest(`/collections/${collection}`, "PUT", {
+      vectors: { size: 4, distance: "Cosine" },
+    })
+  }
+}
+
+function qdrantSimpleEmbed(text: string): number[] {
+  const seed = Array.from(text.slice(0, 512)).reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) & 0x7fffffff, 0)
+  const rng = (n: number) => ((seed * 1664525 + n * 1013904223) & 0x7fffffff) / 0x7fffffff
+  return [rng(1) * 2 - 1, rng(2) * 2 - 1, rng(3) * 2 - 1, rng(4) * 2 - 1]
+}
+
+async function qdrantUpsert(items: HybridIngestItem[]): Promise<{ written: number; errors: string[] }> {
+  const errors: string[] = []
+  if (!qdrantEnabled() || items.length === 0) return { written: 0, errors }
+  try {
+    await qdrantEnsureCollection()
+    const { collection } = qdrantConfig()
+    const points = items.map((item) => ({
+      id: Math.abs(Array.from(item.content.slice(0, 32)).reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0x7fffffff, Date.now() & 0x7fffffff)),
+      vector: qdrantSimpleEmbed(item.content),
+      payload: {
+        source: item.source,
+        user_id: item.user_id,
+        session_id: item.session_id ?? null,
+        type: item.type,
+        memory_mode: item.memory_mode,
+        title: item.title ?? null,
+        subject: item.subject ?? null,
+        content: item.content.slice(0, 2000),
+        importance: item.importance,
+        tags: item.tags,
+        metadata: item.metadata ?? null,
+        created_at: new Date().toISOString(),
+      },
+    }))
+    await qdrantRequest(`/collections/${collection}/points`, "PUT", { points })
+    return { written: points.length, errors }
+  } catch (err) {
+    errors.push(String(err))
+    return { written: 0, errors }
+  }
+}
+
+async function qdrantRecall(cue: string, limit: number): Promise<HybridRecallItem[]> {
+  if (!qdrantEnabled()) return []
+  try {
+    const { collection } = qdrantConfig()
+    const res = await qdrantRequest(`/collections/${collection}/points/search`, "POST", {
+      vector: qdrantSimpleEmbed(cue),
+      limit,
+      with_payload: true,
+    }) as { result?: QdrantSearchResult[] }
+    return (res.result ?? []).map((r) => ({
+      id: String(r.id),
+      source: "qdrant" as const,
+      content: String(r.payload?.content ?? ""),
+      score: r.score,
+      title: r.payload?.title as string | undefined,
+      subject: r.payload?.subject as string | undefined,
+      tags: r.payload?.tags as string[] | undefined,
+    }))
+  } catch {
+    return []
+  }
+}
+
 export async function recallHybridMemories(input: HybridRecallInput): Promise<HybridRecallResult> {
   const provider = providerFrom(input.provider)
   const limit = saneLimit(input.limit)
@@ -1252,14 +1365,19 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
     tags: item.tags as string[] | undefined,
   })) ?? []
 
+  const qdrantItems: HybridRecallItem[] = qdrantEnabled()
+    ? await qdrantRecall(expandedCue, limit).catch(() => [])
+    : []
+
   const maxChars = saneMaxChars(input.max_chars)
   return {
     provider,
     local_available: local.available,
     cloud_available: provider === "local" ? false : cloudAvailable && !errors.some((x) => x.startsWith("cloud:")),
     brain_available: brainResult?.ok === true,
+    qdrant_available: qdrantEnabled() && qdrantItems.length >= 0,
     errors,
-    memories: [...localMemories, ...cloudMemories, ...brainItems]
+    memories: [...localMemories, ...cloudMemories, ...brainItems, ...qdrantItems]
       .filter((memory) => memory.content.trim())
       .slice(0, limit)
       .map((memory) => ({
