@@ -11,8 +11,9 @@ import {
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { setRemoteMemoryConfig } from "@/memory-config"
 import { setBrainConfig } from "@/brain-config"
+import { beginRagConfigUpdate, clearRagConfig, setRagConfig } from "@/rag/rag-config"
 import { isRecord } from "@/util/record"
-import { AccountRepo, type AccountRow } from "./repo"
+import { AccountRepo, type AccountRow, type ActiveSnapshot } from "./repo"
 import { normalizeServerUrl } from "./url"
 import {
   type AccountError,
@@ -71,6 +72,23 @@ export type ActiveOrg = {
   org: Org
 }
 
+export type ActiveOrgLease = {
+  active: ActiveOrg
+  accessToken: AccessToken
+  revision: number
+}
+
+export type OrgResolution = {
+  account: Info
+  orgs: readonly Org[]
+  active: Option.Option<Org>
+}
+
+type OrgResolutionSnapshot = {
+  resolution: OrgResolution
+  revision: number
+}
+
 export type MarkspanelQuotaPlan = {
   id?: string | number | null
   slug?: string | null
@@ -115,6 +133,7 @@ export type MarkspanelQuota = {
 class RemoteConfig extends Schema.Class<RemoteConfig>("RemoteConfig")({
   config: Schema.Record(Schema.String, Schema.Json),
   brain: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
+  rag: Schema.optional(Schema.Json),
 }) {}
 
 const DurationFromSeconds = Schema.Number.pipe(
@@ -225,7 +244,16 @@ const accountErrorFromCause = (cause: unknown, message: string): AccountError =>
 const freePattern = /free|livre/i
 const paidPattern = /(?:^|[-_\s:/])(?:plus|pro|premium)(?:$|[-_\s:/])/i
 const paidPlanPattern = /^(?:plus|pro|premium|paid|enterprise|team|restricted)$/i
-const paidPlanFields = ["tier", "plan", "access", "billing", "required_plan", "min_plan", "subscription", "availability"]
+const paidPlanFields = [
+  "tier",
+  "plan",
+  "access",
+  "billing",
+  "required_plan",
+  "min_plan",
+  "subscription",
+  "availability",
+]
 
 const textIncludes = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value)
 
@@ -247,8 +275,7 @@ const quotaLooksFree = (quota: MarkspanelQuota | null) => {
   return false
 }
 
-const modelFieldLooksFree = (value: unknown) =>
-  value === true || (typeof value === "string" && freePattern.test(value))
+const modelFieldLooksFree = (value: unknown) => value === true || (typeof value === "string" && freePattern.test(value))
 
 const modelHasZeroCost = (model: Record<string, unknown>) => {
   const cost = model.cost
@@ -258,33 +285,42 @@ const modelHasZeroCost = (model: Record<string, unknown>) => {
 
 const modelFieldLooksPaid = (value: unknown) => typeof value === "string" && paidPlanPattern.test(value)
 
-const modelHasPaidRestriction = (model: Record<string, unknown>) => paidPlanFields.some((field) => modelFieldLooksPaid(model[field]))
+const modelHasPaidRestriction = (model: Record<string, unknown>) =>
+  paidPlanFields.some((field) => modelFieldLooksPaid(model[field]))
 
 const modelLooksFree = (id: string, value: unknown) => {
   const model = isRecord(value) ? value : {}
   const searchable = [id, model.id, model.name].filter((item): item is string => typeof item === "string")
   if (modelHasPaidRestriction(model)) return false
-  if ([model.free, model.is_free, model.tier, model.plan, model.access, model.billing].some(modelFieldLooksFree)) return true
+  if ([model.free, model.is_free, model.tier, model.plan, model.access, model.billing].some(modelFieldLooksFree))
+    return true
   if (modelHasZeroCost(model)) return true
   if (searchable.some((item) => freePattern.test(item) || /big-pickle/i.test(item))) return true
   return !searchable.some((item) => paidPattern.test(item))
 }
 
 const filterModels = (models: unknown) => {
-  if (Array.isArray(models)) return models.filter((model) => modelLooksFree(isRecord(model) && typeof model.id === "string" ? model.id : "", model))
+  if (Array.isArray(models))
+    return models.filter((model) =>
+      modelLooksFree(isRecord(model) && typeof model.id === "string" ? model.id : "", model),
+    )
   if (!isRecord(models)) return models
   return Object.fromEntries(Object.entries(models).filter(([id, model]) => modelLooksFree(id, model)))
 }
 
 const filterProviderModels = (provider: unknown) => {
   if (!isRecord(provider)) return provider
-  const entries = Object.entries(provider).map(([key, value]) =>
-    [key, ["model", "models"].includes(key) ? filterModels(value) : value] as const,
+  const entries = Object.entries(provider).map(
+    ([key, value]) => [key, ["model", "models"].includes(key) ? filterModels(value) : value] as const,
   )
   const result = Object.fromEntries(entries)
   const modelValues = [result.model, result.models].filter(Boolean)
   if (!modelValues.length) return result
-  if (modelValues.some((models) => (Array.isArray(models) ? models.length > 0 : isRecord(models) && Object.keys(models).length > 0))) {
+  if (
+    modelValues.some((models) =>
+      Array.isArray(models) ? models.length > 0 : isRecord(models) && Object.keys(models).length > 0,
+    )
+  ) {
     return result
   }
 }
@@ -301,8 +337,16 @@ const filterProviders = (providers: unknown) => {
 export function filterRemoteConfigForFreePlan(config: Record<string, unknown>, quota: MarkspanelQuota | null) {
   if (!quotaLooksFree(quota)) return config
   return Object.fromEntries(
-    Object.entries(config).map(([key, value]) =>
-      [key, ["provider", "providers"].includes(key) ? filterProviders(value) : ["model", "models"].includes(key) ? filterModels(value) : value] as const,
+    Object.entries(config).map(
+      ([key, value]) =>
+        [
+          key,
+          ["provider", "providers"].includes(key)
+            ? filterProviders(value)
+            : ["model", "models"].includes(key)
+              ? filterModels(value)
+              : value,
+        ] as const,
     ),
   )
 }
@@ -310,15 +354,19 @@ export function filterRemoteConfigForFreePlan(config: Record<string, unknown>, q
 export interface Interface {
   readonly active: () => Effect.Effect<Option.Option<Info>, AccountError>
   readonly activeOrg: () => Effect.Effect<Option.Option<ActiveOrg>, AccountError>
+  readonly acquireActiveOrgLease: () => Effect.Effect<Option.Option<ActiveOrgLease>, AccountError>
+  readonly validateActiveOrgLease: (lease: ActiveOrgLease) => Effect.Effect<boolean, AccountError>
   readonly list: () => Effect.Effect<Info[], AccountError>
   readonly orgsByAccount: () => Effect.Effect<readonly AccountOrgs[], AccountError>
   readonly remove: (accountID: AccountID) => Effect.Effect<void, AccountError>
   readonly use: (accountID: AccountID, orgID: Option.Option<OrgID>) => Effect.Effect<void, AccountError>
+  readonly selectOrg: (account: Info, org: Org) => Effect.Effect<ActiveOrg, AccountError>
   readonly orgs: (accountID: AccountID) => Effect.Effect<readonly Org[], AccountError>
   readonly config: (
     accountID: AccountID,
     orgID: OrgID,
   ) => Effect.Effect<Option.Option<Record<string, unknown>>, AccountError>
+  readonly configActive: (active: ActiveOrg) => Effect.Effect<Option.Option<Record<string, unknown>>, AccountError>
   readonly token: (accountID: AccountID) => Effect.Effect<Option.Option<AccessToken>, AccountError>
   readonly login: (url: string) => Effect.Effect<Login, AccountError>
   readonly poll: (input: Login) => Effect.Effect<PollResult, AccountError>
@@ -330,8 +378,7 @@ export interface Interface {
   readonly invalidateToken: (accountID: AccountID) => Effect.Effect<void, AccountError>
 
   readonly reportUsage: (input: {
-    url: string
-    accountID: AccountID
+    active: ActiveOrg
     provider: string
     model: string
     inputTokens: number
@@ -474,23 +521,24 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       )
     })
 
+    const decideOrg = (account: Info, accountOrgs: readonly Org[]): OrgResolution => {
+      const current = accountOrgs.find((item) => item.id === account.active_org_id)
+      const selected = current ?? (accountOrgs.length === 1 ? accountOrgs[0] : undefined)
+      return {
+        account: new Info({
+          id: account.id,
+          email: account.email,
+          url: account.url,
+          active_org_id: selected?.id ?? null,
+        }),
+        orgs: accountOrgs,
+        active: Option.fromNullishOr(selected),
+      }
+    }
+
     const token = Effect.fn("Account.token")((accountID: AccountID) =>
       resolveAccess(accountID).pipe(Effect.map(Option.map((r) => r.accessToken))),
     )
-
-    const activeOrg = Effect.fn("Account.activeOrg")(function* () {
-      const activeAccount = yield* repo.active()
-      if (Option.isNone(activeAccount)) return Option.none<ActiveOrg>()
-
-      const account = activeAccount.value
-      if (!account.active_org_id) return Option.none<ActiveOrg>()
-
-      const accountOrgs = yield* orgs(account.id)
-      const org = accountOrgs.find((item) => item.id === account.active_org_id)
-      if (!org) return Option.none<ActiveOrg>()
-
-      return Option.some({ account, org })
-    })
 
     const orgsByAccount = Effect.fn("Account.orgsByAccount")(function* () {
       const accounts = yield* repo.list()
@@ -514,17 +562,133 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       return yield* fetchOrgs(account.url, accessToken)
     })
 
-    const config = Effect.fn("Account.config")(function* (accountID: AccountID, orgID: OrgID) {
+    const reconcile = (
+      snapshot: ActiveSnapshot,
+      accountOrgs: readonly Org[],
+    ): Effect.Effect<Option.Option<OrgResolutionSnapshot>, AccountError> =>
+      Effect.gen(function* () {
+        const resolved = decideOrg(snapshot.account, accountOrgs)
+        if (resolved.account.active_org_id === snapshot.account.active_org_id) {
+          const current = yield* repo.activeSnapshot()
+          if (Option.isNone(current) || current.value.revision !== snapshot.revision) return Option.none()
+          return Option.some({ resolution: resolved, revision: snapshot.revision })
+        }
+        const updated = yield* repo.compareAndUse({
+          accountID: snapshot.account.id,
+          expectedOrgID: Option.fromNullishOr(snapshot.account.active_org_id),
+          expectedRevision: snapshot.revision,
+          orgID: Option.fromNullishOr(resolved.account.active_org_id),
+        })
+        if (updated) return Option.some({ resolution: resolved, revision: snapshot.revision + 1 })
+        return Option.none()
+      })
+
+    const orgCache = yield* Cache.make<AccountID, Option.Option<OrgResolutionSnapshot>, AccountError>({
+      capacity: Number.POSITIVE_INFINITY,
+      timeToLive: Duration.zero,
+      lookup: Effect.fnUntraced(function* (accountID) {
+        const active = yield* repo.activeSnapshot()
+        if (Option.isNone(active) || active.value.account.id !== accountID) {
+          return yield* new AccountServiceError({
+            message: "Active account changed during organization reconciliation",
+          })
+        }
+        return yield* reconcile(active.value, yield* orgs(accountID))
+      }),
+    })
+
+    const activeOrg = Effect.fn("Account.activeOrg")(function* () {
+      const activeAccount = yield* repo.active()
+      if (Option.isNone(activeAccount)) return Option.none<ActiveOrg>()
+
+      const resolved = yield* Cache.get(orgCache, activeAccount.value.id)
+      return Option.flatMap(resolved, (value) =>
+        Option.map(value.resolution.active, (org) => ({ account: value.resolution.account, org })),
+      )
+    })
+
+    const validateActiveOrgLease = Effect.fn("Account.validateActiveOrgLease")(function* (lease: ActiveOrgLease) {
+      const current = yield* repo.activeSnapshot()
+      return Option.exists(
+        current,
+        (snapshot) =>
+          snapshot.revision === lease.revision &&
+          snapshot.account.id === lease.active.account.id &&
+          snapshot.account.active_org_id === lease.active.org.id,
+      )
+    })
+
+    const acquireActiveOrgLease = Effect.fn("Account.acquireActiveOrgLease")(function* () {
+      const snapshot = yield* repo.activeSnapshot()
+      if (Option.isNone(snapshot)) return Option.none<ActiveOrgLease>()
+      const resolved = yield* resolveAccess(snapshot.value.account.id)
+      if (Option.isNone(resolved) || resolved.value.account.id !== snapshot.value.account.id) {
+        return Option.none<ActiveOrgLease>()
+      }
+      const reconciled = yield* reconcile(
+        snapshot.value,
+        yield* fetchOrgs(resolved.value.account.url, resolved.value.accessToken),
+      )
+      if (Option.isNone(reconciled) || Option.isNone(reconciled.value.resolution.active)) {
+        return Option.none<ActiveOrgLease>()
+      }
+      const lease: ActiveOrgLease = {
+        active: {
+          account: reconciled.value.resolution.account,
+          org: reconciled.value.resolution.active.value,
+        },
+        accessToken: resolved.value.accessToken,
+        revision: reconciled.value.revision,
+      }
+      if (!(yield* validateActiveOrgLease(lease))) return Option.none<ActiveOrgLease>()
+      return Option.some(lease)
+    })
+
+    const selectOrg = Effect.fn("Account.selectOrg")(function* (account: Info, org: Org) {
+      clearRagConfig({ accountID: account.id })
+      yield* repo.use(account.id, Option.some(org.id))
+      yield* Cache.invalidate(orgCache, account.id)
+      return { account: { ...account, active_org_id: org.id }, org }
+    })
+
+    const validated = Effect.fnUntraced(function* (accountID: AccountID, orgID: OrgID) {
+      const active = yield* repo.active()
+      if (Option.isNone(active)) return Option.none<OrgResolutionSnapshot>()
+      const resolved = yield* Cache.get(orgCache, active.value.id)
+      if (Option.isNone(resolved)) return Option.none<OrgResolutionSnapshot>()
+      if (resolved.value.resolution.account.id !== accountID) return Option.none<OrgResolutionSnapshot>()
+      if (!Option.exists(resolved.value.resolution.active, (org) => org.id === orgID)) {
+        return Option.none<OrgResolutionSnapshot>()
+      }
+      return resolved
+    })
+
+    const matchesRevision = Effect.fnUntraced(function* (accountID: AccountID, orgID: OrgID, revision: number) {
+      const current = yield* repo.activeSnapshot()
+      return Option.exists(
+        current,
+        (snapshot) =>
+          snapshot.revision === revision &&
+          snapshot.account.id === accountID &&
+          snapshot.account.active_org_id === orgID,
+      )
+    })
+
+    const loadConfig = Effect.fnUntraced(function* (accountID: AccountID, requestedOrgID: OrgID) {
+      const ragRevision = beginRagConfigUpdate(accountID, requestedOrgID)
+      const current = yield* validated(accountID, requestedOrgID)
+      if (Option.isNone(current)) return Option.none<Record<string, unknown>>()
       const resolved = yield* resolveAccess(accountID)
       if (Option.isNone(resolved)) return Option.none()
 
       const { account, accessToken } = resolved.value
+      if (!(yield* matchesRevision(accountID, requestedOrgID, current.value.revision))) return Option.none()
 
       const response = yield* executeRead(
         HttpClientRequest.get(`${account.url}/api/config`).pipe(
           HttpClientRequest.acceptJson,
           HttpClientRequest.bearerToken(accessToken),
-          HttpClientRequest.setHeaders({ "x-org-id": orgID }),
+          HttpClientRequest.setHeaders({ "x-org-id": requestedOrgID }),
         ),
       )
 
@@ -547,10 +711,17 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       )
       const quotaResponse = yield* fetchQuota(account.url, accessToken)
       const filteredConfig = filterRemoteConfigForFreePlan(parsed.config, quotaResponse)
+      if (!(yield* matchesRevision(accountID, requestedOrgID, current.value.revision))) return Option.none()
       setRemoteMemoryConfig(filteredConfig.memories, `${account.url}/api/config`)
       setBrainConfig(parsed.brain ?? filteredConfig.brain, account.url)
+      setRagConfig(parsed.rag, { accountID, orgID: requestedOrgID, accountUrl: account.url }, ragRevision)
       return Option.some(filteredConfig)
     })
+
+    const config = Effect.fn("Account.config")((accountID: AccountID, orgID: OrgID) => loadConfig(accountID, orgID))
+    const configActive = Effect.fn("Account.configActive")((active: ActiveOrg) =>
+      loadConfig(active.account.id, active.org.id),
+    )
 
     const login = Effect.fn("Account.login")(function* (server: string) {
       const normalizedServer = normalizeServerUrl(server)
@@ -599,14 +770,24 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       const orgs = fetchOrgs(input.server, accessToken)
 
       const [account, remoteOrgs] = yield* Effect.all([user, orgs], { concurrency: 2 })
-
-      // TODO: When there are multiple orgs, let the user choose
-      const firstOrgID = remoteOrgs.length > 0 ? Option.some(remoteOrgs[0].id) : Option.none<OrgID>()
+      const previous = yield* repo.active()
+      const resolved = decideOrg(
+        new Info({
+          id: account.id,
+          email: account.email,
+          url: input.server,
+          active_org_id:
+            Option.isSome(previous) && previous.value.id === account.id ? previous.value.active_org_id : null,
+        }),
+        remoteOrgs,
+      )
 
       const now = yield* Clock.currentTimeMillis
       const expiry = now + Duration.toMillis(parsed.expires_in)
       const refreshToken = parsed.refresh_token
 
+      clearRagConfig({ accountID: account.id })
+      if (Option.isSome(previous) && previous.value.id !== account.id) clearRagConfig({ accountID: previous.value.id })
       yield* repo.persistAccount({
         id: account.id,
         email: account.email,
@@ -614,10 +795,16 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
         accessToken,
         refreshToken,
         expiry,
-        orgID: firstOrgID,
+        orgID: Option.fromNullishOr(resolved.account.active_org_id),
       })
+      yield* Cache.invalidate(orgCache, account.id)
 
-      return new PollSuccess({ email: account.email })
+      return new PollSuccess({
+        email: account.email,
+        account: resolved.account,
+        orgs: [...resolved.orgs],
+        org: Option.getOrNull(resolved.active),
+      })
     })
 
     const loginWithPassword = Effect.fn("Account.loginWithPassword")(function* (input: {
@@ -659,12 +846,23 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       const orgsResult = fetchOrgs(normalizedServer, accessToken)
 
       const [account, remoteOrgs] = yield* Effect.all([user, orgsResult], { concurrency: 2 })
-
-      const firstOrgID = remoteOrgs.length > 0 ? Option.some(remoteOrgs[0].id) : Option.none<OrgID>()
+      const previous = yield* repo.active()
+      const resolved = decideOrg(
+        new Info({
+          id: account.id,
+          email: account.email,
+          url: normalizedServer,
+          active_org_id:
+            Option.isSome(previous) && previous.value.id === account.id ? previous.value.active_org_id : null,
+        }),
+        remoteOrgs,
+      )
 
       const now = yield* Clock.currentTimeMillis
       const expiry = now + Duration.toMillis(parsed.expires_in)
 
+      clearRagConfig({ accountID: account.id })
+      if (Option.isSome(previous) && previous.value.id !== account.id) clearRagConfig({ accountID: previous.value.id })
       yield* repo.persistAccount({
         id: account.id,
         email: account.email,
@@ -672,15 +870,20 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
         accessToken,
         refreshToken: parsed.refresh_token,
         expiry,
-        orgID: firstOrgID,
+        orgID: Option.fromNullishOr(resolved.account.active_org_id),
       })
+      yield* Cache.invalidate(orgCache, account.id)
 
-      return new PollSuccess({ email: account.email })
+      return new PollSuccess({
+        email: account.email,
+        account: resolved.account,
+        orgs: [...resolved.orgs],
+        org: Option.getOrNull(resolved.active),
+      })
     })
 
     const reportUsage = Effect.fn("Account.reportUsage")(function* (input: {
-      url: string
-      accountID: AccountID
+      active: ActiveOrg
       provider: string
       model: string
       inputTokens: number
@@ -693,17 +896,26 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
       sessionId?: string
       messageId?: string
     }) {
-      const resolved = yield* resolveAccess(input.accountID).pipe(
+      const current = yield* validated(input.active.account.id, input.active.org.id).pipe(
+        Effect.catch(() => Effect.succeed(Option.none())),
+      )
+      if (Option.isNone(current)) return
+      const resolved = yield* resolveAccess(input.active.account.id).pipe(
         Effect.catch(() => Effect.succeed(Option.none())),
       )
       if (Option.isNone(resolved)) return
 
       const { account, accessToken } = resolved.value
+      const matches = yield* matchesRevision(input.active.account.id, input.active.org.id, current.value.revision).pipe(
+        Effect.catch(() => Effect.succeed(false)),
+      )
+      if (!matches) return
 
       yield* executeEffect(
         HttpClientRequest.post(`${account.url}/api/markscode/ai/usage/event`).pipe(
           HttpClientRequest.acceptJson,
           HttpClientRequest.bearerToken(accessToken),
+          HttpClientRequest.setHeaders({ "x-org-id": input.active.org.id }),
           HttpClientRequest.bodyJson({
             provider: input.provider,
             model: input.model,
@@ -737,9 +949,7 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
     })
 
     const quota = Effect.fn("Account.quota")(function* (accountID: AccountID) {
-      const resolved = yield* resolveAccess(accountID).pipe(
-        Effect.catch(() => Effect.succeed(Option.none())),
-      )
+      const resolved = yield* resolveAccess(accountID).pipe(Effect.catch(() => Effect.succeed(Option.none())))
       if (Option.isNone(resolved)) return null
 
       const { account, accessToken } = resolved.value
@@ -753,12 +963,24 @@ export const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient
     return Service.of({
       active: repo.active,
       activeOrg,
+      acquireActiveOrgLease,
+      validateActiveOrgLease,
       list: repo.list,
       orgsByAccount,
-      remove: repo.remove,
-      use: repo.use,
+      remove: (accountID) =>
+        Effect.sync(() => clearRagConfig({ accountID })).pipe(Effect.andThen(repo.remove(accountID))),
+      use: (accountID, orgID) =>
+        Effect.gen(function* () {
+          const previous = yield* repo.active()
+          clearRagConfig({ accountID })
+          if (Option.isSome(previous) && previous.value.id !== accountID)
+            clearRagConfig({ accountID: previous.value.id })
+          yield* repo.use(accountID, orgID)
+        }),
+      selectOrg,
       orgs,
       config,
+      configActive,
       token,
       login,
       poll,

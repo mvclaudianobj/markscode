@@ -22,6 +22,7 @@ import { FileWatcher } from "@/file/watcher"
 import { Ripgrep } from "@/file/ripgrep"
 import { Format } from "@/format"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { MapGate } from "@/map/gate"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "@/mcp"
 import { Permission } from "@/permission"
@@ -215,6 +216,7 @@ export function createRoutes(
       Question.defaultLayer,
       Ripgrep.defaultLayer,
       RuntimeFlags.defaultLayer,
+      MapGate.defaultLayer,
       Session.defaultLayer,
       SessionCompaction.defaultLayer,
       SessionPrompt.defaultLayer,

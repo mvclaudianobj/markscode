@@ -1,4 +1,9 @@
 import { hasMemoriesAPIKey, resolveMemoryConfig } from "./memory-config"
+import type { MemoryIdentity } from "./memory-identity"
+import { Effect, Option } from "effect"
+import { Account } from "@/account/account"
+import { makeRuntime } from "@/effect/run-service"
+import { getMarksAgentString } from "./marks-agent-config-source"
 export type MemoryMode = "short_term" | "long_term" | "visual"
 export type MemoryType = "episodic" | "semantic" | "procedural"
 
@@ -17,6 +22,12 @@ export interface SaveMemoryInput {
   mnemonic_techniques?: string[]
   visual_refs?: string[]
   source_name?: string
+  identity?: MemoryIdentity["identity"]
+  customer_id?: string
+  org_id?: string
+  metadata?: Record<string, unknown>
+  dedup?: boolean
+  session_rollup?: boolean
 }
 
 export interface HumanContext {
@@ -49,6 +60,10 @@ export interface EnsureHumanMemoryLayersInput {
   user_id: string
   session_id: string
   source_name?: string
+  identity?: MemoryIdentity["identity"]
+  customer_id?: string
+  org_id?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface EnsureHumanMemoryLayersResult {
@@ -104,11 +119,11 @@ export interface ContextSafetyResult {
 }
 
 const DEFAULT_MEMORIES_URL = "http://api.marks.ia.br:8689"
-const DEFAULT_MEMORIES_API_KEY = ""
-const DEFAULT_MEMORIES_USER_ID = "marks-local"
 const HUMAN_MEMORY_LAYER_MODES: MemoryMode[] = ["short_term", "long_term", "visual"]
 const HUMAN_MEMORY_LAYER_MARKER_TAG = "markscode-system-memory-layer"
 const humanMemoryLayerEnsures = new Map<string, Promise<EnsureHumanMemoryLayersResult>>()
+const accountRuntime = makeRuntime(Account.Service, Account.defaultLayer)
+const activeOrgConfigLoads = new Set<string>()
 
 function isHumanMemoryLayerMarker(memory: Partial<MemoryRecord> | undefined) {
   return Boolean(memory?.tags?.includes(HUMAN_MEMORY_LAYER_MARKER_TAG) || memory?.source_name === "markscode-memory-layer-ensure")
@@ -122,6 +137,10 @@ function withoutHumanMemoryLayerMarkers(context: HumanContext): HumanContext {
   }
 }
 
+function isHumanMemoryLayerDuplicate(error: unknown) {
+  return error instanceof Error && /already|conflict|duplicate|exists|http_409/i.test(error.message)
+}
+
 function resolveBaseURL() {
   return resolveMemoryConfig().memories.url
 }
@@ -130,6 +149,44 @@ function resolveAPIKey() {
   return resolveMemoryConfig().memories.api_key
 }
 
+const defaultActiveOrgLeaseHeaders = (): Promise<Record<string, string>> =>
+  accountRuntime.runPromise(() =>
+    Account.Service.use((account) =>
+      account.acquireActiveOrgLease().pipe(
+        Effect.flatMap((lease) => {
+          if (Option.isNone(lease)) return Effect.succeed({})
+          const cacheKey = `${lease.value.active.account.id}:${lease.value.active.org.id}:${lease.value.revision}`
+          const loadConfig = activeOrgConfigLoads.has(cacheKey)
+            ? Effect.void
+            : account.configActive(lease.value.active).pipe(
+                Effect.tap(() => Effect.sync(() => activeOrgConfigLoads.add(cacheKey))),
+                Effect.asVoid,
+                Effect.catch(() => Effect.void),
+              )
+          return loadConfig.pipe(
+            Effect.as({
+              Authorization: "Bearer " + lease.value.accessToken,
+              "x-org-id": lease.value.active.org.id,
+              "x-customer-id": lease.value.active.account.id,
+            }),
+          )
+        }),
+        Effect.catch(() => Effect.succeed({})),
+      ),
+    ),
+  )
+
+let activeOrgLeaseHeaders = defaultActiveOrgLeaseHeaders
+
+export function setActiveOrgLeaseHeadersForTest(loader: typeof activeOrgLeaseHeaders) {
+  activeOrgLeaseHeaders = loader
+  return () => {
+    activeOrgLeaseHeaders = defaultActiveOrgLeaseHeaders
+  }
+}
+
+const hasActiveOrgLease = async () => Object.keys(await activeOrgLeaseHeaders()).length > 0
+
 export function memoriesAPIStatus() {
   const config = resolveMemoryConfig()
   return {
@@ -137,20 +194,30 @@ export function memoriesAPIStatus() {
     api_key_configured: Boolean(config.memories.api_key),
     api_key_source: config.memories.api_key_source,
     timeout_ms: config.memories.timeout_ms,
-    user_id: config.user_id || "marks-local",
+    user_id: config.user_id,
   }
+}
+
+function payloadImportance(value: number | undefined) {
+  if (value === undefined || value === 0.7) return undefined
+  return value
 }
 
 function requestTimeoutMs(value?: number) {
   const memoryConfig = resolveMemoryConfig()
-  const configured = Number(process.env.MARKSCODE_MEMORIES_API_TIMEOUT_MS || process.env.MEMORIES_API_TIMEOUT_MS || "")
+  const configured = Number(
+    getMarksAgentString("MARKSCODE_MEMORIES_API_TIMEOUT_MS") || process.env.MARKSCODE_MEMORIES_API_TIMEOUT_MS || process.env.MEMORIES_API_TIMEOUT_MS || "",
+  )
   const raw = Number.isFinite(value) ? Number(value) : Number.isFinite(configured) && configured > 0 ? configured : memoryConfig.memories.timeout_ms
   return Math.min(30000, Math.max(1000, Math.floor(raw || 10000)))
 }
 
 async function request(path: string, init?: RequestInit & { timeout_ms?: number }): Promise<any> {
-  const apiKey = resolveAPIKey()
   const headers = new Headers(init?.headers || {})
+  Object.entries(await activeOrgLeaseHeaders()).forEach(([key, value]) => {
+    if (!headers.has(key)) headers.set(key, value)
+  })
+  const apiKey = resolveAPIKey()
   if (!headers.has("X-API-Key") && apiKey.trim()) headers.set("X-API-Key", apiKey)
   if (!headers.has("Content-Type") && init?.body) headers.set("Content-Type", "application/json")
 
@@ -174,7 +241,9 @@ async function request(path: string, init?: RequestInit & { timeout_ms?: number 
   }
 
   if (!res.ok) {
-    const reason = (body && (body.error || body.message)) || `http_${res.status}`
+    const reason = res.status === 401 || res.status === 403
+      ? "sessão Markspanel ausente ou expirada; faça login pelo fluxo OAuth/device do MarksCode/Markspanel"
+      : (body && (body.error || body.message)) || `http_${res.status}`
     throw new Error(`Memories API error: ${reason}`)
   }
 
@@ -192,60 +261,77 @@ async function postHumanMemory(input: SaveMemoryInput): Promise<any> {
       title: input.title,
       subject: input.subject,
       content: input.content,
-      importance: input.importance ?? 0.7,
+      ...(payloadImportance(input.importance) !== undefined ? { importance: payloadImportance(input.importance) } : {}),
       tags: input.tags ?? [],
       triggers: input.triggers ?? [],
       retrieval_cues: input.retrieval_cues ?? [],
       mnemonic_techniques: input.mnemonic_techniques ?? [],
       visual_refs: input.visual_refs ?? [],
       source_name: input.source_name,
+      identity: input.identity,
+      customer_id: input.customer_id,
+      org_id: input.org_id,
+      metadata: input.metadata,
+      dedup: input.dedup,
+      session_rollup: input.session_rollup,
     }),
   })
 }
 
 export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
   const result = await postHumanMemory(input)
-  await ensureHumanMemoryLayers({ user_id: input.user_id, session_id: input.session_id, source_name: input.source_name }).catch(() => undefined)
+  await ensureHumanMemoryLayers({
+    user_id: input.user_id,
+    session_id: input.session_id,
+    source_name: input.source_name,
+    identity: input.identity,
+    customer_id: input.customer_id,
+    org_id: input.org_id,
+    metadata: input.metadata,
+  }).catch(() => undefined)
   return result
 }
 
 async function ensureHumanMemoryLayersOnce(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {
   const errors: string[] = []
-  const context = await request(`/memories/human/context?${new URLSearchParams({ user_id: input.user_id, session_id: input.session_id }).toString()}`)
-    .catch((err) => {
-      errors.push(err instanceof Error ? err.message : String(err))
-      return undefined
-    }) as HumanContext | undefined
-  const existing = HUMAN_MEMORY_LAYER_MODES.filter((mode) => Array.isArray(context?.[mode]) && context[mode].length > 0)
-  const missing = HUMAN_MEMORY_LAYER_MODES.filter((mode) => !existing.includes(mode))
-  const created = (await Promise.all(missing.map(async (mode) => {
+  const results = await Promise.all(HUMAN_MEMORY_LAYER_MODES.map(async (mode) => {
     const saved = await postHumanMemory({
       user_id: input.user_id,
       session_id: input.session_id,
       type: mode === "short_term" ? "episodic" : "semantic",
       memory_mode: mode,
-      title: "MarksCode memory layer bootstrap: " + mode,
+      title: "MarksCode memory layer bootstrap: " + input.session_id + ":" + mode,
       subject: "markscode-system-memory-layer",
-      content: "MarksCode system memory layer bootstrap placeholder for " + mode + ". Ignore in recall and user-facing context.",
+      content: "MarksCode system memory layer bootstrap placeholder for session " + input.session_id + " and mode " + mode + ". Ignore in recall and user-facing context.",
       importance: 0,
-      tags: [HUMAN_MEMORY_LAYER_MARKER_TAG, "system", "bootstrap", mode],
+      tags: [HUMAN_MEMORY_LAYER_MARKER_TAG, "system", "bootstrap", "session:" + input.session_id, "mode:" + mode],
       triggers: [],
       retrieval_cues: [],
       mnemonic_techniques: [],
       visual_refs: [],
       source_name: input.source_name || "markscode-memory-layer-ensure",
-    }).catch((err) => {
+      identity: input.identity,
+      customer_id: input.customer_id,
+      org_id: input.org_id,
+      metadata: { ...input.metadata, memory_layer_mode: mode, session_id: input.session_id },
+      dedup: false,
+      session_rollup: false,
+    }).catch((err: unknown) => {
+      if (isHumanMemoryLayerDuplicate(err)) return "existing"
       errors.push(mode + ": " + (err instanceof Error ? err.message : String(err)))
       return undefined
     })
-    return saved ? mode : undefined
-  }))).filter((mode): mode is MemoryMode => Boolean(mode))
+    if (saved === "existing") return { mode, status: "existing" as const }
+    return saved ? { mode, status: "created" as const } : undefined
+  }))
+  const created = results.flatMap((result) => result?.status === "created" ? [result.mode] : [])
+  const existing = results.flatMap((result) => result?.status === "existing" ? [result.mode] : [])
 
   return { ok: errors.length === 0, ensured: HUMAN_MEMORY_LAYER_MODES, created, existing, errors }
 }
 
 export async function ensureHumanMemoryLayers(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {
-  const key = [input.user_id, input.session_id, input.source_name || ""].join("\0")
+  const key = [input.user_id, input.session_id, input.source_name || "", input.customer_id || "", input.org_id || ""].join("\0")
   const current = humanMemoryLayerEnsures.get(key)
   if (current) return current
   const next = ensureHumanMemoryLayersOnce(input)
@@ -256,7 +342,6 @@ export async function ensureHumanMemoryLayers(input: EnsureHumanMemoryLayersInpu
 }
 
 export async function getHumanContext(input: { user_id: string; session_id: string }): Promise<HumanContext> {
-  await ensureHumanMemoryLayers(input).catch(() => undefined)
   const params = new URLSearchParams({
     user_id: input.user_id,
     session_id: input.session_id,
@@ -265,10 +350,13 @@ export async function getHumanContext(input: { user_id: string; session_id: stri
 }
 
 export async function recallHumanMemories(input: RecallInput): Promise<RecallResult> {
+  const oauthHeaders = await activeOrgLeaseHeaders()
+  const configUserID = resolveMemoryConfig().user_id.trim()
   const body = await request("/memories/human/recall", {
     method: "POST",
+    headers: oauthHeaders,
     body: JSON.stringify({
-      user_id: input.user_id,
+      user_id: configUserID && configUserID !== "marks-local" ? configUserID : input.user_id,
       session_id: input.session_id,
       cue: input.cue,
       limit: input.limit ?? 8,
@@ -410,6 +498,10 @@ export async function importMemories(input: {
   subject?: string
   default_user_id: string
   default_session_id: string
+  identity?: MemoryIdentity["identity"]
+  customer_id?: string
+  org_id?: string
+  metadata?: Record<string, unknown>
   items: Array<{
     content: string
     type?: MemoryType
@@ -430,6 +522,10 @@ export async function importMemories(input: {
       subject: input.subject,
       default_user_id: input.default_user_id,
       default_session_id: input.default_session_id,
+      identity: input.identity,
+      customer_id: input.customer_id,
+      org_id: input.org_id,
+      metadata: input.metadata,
       items: input.items,
     }),
   })
@@ -497,6 +593,70 @@ export interface SearchAdvancedResult {
   total: number
 }
 
+export interface RecallAdminFallbackInput {
+  query: string
+  limit?: number
+  timeout_ms?: number
+  allow?: boolean
+}
+
+function adminFallbackLimit(value?: number) {
+  if (!Number.isFinite(value)) return 3
+  return Math.min(5, Math.max(1, Math.floor(Number(value))))
+}
+
+function adminFallbackEnabled() {
+  return /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
+}
+
+function adminFallbackQueries(query: string) {
+  const normalized = query.trim().replace(/\s+/g, " ")
+  const lower = normalized.toLowerCase()
+  const expansions = [
+    /graph\/ingest|brain graph ingest/.test(lower) ? "markscode brain graph ingest" : undefined,
+    /memories\/human|memories human|flood/.test(lower) ? "memories human flood" : undefined,
+    /markspanel|gateway timeout|timeout|async|worker/.test(lower) ? "markspanel gateway timeout async worker" : undefined,
+    /marks1|async|graph\/ingest|memories\/human/.test(lower) ? "brain graph ingest memories human async marks1" : undefined,
+  ].filter((value): value is string => Boolean(value))
+  return Array.from(new Set([normalized, ...expansions])).filter(Boolean).slice(0, 3)
+}
+
+function isAdminFallbackPlaceholder(memory: SearchAdvancedResult["memories"][number]) {
+  return /memory layer bootstrap|placeholder|ignore in recall/i.test([memory.title, memory.subject, memory.content].filter(Boolean).join("\n")) && adminFallbackCleanContent(memory.content).length < 80
+}
+
+function adminFallbackCleanContent(content: string) {
+  return String(content || "").replace(/^\s*MarksCode system memory layer bootstrap placeholder for session\b[\s\S]*?Ignore in recall and user-facing context\.\s*/i, "").trim()
+}
+
+function isTasksIndexMemory(memory: SearchAdvancedResult["memories"][number]) {
+  return /^index\.md$/i.test(String(memory.title || "").trim()) || /^#\s*Tasks\s+Index/i.test(String(memory.content || "").trimStart())
+}
+
+function adminFallbackRank(memory: SearchAdvancedResult["memories"][number]) {
+  const cleanContent = adminFallbackCleanContent(memory.content)
+  const text = [memory.title, memory.subject, cleanContent, ...(Array.isArray(memory.tags) ? memory.tags : [])].filter(Boolean).join("\n").toLowerCase()
+  return (text.includes("/api/markscode/brain/graph/ingest") ? 100 : 0)
+    + (text.includes("/memories/human") ? 80 : 0)
+    + (text.includes("async") ? 35 : 0)
+    + (text.includes("markspanel") ? 25 : 0)
+    + (text.includes("marks1") ? 20 : 0)
+    + (cleanContent.length > 200 ? 10 : 0)
+    + (isAdminFallbackPlaceholder(memory) ? -200 : 15)
+    + (isTasksIndexMemory(memory) ? -150 : 0)
+}
+
+function markAdminFallbackMemory(memory: SearchAdvancedResult["memories"][number]) {
+  const cleanContent = adminFallbackCleanContent(memory.content)
+  return {
+    ...memory,
+    title: "[admin_fallback_unscoped] " + (memory.title || memory.subject || memory.id || "memory"),
+    subject: memory.subject ? "[admin_fallback_unscoped] " + memory.subject : "admin_fallback_unscoped",
+    content: cleanContent || memory.content,
+    tags: Array.from(new Set([...(Array.isArray(memory.tags) ? memory.tags : []), "admin_fallback_unscoped"])),
+  }
+}
+
 export async function searchAdvancedMemories(input: SearchAdvancedInput): Promise<SearchAdvancedResult> {
   const params = new URLSearchParams()
   if (input.query) {
@@ -524,6 +684,41 @@ export async function searchAdvancedMemories(input: SearchAdvancedInput): Promis
   return {
     memories,
     total: typeof data?.total === "number" ? data.total : memories.length,
+  }
+}
+
+export async function recallAdminFallbackMemories(input: RecallAdminFallbackInput): Promise<SearchAdvancedResult> {
+  if (input.allow !== true && !adminFallbackEnabled()) throw new Error("admin_fallback_unscoped disabled")
+  const oauthHeaders = await activeOrgLeaseHeaders()
+  const hasOAuth = Object.keys(oauthHeaders).length > 0
+  if (!hasOAuth && !resolveAPIKey().trim()) throw new Error("admin_fallback_unscoped unavailable: no auth method available")
+  const withImportance = (query: string) => searchAdvancedMemories({
+    query,
+    fuzzy: true,
+    cross_session: true,
+    importance_min: 0.5,
+    limit: 5,
+    timeout_ms: input.timeout_ms ?? 1500,
+  }).catch(() => ({ memories: [], total: 0 }))
+  const withoutImportance = (query: string) => searchAdvancedMemories({
+    query,
+    fuzzy: true,
+    cross_session: true,
+    limit: 5,
+    timeout_ms: input.timeout_ms ?? 1500,
+  }).catch(() => ({ memories: [], total: 0 }))
+  const queries = adminFallbackQueries(input.query)
+  const primaryResults = await Promise.all(queries.map(withImportance))
+  const primaryMemories = primaryResults.flatMap((r) => r.memories)
+  const results = primaryMemories.length > 0 ? primaryResults : await Promise.all(queries.map(withoutImportance))
+  const deduped = new Map<string, SearchAdvancedResult["memories"][number]>()
+  results.flatMap((result) => result.memories).forEach((memory) => {
+    deduped.set(String(memory.id || memory.content || memory.title || "").toLowerCase(), memory)
+  })
+  const ranked = Array.from(deduped.values()).sort((a, b) => adminFallbackRank(b) - adminFallbackRank(a))
+  return {
+    memories: ranked.slice(0, adminFallbackLimit(input.limit)).map(markAdminFallbackMemory),
+    total: ranked.length,
   }
 }
 
@@ -577,7 +772,7 @@ export function deriveRecentMemoryTopics(input: { memories?: unknown[]; source?:
 }
 
 export async function listRecentCloudMemoryTopics(input: { user_id?: string; session_id?: string; limit?: number; query?: string; timeout_ms?: number } = {}): Promise<RecentMemoryTopicsResult> {
-  if (!hasMemoriesAPIKey()) return { available: false, source: "cloud", topics: [], errors: ["Memories API key não configurada"], status: "cloud_unconfigured" }
+  if (!hasMemoriesAPIKey() && !(await hasActiveOrgLease())) return { available: false, source: "cloud", topics: [], errors: ["Sessão Markspanel indisponível; faça login pelo fluxo OAuth/device do MarksCode/Markspanel"], status: "cloud_unconfigured" }
   const errors: string[] = []
   const limit = Math.max(1, Math.floor(input.limit || 12))
   const timeoutMs = Math.min(30000, Math.max(1000, Math.floor(Number(input.timeout_ms ?? process.env.MARKSCODE_RECENT_TOPICS_TIMEOUT_MS ?? 3500))))

@@ -43,6 +43,10 @@ function envValue(keys: string[]) {
   return keys.map((key) => process.env[key]?.trim()).find(Boolean)
 }
 
+function hasProviderPrefix(model: string) {
+  return /^[A-Za-z0-9][\w.-]*\/.+/.test(model)
+}
+
 function graphfyMarksOpenAI() {
   const baseUrl = envValue([
     "MARKSCODE_GRAPHFY_OPENAI_BASE_URL",
@@ -63,10 +67,10 @@ function graphfyMarksOpenAI() {
     "MARKS_API_KEY",
     "OPENAI_API_KEY",
   ])
+  const useOpenAI = Boolean(apiKey && hasProviderPrefix(model))
   return {
-    args: ["--backend", "openai", "--model", model],
-    env: apiKey ? { ...process.env, OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: model, OPENAI_API_KEY: apiKey } : process.env,
-    hasApiKey: Boolean(apiKey),
+    args: useOpenAI ? ["--backend", "openai", "--model", model] : ["--code-only"],
+    env: useOpenAI ? { ...process.env, OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: model, OPENAI_API_KEY: apiKey } : process.env,
   }
 }
 
@@ -176,6 +180,13 @@ export type GraphfyExtractResult = {
 }
 
 export async function graphfyExtract(projectRoot?: string): Promise<GraphfyExtractResult> {
+  if (isDisabled()) {
+    return {
+      success: true,
+      step: "done",
+      message: "Graphfy desativado por ambiente.",
+    }
+  }
   const root = projectRoot || process.cwd()
   const cli = findGraphfyCli()
   if (!cli) {
@@ -223,6 +234,13 @@ function detectInstaller(): { cmd: string; args: string[] } | undefined {
 }
 
 export async function graphfyAutoSetup(projectRoot?: string): Promise<GraphfySetupResult> {
+  if (isDisabled()) {
+    return {
+      success: true,
+      step: "done",
+      message: "Graphfy desativado por ambiente.",
+    }
+  }
   const root = projectRoot || process.cwd()
   const installer = detectInstaller()
   if (!installer) {
@@ -251,7 +269,7 @@ export async function graphfyAutoSetup(projectRoot?: string): Promise<GraphfySet
   }
   const marksOpenAI = graphfyMarksOpenAI()
   try {
-    execFileSync(cli, ["extract", root, "--no-viz", ...(marksOpenAI.hasApiKey ? marksOpenAI.args : ["--code-only"])], { encoding: "utf-8", timeout: 120000, cwd: root, env: marksOpenAI.env })
+    execFileSync(cli, ["extract", root, "--no-viz", ...marksOpenAI.args], { encoding: "utf-8", timeout: 120000, cwd: root, env: marksOpenAI.env })
   } catch (err) {
     return {
       success: false,

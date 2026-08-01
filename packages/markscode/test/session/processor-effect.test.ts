@@ -29,6 +29,7 @@ import { raw, reply, TestLLMServer } from "../lib/llm-server"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Account } from "@/account/account"
 
 void Log.init({ print: false })
 
@@ -172,6 +173,13 @@ const assistant = Effect.fn("TestSession.assistant")(function* (
 
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
+let usageAttempts = 0
+const account = Layer.mock(Account.Service)({
+  activeOrg: () => {
+    usageAttempts += 1
+    return Effect.fail(new Account.AccountServiceError({ message: "simulated account failure" }))
+  },
+})
 const deps = Layer.mergeAll(
   Session.defaultLayer,
   Snapshot.defaultLayer,
@@ -184,6 +192,7 @@ const deps = Layer.mergeAll(
   status,
   SyncEvent.defaultLayer,
   EventV2Bridge.defaultLayer,
+  account,
 ).pipe(Layer.provideMerge(infra))
 const env = Layer.mergeAll(
   TestLLMServer.layer,
@@ -212,6 +221,7 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
+        usageAttempts = 0
         const { processors, session, provider } = yield* boot()
 
         yield* llm.text("hello")
@@ -244,6 +254,10 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         } satisfies LLM.StreamInput
 
         const value = yield* handle.process(input)
+        yield* waitFor(
+          Effect.sync(() => (usageAttempts > 0 ? usageAttempts : undefined)),
+          "timed out waiting for usage reporting attempt",
+        )
         const parts = MessageV2.parts(msg.id)
         const calls = yield* llm.calls
 
@@ -568,12 +582,12 @@ it.live("session.processor effect tests retry recognized structured json errors"
   ),
 )
 
-it.live("session.processor effect tests publish retry status updates", () =>
+it.live("session.processor effect tests complete provider retries without processor retry transition", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
-        const bus = yield* Bus.Service
+        const sts = yield* SessionStatus.Service
 
         yield* llm.error(503, { error: "boom" })
         yield* llm.text("")
@@ -582,11 +596,6 @@ it.live("session.processor effect tests publish retry status updates", () =>
         const parent = yield* user(chat.id, "retry")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const states: number[] = []
-        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
-          if (evt.properties.sessionID !== chat.id) return
-          if (evt.properties.status.type === "retry") states.push(evt.properties.status.attempt)
-        })
         const handle = yield* processors.create({
           assistantMessage: msg,
           sessionID: chat.id,
@@ -610,11 +619,9 @@ it.live("session.processor effect tests publish retry status updates", () =>
           tools: {},
         })
 
-        off()
-
         expect(value).toBe("continue")
         expect(yield* llm.calls).toBe(2)
-        expect(states).toStrictEqual([1])
+        expect(yield* sts.get(chat.id)).toEqual({ type: "busy" })
       }),
     { config: (url) => providerCfg(url) },
   ),

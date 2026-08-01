@@ -1,0 +1,17 @@
+{
+  "name": "markscode-telegram-notifier",
+  "version": "0.1.0",
+  "description": "MarksCode server-side Telegram notifier plugin",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "markscode",
+    "plugin",
+    "telegram",
+    "notifier"
+  ]
+}

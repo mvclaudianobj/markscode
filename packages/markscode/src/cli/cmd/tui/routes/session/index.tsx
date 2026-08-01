@@ -90,6 +90,18 @@ import {
   progressMapSession,
   endMapSession,
 } from "@/map-api"
+import type { MapProjectItem } from "@/map-api"
+import {
+  canChooseMapModuleOrTask,
+  clearMapModuleTaskInKV,
+  getMapBindingFromKV,
+  mapAutoCheckpointKeyFor,
+  mapContextOptions,
+  mapKeyFor,
+  mapLifecycleBindingPatch,
+  mapSuggestionSeenKeyFor,
+  setMapBindingInKV,
+} from "@/map-tui-kv"
 import {
   getHumanContext,
   getSessionCompactContext,
@@ -116,6 +128,7 @@ import { diagnoseBrainSystem } from "@/memory-diagnose"
 import { runBrainIngestor } from "@/brain-ingestor"
 import { isBrainEnabled } from "@/brain-config"
 import { brainStatus, brainRecall, brainGraphQuery, brainGraphArtifact } from "@/brain-client"
+import { resolveMemoryIdentity } from "@/memory-identity"
 import { getGraphfyStatus, graphfyAutoSetup, graphfyExtract } from "@/graphfy"
 import { Database } from "@/storage/db"
 import { DialogRecentTopics } from "../../component/dialog-recent-topics"
@@ -304,13 +317,32 @@ export function Session() {
       .join("\n\n")
       .trim()
 
+  const safeSessionSnapshotFor = (sessionID: string) => {
+    const title = (sync.session.get(sessionID)?.title || "").trim()
+    const rows = (sync.data.message[sessionID] ?? [])
+      .map((msg) => {
+        const parts = (sync.data.part[msg.id] ?? [])
+          .flatMap((x) => x.type === "text" && "text" in x ? [x.text.replace(/password|secret|token|api[_-]?key|bearer/gi, "[redacted]").trim().slice(0, 500)] : [])
+          .filter(Boolean)
+        if (!parts.length) return ""
+        return (msg.role === "user" ? "User" : "AI") + ": " + parts.join("\n")
+      })
+      .filter(Boolean)
+      .slice(-20)
+    return [title ? "Title: " + title : "", "Session: " + sessionID, ...rows].filter(Boolean).join("\n\n").trim()
+  }
+
   const cachedMemorySnapshotFor = (sessionID: string) => {
     const text = memorySnapshotFor(sessionID)
     if (text) {
       snapshotCache.set(sessionID, text)
       return text
     }
-    return snapshotCache.get(sessionID) || ""
+    const cached = snapshotCache.get(sessionID) || ""
+    if (cached) return cached
+    const safe = safeSessionSnapshotFor(sessionID)
+    if (safe) snapshotCache.set(sessionID, safe)
+    return safe
   }
 
   const memorySnapshot = () => {
@@ -1435,9 +1467,25 @@ export function Session() {
     }
   }
 
+  const triggerAutoIngest = async (input?: { force?: boolean; sessionID?: string }) => {
+    if (!isBrainEnabled()) return
+    const now = Date.now()
+    if (!input?.force && now - lastBrainIngestAt() < 5 * 60 * 1000) return
+    setLastBrainIngestAt(now)
+    const tokenResult = await resolveBrainValidationToken()
+    if (!tokenResult.token) return
+    await runBrainIngestor({
+      token: tokenResult.token,
+      user_id: memoriesUserID,
+      session_id: input?.sessionID || route.sessionID || undefined,
+      sources: ["md", "sessions", "graphfy"],
+    }).catch(() => undefined)
+  }
+
   const saveSessionMemoryFor = async (sessionID: string, origin: "manual" | "auto") => {
     const text = cachedMemorySnapshotFor(sessionID)
     if (!text || !sessionID) return false
+    const memoryIdentity = await resolveMemoryIdentity(sessionID)
     const title = (sync.session.get(sessionID)?.title || "").trim()
     const selected = local.model.current()
     const lastAssistant = [...messages()].reverse().find((x) => x.role === "assistant") as
@@ -1452,7 +1500,7 @@ export function Session() {
       .filter((w) => w.length > 4)
       .slice(0, 8)
     await saveHumanMemory({
-      user_id: memoriesUserID,
+      user_id: memoryIdentity.user_id || memoriesUserID,
       session_id: sessionID,
       type: "episodic",
       memory_mode: "short_term",
@@ -1466,11 +1514,15 @@ export function Session() {
       mnemonic_techniques: ["association"],
       visual_refs: [],
       source_name: sourceName || undefined,
+      identity: memoryIdentity.identity,
+      customer_id: memoryIdentity.customer_id,
+      org_id: memoryIdentity.org_id,
+      metadata: memoryIdentity.metadata,
     })
     setLastMemorySaveAt(Date.now())
     setLastMemoryChars(text.length)
     setLastMemoryHash(memoryHash(text))
-    triggerAutoIngest()
+    await triggerAutoIngest({ force: origin === "manual", sessionID })
     return true
   }
 
@@ -1499,22 +1551,8 @@ export function Session() {
       visual_refs: [],
       source_name: "markscode-tui-topic",
     })
-    triggerAutoIngest()
+    await triggerAutoIngest({ force: true, sessionID: route.sessionID })
     return true
-  }
-
-  const triggerAutoIngest = () => {
-    if (!isBrainEnabled()) return
-    const now = Date.now()
-    if (now - lastBrainIngestAt() < 5 * 60 * 1000) return
-    setLastBrainIngestAt(now)
-    const token = String(process.env.MARKSCODE_BRAIN_TOKEN || process.env.BRAIN_TOKEN || "")
-    void runBrainIngestor({
-      token,
-      user_id: memoriesUserID,
-      session_id: route.sessionID || undefined,
-      sources: ["md", "sessions", "graphfy"],
-    }).catch(() => undefined)
   }
 
   const resolveBrainValidationToken = async (): Promise<{ token: string; source: string }> => {
@@ -1547,10 +1585,9 @@ export function Session() {
     await AppRuntime.runPromise(
       Effect.gen(function* () {
         const service = yield* Account.Service
-        const active = yield* service.active()
+        const active = yield* service.activeOrg()
         if (Option.isNone(active)) return
-        if (!active.value.active_org_id) return
-        yield* service.config(active.value.id, active.value.active_org_id)
+        yield* service.configActive(active.value)
       }).pipe(Effect.catch(() => Effect.void)),
     ).catch(() => undefined)
   }
@@ -1753,44 +1790,48 @@ export function Session() {
     } catch {}
   }
 
-  const mapKeyFor = (sessionID: string) => "map_binding:" + sessionID
-  const mapAutoCheckpointKeyFor = (sessionID: string) => "map_auto_checkpoint:" + sessionID
-
-  const getMapBinding = (sessionID?: string) => {
-    if (!sessionID) return {}
-    try {
-      const raw = kv.get(mapKeyFor(sessionID))
-      if (!raw) return {}
-      const data = JSON.parse(String(raw))
-      return data && typeof data === "object" ? data : {}
-    } catch {
-      return {}
-    }
-  }
+  const getMapBinding = (sessionID?: string) => getMapBindingFromKV(kv, sessionID)
 
   const setMapBinding = (sessionID: string, patch: Record<string, unknown>) => {
-    const next = {
-      ...getMapBinding(sessionID),
-      ...patch,
-      session_id: sessionID,
-      host: mapHost,
-      actor: mapActor,
-      updated_at: new Date().toISOString(),
-    }
-    kv.set(mapKeyFor(sessionID), JSON.stringify(next))
-    return next
+    return setMapBindingInKV({ kv, sessionID, patch, host: mapHost, actor: mapActor })
+  }
+
+  const normalizeMapSearchText = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+
+  const mapSuggestionTerms = () => normalizeMapSearchText([
+    session()?.title || "",
+    route.prompt || "",
+    project.instance.path().worktree === "/" ? "" : project.instance.path().worktree,
+    project.instance.directory() || "",
+  ].join(" ")).split(/[^a-z0-9]+/).filter((term) => term.length > 2).slice(-24)
+
+  const scoreMapProjectSuggestion = (item: MapProjectItem) => {
+    const haystack = normalizeMapSearchText([item.name, item.slug, item.description || ""].join(" "))
+    const terms = mapSuggestionTerms()
+    return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0)
+  }
+
+  const maybeStartLinkedMapTaskSession = async (sessionID: string) => {
+    const binding = getMapBinding(sessionID) as Record<string, unknown>
+    if (!binding.task_id && !binding.task_title) return
+    const last = Number(kv.get(mapAutoCheckpointKeyFor(sessionID)) || 0)
+    if (Number.isFinite(last) && Date.now() - last < 300_000) return
+    kv.set(mapAutoCheckpointKeyFor(sessionID), String(Date.now()))
+    await startMapTaskSession().catch((error) => {
+      if (!isQuietMapError(error)) void debugUiLog("map:auto-session-start:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+    })
   }
 
   const isQuietMapError = (error: unknown) => /authentication_required|unauthorized|401|missing.*key|api.*key/i.test(error instanceof Error ? error.message : String(error))
 
   const autoMapSessionCheckpoint = async (sessionID: string) => {
-    const binding: any = getMapBinding(sessionID)
-    if (!binding.project_id && !binding.project_slug) return
+    if (!canChooseMapModuleOrTask(getMapBinding(sessionID))) return
 
     await reloadMapContext().catch((error) => {
       if (!isQuietMapError(error)) void debugUiLog("map:auto-context-reload:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
     })
 
+    const binding: any = getMapBinding(sessionID)
     if (!binding.task_id || !binding.task_title) return
 
     const now = Date.now()
@@ -1820,33 +1861,18 @@ export function Session() {
         note,
       },
     }).then((result) => {
-      const task: any = result?.task
-      setMapBinding(sessionID, {
-        task_id: task?.id || binding.task_id,
-        task_title: task?.title || binding.task_title,
-        task_status: task?.status || binding.task_status || "in_progress",
-        last_phase: result?.session?.phase || "progress",
-        last_progress_note: note,
-      })
-      void debugUiLog("map:auto-session-checkpoint:ok", { sessionID, task_id: task?.id || binding.task_id })
+      const next = setMapBinding(sessionID, mapLifecycleBindingPatch({ result, binding, fallbackPhase: "progress", note }))
+      void debugUiLog("map:auto-session-checkpoint:ok", { sessionID, task_id: next.task_id })
     }).catch((error) => {
       if (!isQuietMapError(error)) void debugUiLog("map:auto-session-checkpoint:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
     })
   }
 
   const clearMapModuleTask = (sessionID: string, patch: Record<string, unknown>) =>
-    setMapBinding(sessionID, {
-      ...patch,
-      module_id: undefined,
-      module_slug: undefined,
-      module_name: undefined,
-      task_id: undefined,
-      task_title: undefined,
-      task_status: undefined,
-    })
+    clearMapModuleTaskInKV({ kv, sessionID, patch, host: mapHost, actor: mapActor })
 
   const requireMapSessionID = () => {
-    if (!route.sessionID) throw new Error("Set a session first")
+    if (!route.sessionID) throw new Error("Abra uma sessão primeiro")
     return route.sessionID
   }
 
@@ -1880,11 +1906,11 @@ export function Session() {
     await debugUiLog("map:choose-project:start", { sessionID })
     const result = await listMapProjects()
     const projects = Array.isArray(result?.projects) ? result.projects : []
-    if (!projects.length) throw new Error("No MAP projects found")
-    const picked = await selectMapOption<any>(
+    if (!projects.length) throw new Error("Nenhum projeto MAP encontrado")
+    const picked = await selectMapOption<MapProjectItem>(
       dialog,
       "Vincular projeto MAP",
-      projects.map((item: any) => ({
+      projects.map((item) => ({
         title: String(item.name || item.slug || item.id || "Projeto MAP"),
         value: item,
         description: String(item.slug || item.id || ""),
@@ -1906,13 +1932,13 @@ export function Session() {
     const sessionID = requireMapSessionID()
     const binding: any = getMapBinding(sessionID)
     await debugUiLog("map:choose-module:start", { sessionID, project_id: binding.project_id, project_slug: binding.project_slug })
-    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    if (!canChooseMapModuleOrTask(binding)) throw new Error("Vincule um projeto MAP primeiro")
     const result = await listMapModules({
       project_id: binding.project_id,
       project_slug: binding.project_slug,
     })
     const modules = Array.isArray(result?.modules) ? result.modules : []
-    if (!modules.length) throw new Error("No MAP modules found for project")
+    if (!modules.length) throw new Error("Nenhum módulo MAP encontrado neste projeto")
     const picked = await selectMapOption<any>(
       dialog,
       "Vincular módulo MAP",
@@ -1941,7 +1967,7 @@ export function Session() {
     const sessionID = requireMapSessionID()
     const binding: any = getMapBinding(sessionID)
     await debugUiLog("map:choose-task:start", { sessionID, project_id: binding.project_id, module_id: binding.module_id })
-    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    if (!canChooseMapModuleOrTask(binding)) throw new Error("Vincule um projeto MAP primeiro")
     const listed = await listMapTasks({
       project_id: binding.project_id,
       project_slug: binding.project_slug,
@@ -1971,12 +1997,13 @@ export function Session() {
     if (!selected) return null
     if (selected.kind === "existing") {
       const taskResult: any = selected.task
-      if (!taskResult?.id) throw new Error("MAP task not returned")
+      if (!taskResult?.id) throw new Error("Task MAP não retornada")
       const next = setMapBinding(sessionID, {
         task_id: taskResult.id,
         task_title: taskResult.title,
         task_status: taskResult.status,
       })
+      void maybeStartLinkedMapTaskSession(sessionID)
       await debugUiLog("map:choose-task:ok", { sessionID, task_id: taskResult.id, task_title: taskResult.title, mode: "linked" })
       return next
     }
@@ -2012,26 +2039,27 @@ export function Session() {
     }).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
       if (/authentication_required|unauthorized|401/i.test(message)) {
-        throw new Error("MAP recusou a criação da task no endpoint público atual (authentication_required). Por enquanto, digite o ID/título de uma task existente para vincular sem criar, ou verifique se a escrita pública do MAP foi liberada no backend.")
+        throw new Error("MAP requer login OAuth/device no Markspanel para criar tasks")
       }
       throw error
     })).task
     const taskResult: any = createdTask
-    if (!taskResult?.id) throw new Error("MAP task not returned")
+    if (!taskResult?.id) throw new Error("Task MAP não retornada")
     const next = setMapBinding(sessionID, {
       task_id: taskResult.id,
       task_title: taskResult.title,
       task_status: taskResult.status,
     })
+    void maybeStartLinkedMapTaskSession(sessionID)
     await debugUiLog("map:choose-task:ok", { sessionID, task_id: taskResult.id, task_title: taskResult.title, mode: task ? "linked" : "created" })
     return next
   }
 
-  const reloadMapContext = async () => {
+  const reloadMapContext = async (dialogContext = dialog) => {
     const sessionID = requireMapSessionID()
     const binding: any = getMapBinding(sessionID)
     await debugUiLog("map:context-reload:start", { sessionID, project_id: binding.project_id, module_id: binding.module_id, task_id: binding.task_id })
-    if (!binding.project_id && !binding.project_slug) throw new Error("Link a MAP project first")
+    if (!canChooseMapModuleOrTask(binding)) throw new Error("Vincule um projeto MAP primeiro")
     const data = await getMapBootstrap({
       project_id: binding.project_id,
       project_slug: binding.project_slug,
@@ -2040,27 +2068,19 @@ export function Session() {
       host: mapHost,
       include_tasks: true,
     })
-    const project = data?.project as any
-    const module = data?.module as any
-    const tasks = Array.isArray(data?.tasks) ? data.tasks.slice(0, 8) : []
-    const rows = [
-      "[Planning / MAP]",
-      "- host: " + mapHost,
-      "- actor: " + mapActor,
-      "- project: " + (project?.name || binding.project_name || binding.project_slug || binding.project_id || "(none)"),
-      "- module: " + (module?.name || binding.module_name || binding.module_slug || binding.module_id || "(none)"),
-      "- linked_task: " + (binding.task_title || binding.task_id || "(none)"),
-      "",
-      "Tasks:",
-      ...tasks.map((item: any) => "- [" + String(item.status || "todo") + "] " + String(item.title || item.id || "sem titulo")),
-    ]
-    injectContext("Planning", rows)
-    await debugUiLog("map:context-reload:ok", { sessionID, tasks: tasks.length })
+    const options = mapContextOptions({ data, binding, host: mapHost, actor: mapActor })
+    await selectMapOption<string>(
+      dialogContext,
+      "Contexto MAP vinculado",
+      options,
+      "Buscar no contexto MAP...",
+    )
+    await debugUiLog("map:context-reload:ok", { sessionID, tasks: Array.isArray(data?.tasks) ? data.tasks.length : 0 })
     return data
   }
 
   const ensureMapTaskBinding = (binding: any) => {
-    if (!binding?.task_id && !binding?.task_title) throw new Error("Link a MAP task first")
+    if (!binding?.task_id && !binding?.task_title) throw new Error("Vincule uma task MAP primeiro")
     return binding
   }
 
@@ -2078,16 +2098,10 @@ export function Session() {
       host: mapHost,
       actor: mapActor,
       task_status: "in_progress",
-      note: "Session started from MarksCode",
+      note: "Sessão iniciada pelo MarksCode",
     })
-    const task: any = result?.task
-    const next = setMapBinding(sessionID, {
-      task_id: task?.id || binding.task_id,
-      task_title: task?.title || binding.task_title,
-      task_status: task?.status || "in_progress",
-      last_phase: result?.session?.phase || "started",
-    })
-    await debugUiLog("map:session-start:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "started" })
+    const next = setMapBinding(sessionID, mapLifecycleBindingPatch({ result, binding, fallbackPhase: "started" }))
+    await debugUiLog("map:session-start:ok", { sessionID, task_id: next.task_id, phase: next.last_phase })
     return next
   }
 
@@ -2120,15 +2134,8 @@ export function Session() {
         note,
       },
     })
-    const task: any = result?.task
-    const next = setMapBinding(sessionID, {
-      task_id: task?.id || binding.task_id,
-      task_title: task?.title || binding.task_title,
-      task_status: task?.status || binding.task_status || "in_progress",
-      last_phase: result?.session?.phase || "progress",
-      last_progress_note: note,
-    })
-    await debugUiLog("map:session-progress:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "progress" })
+    const next = setMapBinding(sessionID, mapLifecycleBindingPatch({ result, binding, fallbackPhase: "progress", note }))
+    await debugUiLog("map:session-progress:ok", { sessionID, task_id: next.task_id, phase: next.last_phase })
     return next
   }
 
@@ -2156,17 +2163,83 @@ export function Session() {
         note,
       },
     })
-    const task: any = result?.task
-    const next = setMapBinding(sessionID, {
-      task_id: task?.id || binding.task_id,
-      task_title: task?.title || binding.task_title,
-      task_status: task?.status || "done",
-      last_phase: result?.session?.phase || "ended",
-      last_checkout_note: note,
-    })
-    await debugUiLog("map:session-end:ok", { sessionID, task_id: task?.id || binding.task_id, phase: result?.session?.phase || "ended" })
+    const next = setMapBinding(sessionID, mapLifecycleBindingPatch({ result, binding, fallbackPhase: "ended", note }))
+    await debugUiLog("map:session-end:ok", { sessionID, task_id: next.task_id, phase: next.last_phase })
     return next
   }
+
+  const bindSuggestedMapProject = async (projectItem: MapProjectItem) => {
+    const sessionID = requireMapSessionID()
+    const next = clearMapModuleTask(sessionID, {
+      project_id: projectItem.id,
+      project_slug: projectItem.slug,
+      project_name: projectItem.name,
+    })
+    await reloadMapContext().catch((error) => {
+      if (!isQuietMapError(error)) void debugUiLog("map:auto-suggestion-context:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+    })
+    const pickModule = await DialogConfirm.show(dialog, "Vincular módulo MAP?", "Deseja escolher módulo e tarefa MAP agora?")
+    if (!pickModule) return next
+    const moduleBinding = await chooseMapModule(dialog).catch((error) => {
+      if (!isQuietMapError(error)) toast.show({ message: error instanceof Error ? error.message : "Erro ao vincular módulo MAP", variant: "warning", duration: 7000 })
+      return null
+    })
+    if (!moduleBinding) return next
+    await chooseOrCreateMapTask(dialog).catch((error) => {
+      if (!isQuietMapError(error)) toast.show({ message: error instanceof Error ? error.message : "Erro ao vincular task MAP", variant: "warning", duration: 7000 })
+      return null
+    })
+    return getMapBinding(sessionID)
+  }
+
+  const maybeSuggestMapBinding = async () => {
+    const sessionID = route.sessionID
+    if (!sessionID) return
+    if (kv.get(mapKeyFor(sessionID))) return
+    if (kv.get(mapSuggestionSeenKeyFor(sessionID))) return
+    if (dialog.stack.length > 0) return
+    const result = await listMapProjects().catch((error) => {
+      if (!isQuietMapError(error)) void debugUiLog("map:auto-suggestion:list:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+      return null
+    })
+    const projects = result?.projects || []
+    if (!projects.length) return
+    const ranked = projects.map((item) => ({ item, score: scoreMapProjectSuggestion(item) })).toSorted((a, b) => b.score - a.score)
+    const candidate = ranked[0]
+    if (!candidate) return
+    if (ranked.length > 1 && candidate.score < 6) return
+    kv.set(mapSuggestionSeenKeyFor(sessionID), "1")
+    const choice = await selectMapOption<"bind" | "choose" | "ignore">(
+      dialog,
+      "Encontrei o projeto MAP '" + String(candidate.item.name || candidate.item.slug) + "'. Deseja vincular esta sessão?",
+      [
+        { title: "Vincular projeto", value: "bind", description: String(candidate.item.slug || candidate.item.id || ""), category: "MAP" },
+        { title: "Escolher outro", value: "choose", description: "selecionar projeto/módulo/tarefa", category: "MAP" },
+        { title: "Ignorar por esta sessão", value: "ignore", description: "não perguntar novamente nesta sessão", category: "MAP" },
+      ],
+      "Escolha uma ação...",
+    )
+    if (choice === "bind") {
+      const binding = await bindSuggestedMapProject(candidate.item)
+      if ((binding as Record<string, unknown>)?.project_name || (binding as Record<string, unknown>)?.project_slug) toast.show({ message: "Projeto MAP vinculado: " + String((binding as Record<string, unknown>).project_name || (binding as Record<string, unknown>).project_slug), variant: "success", duration: 6500 })
+      return
+    }
+    if (choice === "choose") {
+      const binding = await chooseMapProject(dialog)
+      if (!binding) return
+      await reloadMapContext().catch((error) => {
+        if (!isQuietMapError(error)) void debugUiLog("map:auto-suggestion-context:error", { sessionID, message: error instanceof Error ? error.message : String(error) })
+      })
+      const pickModule = await DialogConfirm.show(dialog, "Vincular módulo MAP?", "Deseja escolher módulo e tarefa MAP agora?")
+      if (!pickModule) return
+      await chooseMapModule(dialog).catch(() => null)
+      await chooseOrCreateMapTask(dialog).catch(() => null)
+    }
+  }
+
+  onMount(() => {
+    setTimeout(() => void maybeSuggestMapBinding(), 1200)
+  })
   // MARKSCODE_MAP_HELPERS_END
       
   event.on("session.status", (evt) => {
@@ -2991,25 +3064,6 @@ export function Session() {
         moveChild(-1)
       }),
     },
-{
-      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
-      name: "markscode.memories.recent-topics",
-      category: "MarksCode",
-      slashName: "memory-recent-topics",
-      run: () => {
-        dialog.replace(() => (
-          <DialogRecentTopics
-            userID={memoriesUserID}
-            sessionID={route.sessionID || undefined}
-            onSelect={(topic) => {
-              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
-              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
-              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
-            }}
-          />
-        ))
-      },
-    },
     {
       title: "MarksCode: Buscar na Memória Local (Memvid)",
       name: "markscode.memories.search-local",
@@ -3091,13 +3145,13 @@ export function Session() {
 
         const cloudOk = Boolean(status.cloud_available)
         if (!cloudOk) {
-          lines.push("❌ API remota: sem configuração cloud (MARKSCODE_MEMORIES_API_KEY / MEMORIES_API_KEY)")
+          lines.push("❌ API remota: sem sessão/configuração Markspanel; faça login pelo fluxo OAuth/device")
         } else {
           const cloudTest = await recallHybridMemories({ cue: "test", provider: "cloud", limit: 1 }).catch(() => null)
           lines.push(
             cloudTest && !cloudTest.errors.some((e) => e.startsWith("cloud:"))
               ? "✅ API remota: acessível"
-              : "⚠️ API remota: chave configurada mas não respondeu",
+              : "⚠️ API remota: sessão/configuração Markspanel não respondeu",
           )
         }
 
@@ -3318,25 +3372,6 @@ export function Session() {
       },
     },
     {
-      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
-      name: "markscode.memories.recent-topics",
-      category: "MarksCode",
-      slashName: "memory-recent-topics",
-      run: () => {
-        dialog.replace(() => (
-          <DialogRecentTopics
-            userID={memoriesUserID}
-            sessionID={route.sessionID || undefined}
-            onSelect={(topic) => {
-              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
-              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
-              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
-            }}
-          />
-        ))
-      },
-    },
-    {
       title: "MarksCode: Testar auto-handoff de contexto",
       name: "markscode.memories.test-auto-handoff",
       category: "MarksCode",
@@ -3344,7 +3379,7 @@ export function Session() {
       run: async () => {
         const targetSessionID = route.sessionID
         if (!targetSessionID) {
-          toast.show({ message: "Set a session first", variant: "warning" })
+          toast.show({ message: "Abra uma sessão primeiro", variant: "warning" })
           dialog.clear()
           return
         }
@@ -3634,25 +3669,6 @@ export function Session() {
         await refreshHybridMemoryStatus().catch(() => undefined)
         await DialogAlert.show(dialog, "BrainSystem atualizado", "Status híbrido e diagnóstico BrainSystem foram atualizados.")
         dialog.clear()
-      },
-    },
-    {
-      title: "MarksCode: Assuntos recentes (Memvid/BrainSystem)",
-      name: "markscode.memories.recent-topics",
-      category: "MarksCode",
-      slashName: "memory-recent-topics",
-      run: () => {
-        dialog.replace(() => (
-          <DialogRecentTopics
-            userID={memoriesUserID}
-            sessionID={route.sessionID || undefined}
-            onSelect={(topic) => {
-              const detail = [topic.topic, topic.content_preview].filter(Boolean).join(" — ")
-              injectContext("[Assunto recente - Memvid/BrainSystem]", ["[" + topic.source + "] " + detail])
-              toast.show({ message: "Assunto recente inserido no prompt", variant: "success", duration: 6500 })
-            }}
-          />
-        ))
       },
     },
     {

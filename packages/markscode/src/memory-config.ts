@@ -1,3 +1,5 @@
+import { getMarksAgentConfigValue, getMarksAgentSecretValue } from "./marks-agent-config-source"
+
 const DEFAULT_MEMORIES_URL = "http://api.marks.ia.br:8689"
 const DEFAULT_MEMORIES_USER_ID = "marks-local"
 
@@ -52,30 +54,50 @@ export function setRemoteMemoryConfig(value: unknown, source = "remote") {
 }
 
 export function resolveMemoryConfig() {
+  const marksAgentAPIKey = firstNonEmpty(
+    getMarksAgentConfigValue("MARKSCODE_MEMORIES_API_KEY"),
+    getMarksAgentSecretValue("MARKSCODE_MEMORIES_API_KEY"),
+  )
   const apiKey = firstNonEmpty(
+    marksAgentAPIKey,
+    remoteMemoryConfig?.api_key,
     process.env.MARKSCODE_MEMORIES_API_KEY,
     process.env.MEMORIES_API_KEY,
-    remoteMemoryConfig?.api_key,
   )
-  const apiKeySource = process.env.MARKSCODE_MEMORIES_API_KEY?.trim()
-    ? "MARKSCODE_MEMORIES_API_KEY"
-    : process.env.MEMORIES_API_KEY?.trim()
-      ? "MEMORIES_API_KEY"
-      : remoteMemoryConfig?.api_key
-        ? remoteMemoryConfig.source || "remote"
-        : "none"
-  const timeoutMs = remoteMemoryConfig?.timeout_ms
+  const apiKeySource = marksAgentAPIKey
+    ? "marks_agent"
+    : remoteMemoryConfig?.api_key
+      ? remoteMemoryConfig.source || "remote"
+      : process.env.MARKSCODE_MEMORIES_API_KEY?.trim()
+        ? "MARKSCODE_MEMORIES_API_KEY"
+        : process.env.MEMORIES_API_KEY?.trim()
+          ? "MEMORIES_API_KEY"
+          : "none"
+  const timeoutMs =
+    timeoutValue(getMarksAgentConfigValue("MARKSCODE_MEMORIES_API_TIMEOUT_MS")) ||
+    timeoutValue(getMarksAgentConfigValue("MARKSCODE_MEMORIES_TIMEOUT_MS")) ||
+    remoteMemoryConfig?.timeout_ms
 
   return {
     memories: {
-      url: firstNonEmpty(process.env.MARKSCODE_MEMORIES_URL, process.env.MEMORIES_URL, remoteMemoryConfig?.url) || DEFAULT_MEMORIES_URL,
+      url:
+        firstNonEmpty(
+          getMarksAgentConfigValue("MARKSCODE_MEMORIES_URL"),
+          remoteMemoryConfig?.url,
+          process.env.MARKSCODE_MEMORIES_URL,
+          process.env.MEMORIES_URL,
+        ) || DEFAULT_MEMORIES_URL,
       api_key: apiKey,
       api_key_source: apiKeySource,
       ...(timeoutMs ? { timeout_ms: timeoutMs } : {}),
     },
     user_id:
-      firstNonEmpty(process.env.MARKSCODE_MEMORIES_USER_ID, process.env.MEMORIES_USER_ID, remoteMemoryConfig?.user_id) ||
-      DEFAULT_MEMORIES_USER_ID,
+      firstNonEmpty(
+        getMarksAgentConfigValue("MARKSCODE_MEMORIES_USER_ID"),
+        remoteMemoryConfig?.user_id,
+        process.env.MARKSCODE_MEMORIES_USER_ID,
+        process.env.MEMORIES_USER_ID,
+      ) || DEFAULT_MEMORIES_USER_ID,
   }
 }
 

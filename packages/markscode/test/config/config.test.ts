@@ -578,7 +578,7 @@ const accountTokenIt = configIt({
           },
         }),
       ),
-    config: () =>
+    configActive: () =>
       Effect.succeed(
         Option.some({
           provider: { opencode: { options: { apiKey: "{env:OPENCODE_CONSOLE_TOKEN}" } } },
@@ -597,16 +597,19 @@ accountTokenIt.instance("resolves env templates in account config with account t
 
 const accountProviderIt = configIt({
   account: Layer.mock(Account.Service)({
-    active: () =>
+    activeOrg: () =>
       Effect.succeed(
         Option.some({
-          id: AccountID.make("account-1"),
-          email: "user@example.com",
-          url: "https://control.example.com",
-          active_org_id: OrgID.make("org-1"),
+          account: {
+            id: AccountID.make("account-1"),
+            email: "user@example.com",
+            url: "https://control.example.com",
+            active_org_id: OrgID.make("org-1"),
+          },
+          org: { id: OrgID.make("org-1"), name: "Example Org" },
         }),
       ),
-    config: () =>
+    configActive: () =>
       Effect.succeed(
         Option.some({
           enabled_providers: ["markspanel"],
@@ -623,6 +626,37 @@ const accountProviderIt = configIt({
     token: () => Effect.succeed(Option.none()),
   }),
 })
+
+const reconciledAccountCalls: string[] = []
+const reconciledAccountIt = configIt({
+  account: Layer.mock(Account.Service)({
+    activeOrg: () =>
+      Effect.succeed(
+        Option.some({
+          account: {
+            id: AccountID.make("account-1"),
+            email: "user@example.com",
+            url: "https://control.example.com",
+            active_org_id: OrgID.make("org-valid"),
+          },
+          org: { id: OrgID.make("org-valid"), name: "Valid" },
+        }),
+      ),
+    configActive: (active) => {
+      reconciledAccountCalls.push(active.org.id)
+      return Effect.succeed(Option.some({ provider: {} }))
+    },
+    token: () => Effect.succeed(Option.none()),
+  }),
+})
+
+reconciledAccountIt.instance("loads account config only with the reconciled org snapshot", () =>
+  Effect.gen(function* () {
+    reconciledAccountCalls.length = 0
+    yield* Config.use.get()
+    expect(reconciledAccountCalls).toEqual(["org-valid"])
+  }),
+)
 
 accountProviderIt.instance("replaces local providers when account config provides authorized providers", () =>
   Effect.gen(function* () {
@@ -1771,6 +1805,24 @@ describe("deduplicatePluginOrigins", () => {
     const result = dedupe(plugins)
 
     expect(result).toEqual(["file:///project/.opencode/plugin/demo.ts"])
+  })
+
+  test("deduplicates notifier variants without removing dcp or supermemory", () => {
+    const plugins = [
+      "@tarquinen/opencode-dcp@latest",
+      "opencode-supermemory@latest",
+      "opencode-notifier@latest",
+      "file:///project/vendor/markscode-notifier/dist/index.js",
+      "file:///project/vendor/markscode-telegram-notifier/dist/index.js",
+    ]
+
+    const result = dedupe(plugins)
+
+    expect(result).toContain("@tarquinen/opencode-dcp@latest")
+    expect(result).toContain("opencode-supermemory@latest")
+    expect(result).not.toContain("opencode-notifier@latest")
+    expect(result).toContain("file:///project/vendor/markscode-notifier/dist/index.js")
+    expect(result).toContain("file:///project/vendor/markscode-telegram-notifier/dist/index.js")
   })
 
   test("preserves order of remaining plugins", () => {

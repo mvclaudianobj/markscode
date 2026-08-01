@@ -12,10 +12,12 @@ import { parsePluginSpecifier } from "@/plugin/shared"
 
 const log = Log.create({ service: "config.global" })
 const MARKSCODE_NOTIFIER_PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../vendor/markscode-notifier")
+const MARKSCODE_TELEGRAM_NOTIFIER_PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../vendor/markscode-telegram-notifier")
 
 export const DEFAULT_MARKSCODE_PLUGINS = [
   "@tarquinen/opencode-dcp@latest",
   MARKSCODE_NOTIFIER_PLUGIN,
+  MARKSCODE_TELEGRAM_NOTIFIER_PLUGIN,
   "opencode-supermemory@latest",
 ] as const
 
@@ -31,8 +33,15 @@ function pluginSpec(item: unknown) {
 }
 
 function pluginPackage(spec: string) {
-  if (spec.startsWith("file://")) return spec
-  return parsePluginSpecifier(spec).pkg
+  if (spec.startsWith("file://") || path.isAbsolute(spec)) {
+    if (/markscode-telegram-notifier(?:[\\/]|$)/.test(spec)) return "markscode-telegram-notifier"
+    if (/markscode-notifier(?:[\\/]|$)/.test(spec) || /opencode-notifier|notifier/i.test(spec)) return "markscode-notifier"
+    return spec
+  }
+  const pkg = parsePluginSpecifier(spec).pkg
+  if (/markscode-telegram-notifier/i.test(pkg)) return "markscode-telegram-notifier"
+  if (/markscode-notifier|opencode-notifier|notifier/i.test(pkg) && !/telegram/i.test(pkg)) return "markscode-notifier"
+  return pkg
 }
 
 export async function ensureDefaultPlugins(env: NodeJS.ProcessEnv = process.env) {
@@ -53,9 +62,16 @@ export async function ensureDefaultPlugins(env: NodeJS.ProcessEnv = process.env)
   }
 
   const list = Array.isArray(data.plugin) ? data.plugin : []
-  const packages = new Set(list.map(pluginSpec).filter((item): item is string => Boolean(item)).map(pluginPackage))
-  const missing = DEFAULT_MARKSCODE_PLUGINS.filter((spec) => !packages.has(pluginPackage(spec)))
-  if (!missing.length && Array.isArray(data.plugin)) return
+  const cleaned = list.filter((item) => {
+    const spec = pluginSpec(item)
+    if (!spec) return true
+    const pkg = pluginPackage(spec)
+    if (pkg !== "markscode-notifier") return true
+    return path.resolve(spec) === MARKSCODE_NOTIFIER_PLUGIN
+  })
+  const currentPackages = new Set(cleaned.map(pluginSpec).filter((item): item is string => Boolean(item)).map(pluginPackage))
+  const missing = DEFAULT_MARKSCODE_PLUGINS.filter((spec) => !currentPackages.has(pluginPackage(spec)))
+  if (!missing.length && cleaned.length === list.length && Array.isArray(data.plugin)) return
 
-  await Filesystem.write(file, JSON.stringify({ ...data, plugin: [...list, ...missing] }, null, 2))
+  await Filesystem.write(file, JSON.stringify({ ...data, plugin: [...cleaned, ...missing] }, null, 2))
 }

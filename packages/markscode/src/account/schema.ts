@@ -90,6 +90,9 @@ export class Login extends Schema.Class<Login>("Login")({
 
 export class PollSuccess extends Schema.TaggedClass<PollSuccess>()("PollSuccess", {
   email: Schema.String,
+  account: Schema.optionalKey(Info),
+  orgs: Schema.optionalKey(Schema.Array(Org)),
+  org: Schema.optionalKey(Schema.NullOr(Org)),
 }) {}
 
 export class PollPending extends Schema.TaggedClass<PollPending>()("PollPending", {}) {}

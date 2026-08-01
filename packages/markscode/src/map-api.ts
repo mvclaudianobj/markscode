@@ -1,5 +1,9 @@
 
 
+import { Effect, Option } from "effect"
+import { Account } from "@/account/account"
+import { makeRuntime } from "@/effect/run-service"
+
 /* MARKSCODE_MAP_API_START */
 
 export interface MapProjectRefInput {
@@ -56,6 +60,7 @@ export interface MapBootstrapResult {
   tasks?: MapTaskItem[]
   host_state?: Record<string, unknown> | null
   context?: Record<string, unknown> | null
+  recent_events?: Array<Record<string, unknown>>
 }
 
 export interface MapTaskUpsertInput extends MapModuleRefInput {
@@ -117,19 +122,29 @@ const normalizeMapBase = (value: string) => {
   return url.toString().replace(/\/$/, "")
 }
 
-const mapHeaders = () => {
-  const key = String(
-    process.env.MAP_API_KEY ||
-      process.env.MARKSCODE_MAP_API_KEY ||
-      process.env.MARKSCODE_API_KEY ||
-      process.env.MEMORIES_API_KEY ||
-      process.env.MARKSCODE_ACCESS_API_KEY ||
-      process.env.MAP_WEB_SECRET ||
-      "",
-  ).trim()
+const accountRuntime = makeRuntime(Account.Service, Account.defaultLayer)
+
+const activeOrgLeaseHeaders = (): Promise<Record<string, string>> =>
+  accountRuntime.runPromise(() =>
+    Account.Service.use((account) =>
+      account.acquireActiveOrgLease().pipe(
+        Effect.map((lease) => {
+          if (Option.isNone(lease)) return {} as Record<string, string>
+          return {
+            Authorization: "Bearer " + lease.value.accessToken,
+            "x-org-id": lease.value.active.org.id,
+          } as Record<string, string>
+        }),
+        Effect.catch(() => Effect.succeed({} satisfies Record<string, string>)),
+      ),
+    ),
+  )
+
+const mapHeaders = async (): Promise<Record<string, string>> => {
+  const leaseHeaders = await activeOrgLeaseHeaders()
   return {
     "Content-Type": "application/json",
-    ...(key ? { "X-API-Key": key, Authorization: "Bearer " + key } : {}),
+    ...leaseHeaders,
   }
 }
 
@@ -159,7 +174,7 @@ const mapRequest = async <T>(path: string, init?: RequestInit, query?: MapQueryI
     res = await fetch(url, {
       ...init,
       headers: {
-        ...mapHeaders(),
+        ...(await mapHeaders()),
         ...(init?.headers || {}),
       },
     })
@@ -170,7 +185,9 @@ const mapRequest = async <T>(path: string, init?: RequestInit, query?: MapQueryI
   const text = await res.text()
   const data = text ? JSON.parse(text) : null
   if (!res.ok) {
-    const msg = data?.error || data?.message || res.statusText || "MAP request failed"
+    const msg = res.status === 401 || res.status === 403
+      ? "Sessão Markspanel ausente ou expirada; faça login pelo fluxo OAuth/device do MarksCode/Markspanel."
+      : data?.error || data?.message || res.statusText || "MAP request failed"
     throw new Error(String(msg))
   }
   return data as T
@@ -299,4 +316,3 @@ export async function endMapSession(input: MapSessionLifecycleInput): Promise<Ma
 }
 
 /* MARKSCODE_MAP_API_END */
-

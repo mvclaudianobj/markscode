@@ -38,11 +38,20 @@ const g4fSpaceVoices = new Set([
 const valueFrom = <T>(config: { kv?: MarksTTSConfigSource } | undefined, key: string, env: string, fallback: T) =>
   config?.kv?.get<T>(key, fallback) ?? (process.env[env] === undefined ? fallback : (process.env[env] as T))
 
+export const ttsVolume = (config: { kv?: MarksTTSConfigSource } | undefined) => {
+  const volume = Number(valueFrom(config, "markscode_tts_volume", "MARKSCODE_TTS_VOLUME", 3))
+  if (!Number.isFinite(volume)) return 1
+  return Math.min(3, Math.max(0.1, volume))
+}
+
 const optionalValueFrom = (config: { kv?: MarksTTSConfigSource } | undefined, key: string, ...env: string[]) =>
   String(config?.kv?.get(key, "") || env.map((name) => process.env[name]).find((value) => value) || "")
 
 const optionalValueFromKeys = (config: { kv?: MarksTTSConfigSource } | undefined, keys: string[], env: string[]) =>
   String(keys.map((key) => config?.kv?.get(key, "")).find((value) => value) || env.map((name) => process.env[name]).find((value) => value) || "")
+
+export const g4fSpaceDirectToken = (config: { kv?: MarksTTSConfigSource } | undefined) =>
+  optionalValueFromKeys(config, ["markscode_tts_g4f_space_token"], ["MARKSCODE_TTS_G4F_SPACE_TOKEN", "MARKS_G4F_SPACE_TOKEN"])
 
 const isRootOrSudo = () => process.getuid?.() === 0 || Boolean(process.env.SUDO_USER)
 
@@ -158,9 +167,9 @@ let currentVoice: Parameters<typeof TuiAudio.stopVoice>[0] | undefined
 
 const playerCommand = (player: Exclude<TTSPlayer, "auto" | "native" | "none">, file: string, config?: { kv?: MarksTTSConfigSource }) =>
   player === "ffplay"
-    ? ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", file]
+    ? ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", "-volume", String(Math.round(ttsVolume(config) * 100)), file]
     : player === "mpv"
-      ? ["mpv", "--no-video", "--really-quiet", file]
+      ? ["mpv", "--no-video", "--really-quiet", "--volume=" + String(Math.round(ttsVolume(config) * 100)), file]
       : player === "marcos-pulse"
         ? ((user) => [
             "runuser",
@@ -175,14 +184,16 @@ const playerCommand = (player: Exclude<TTSPlayer, "auto" | "native" | "none">, f
             "-autoexit",
             "-loglevel",
             "error",
+            "-volume",
+            String(Math.round(ttsVolume(config) * 100)),
             file,
           ])(desktopUser(config))
         : [player, file]
 
-async function playNative(bytes: Uint8Array, file: string, text: string) {
+async function playNative(bytes: Uint8Array, file: string, text: string, config?: { kv?: MarksTTSConfigSource }) {
   const sound = await TuiAudio.loadSoundBytes(bytes, file)
   if (!sound) return false
-  const voice = TuiAudio.play(sound)
+  const voice = TuiAudio.play(sound, { volume: ttsVolume(config) })
   if (!voice) return false
   currentVoice = voice
   try {
@@ -214,7 +225,7 @@ async function playWithFallback(file: string, bytes: Uint8Array, text: string, c
     (previous, current) =>
       previous.then(async (done) => {
         if (done) return true
-        if (current === "native") return playNative(bytes, file, text)
+        if (current === "native") return playNative(bytes, file, text, config)
         return runPlayer(current, file, config)
       }),
     Promise.resolve(false),
@@ -279,8 +290,7 @@ async function speakNow(text: string, config: { kv?: MarksTTSConfigSource; messa
   const chunks = chunkText(text, Math.max(20, Number(valueFrom(config, "markscode_tts_chunk_size", "MARKSCODE_TTS_CHUNK_SIZE", 200)) || 200))
   const base = optionalValueFrom(config, "markscode_tts_g4f_space_url", "MARKS_G4F_SPACE_URL", "MARKSCODE_TTS_G4F_SPACE_URL") || "https://gpt4free.marks.ia.br"
   const directBase = optionalValueFrom(config, "markscode_tts_g4f_space_direct_url", "MARKSCODE_TTS_G4F_SPACE_DIRECT_URL") || "https://g4f.space"
-  const directToken = optionalValueFromKeys(config, ["markscode_tts_g4f_space_token"], ["MARKSCODE_TTS_G4F_SPACE_TOKEN", "MARKS_G4F_SPACE_TOKEN"]) || "g4f_u_mrrcwq_be89ab5fc1bf69eccf958c1b7618e00f25fade9fcbf338e9_377260d6"
-  const directToken2 = "g4f_u_mrrcwq_8c9541a138c6269b7e47f037c5e4997d3fc52d7e6a2d49e0_dd0ed2a3"
+  const directToken = g4fSpaceDirectToken(config)
   const output = optionalValueFrom(config, "markscode_tts_output", "MARKSCODE_TTS_OUTPUT")
   const timeout = Math.max(1, Number(valueFrom(config, "markscode_tts_timeout", "MARKSCODE_TTS_TIMEOUT", 90)) || 90) * 1000
   const audioBase = audioBaseFrom(base, config)
@@ -293,11 +303,10 @@ async function speakNow(text: string, config: { kv?: MarksTTSConfigSource; messa
         const directStep = directToken
           ? [{ provider: "g4f-space-direct", response: () => g4fSpaceAudioResponse(directAudioBase + "/ai/audio/" + encodeURIComponent(chunk) + "?voice=" + encodeURIComponent(voice), timeout, directToken) }]
           : []
-        const directStep2 = [{ provider: "g4f-space-direct2", response: () => g4fSpaceAudioResponse(directAudioBase + "/ai/audio/" + encodeURIComponent(chunk) + "?voice=" + encodeURIComponent(voice), timeout, directToken2) }]
         const proxyStep = [{ provider: "g4f-space-proxy", response: () => g4fSpaceAudioResponse(audioBase + "/ai/audio/" + encodeURIComponent(chunk) + "?voice=" + encodeURIComponent(voice), timeout) }]
         const geminiStep = [{ provider: "g4f-gemini", response: () => g4fGeminiAudioResponse(audioBase + "/api/Gemini/audio/speech", chunk, voice, timeout) }]
         const providerSteps: TTSStep[] =
-          provider === "g4f-gemini" ? geminiStep : provider === "g4f-space" ? (directToken ? [...directStep, ...directStep2] : [...directStep2, ...proxyStep]) : [...directStep, ...directStep2, ...proxyStep, ...geminiStep]
+          provider === "g4f-gemini" ? geminiStep : provider === "g4f-space" ? (directToken ? directStep : proxyStep) : [...directStep, ...proxyStep, ...geminiStep]
         const steps = provider === "g4f-space" && isEnabled(String(valueFrom(config, "markscode_tts_disable_provider_fallback", "MARKSCODE_TTS_DISABLE_PROVIDER_FALLBACK", "1"))) ? providerSteps.slice(0, 1) : providerSteps
         const response = await synthesizeWithFallback(steps, config)
         if (config.generation !== ttsGeneration) return

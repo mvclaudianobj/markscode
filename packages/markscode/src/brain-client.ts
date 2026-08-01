@@ -6,13 +6,13 @@ export type BrainRecallInput = { q: string; user_id?: string; session_id?: strin
 export type BrainRecallItem = { id?: string; content?: string; score?: number; [key: string]: unknown }
 export type BrainRecallResult = { ok: boolean; items: BrainRecallItem[]; sources: Record<string, boolean>; error?: string }
 
-export type BrainSaveInput = { content: string; title?: string; tags?: string[]; user_id?: string; session_id?: string; importance?: number }
+export type BrainSaveInput = { content: string; title?: string; tags?: string[]; user_id?: string; session_id?: string; importance?: number; identity?: Record<string, unknown>; customer_id?: string; org_id?: string; metadata?: Record<string, unknown> }
 export type BrainSaveResult = { ok: boolean; id?: string; error?: string }
 
 export type BrainGraphInput = { q: string; user_id?: string; session_id?: string; limit?: number }
 export type BrainGraphResult = { ok: boolean; items?: any[]; graph?: any; error?: string }
 
-export type BrainIngestItem = { source: string; content: string; title?: string; tags?: string[]; user_id: string; session_id?: string; type?: string; importance?: number; metadata?: Record<string, unknown> }
+export type BrainIngestItem = { source: string; content: string; title?: string; tags?: string[]; user_id: string; session_id?: string; type?: string; importance?: number; identity?: Record<string, unknown>; customer_id?: string; org_id?: string; metadata?: Record<string, unknown> }
 export type BrainIngestResult = { ok: boolean; ingested: number; errors?: string[]; error?: string }
 
 export type BrainArtifactResult = { ok: boolean; artifact?: any; error?: string }
@@ -86,7 +86,7 @@ export async function brainSave(token: string, input: BrainSaveInput): Promise<B
   return brainFetch<BrainSaveResult>("/save", {
     method: "POST",
     headers: jsonHeaders(token),
-    body: JSON.stringify({ content: input.content, title: input.title, tags: input.tags, user_id: input.user_id, session_id: input.session_id, importance: input.importance }),
+    body: JSON.stringify({ content: input.content, title: input.title, tags: input.tags, user_id: input.user_id, session_id: input.session_id, ...(input.importance === undefined || input.importance === 0.7 ? {} : { importance: input.importance }), identity: input.identity, customer_id: input.customer_id, org_id: input.org_id, metadata: input.metadata }),
   })
 }
 

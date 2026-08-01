@@ -596,11 +596,10 @@ export const layer = Layer.effect(
               const maybeAccountSvc = yield* Effect.serviceOption(Account.Service)
               if (Option.isNone(maybeAccountSvc)) return
               const acct = maybeAccountSvc.value
-              const active = yield* acct.active().pipe(Effect.catch(() => Effect.succeed(Option.none())))
-              if (Option.isSome(active) && active.value.active_org_id) {
+              const active = yield* acct.activeOrg().pipe(Effect.catch(() => Effect.succeed(Option.none())))
+              if (Option.isSome(active)) {
                 yield* acct.reportUsage({
-                  url: active.value.url,
-                  accountID: active.value.id,
+                  active: active.value,
                   provider: ctx.model.providerID,
                   model: ctx.model.id,
                   inputTokens: usage.tokens.input,

@@ -19,6 +19,7 @@ export const AccountStateTable = sqliteTable("account_state", {
     .$type<AccountID>()
     .references(() => AccountTable.id, { onDelete: "set null" }),
   active_org_id: text().$type<OrgID>(),
+  revision: integer().notNull().default(1),
 })
 
 // LEGACY

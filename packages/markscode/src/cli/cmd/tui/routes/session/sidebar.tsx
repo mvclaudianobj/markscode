@@ -37,6 +37,16 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
       return undefined
     }
   })
+  const mapText = (key: string) => {
+    const binding = mapBinding() as Record<string, unknown> | undefined
+    const value = binding?.[key]
+    return typeof value === "string" && value.trim() ? value : undefined
+  }
+  const mapUpdated = createMemo(() => {
+    const value = mapText("updated_at")
+    if (!value) return undefined
+    return value.replace("T", " ").replace(/\.\d+Z$/, "Z")
+  })
 
   return (
     <Show when={session()}>
@@ -94,6 +104,27 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </Show>
                 <Show when={sessionShareUrl()}>
                   <text fg={theme.textMuted}>{sessionShareUrl()}</text>
+                </Show>
+                <Show when={mapBinding()}>
+                  <box marginTop={1} paddingTop={1}>
+                    <text fg={theme.textMuted}>MAP</text>
+                    <text fg={theme.text}><b>{mapText("project_name") || mapText("project_slug") || mapText("project_id") || "Projeto vinculado"}</b></text>
+                    <Show when={mapText("module_name") || mapText("module_slug") || mapText("module_id")}>
+                      <text fg={theme.textMuted}>Módulo: {mapText("module_name") || mapText("module_slug") || mapText("module_id")}</text>
+                    </Show>
+                    <Show when={mapText("task_title") || mapText("task_id")}>
+                      <text fg={theme.textMuted}>Task: {mapText("task_title") || mapText("task_id")}</text>
+                    </Show>
+                    <Show when={mapText("task_status") || mapText("last_phase")}>
+                      <text fg={theme.textMuted}>Status: {mapText("task_status") || "-"} · {mapText("last_phase") || "sem fase"}</text>
+                    </Show>
+                    <Show when={mapText("last_progress_note")}>
+                      <text fg={theme.textMuted}>Progresso: {mapText("last_progress_note")}</text>
+                    </Show>
+                    <Show when={mapUpdated()}>
+                      <text fg={theme.textMuted}>Atualizado: {mapUpdated()}</text>
+                    </Show>
+                  </box>
                 </Show>
               </box>
             </TuiPluginRuntime.Slot>

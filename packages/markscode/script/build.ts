@@ -236,6 +236,14 @@ function graphifyEnvValue(keys: string[]) {
   return keys.map((key) => process.env[key]?.trim()).find(Boolean)
 }
 
+function graphifyDisabled() {
+  return process.env.MARKSCODE_GRAPHFY_ENABLED === "0" || process.env.MARKSCODE_GRAPHIFY_ENABLED === "0"
+}
+
+function graphifyHasProviderPrefix(model: string) {
+  return /^[A-Za-z0-9][\w.-]*\/.+/.test(model)
+}
+
 function graphifyMarksOpenAI() {
   const baseUrl = graphifyEnvValue([
     "MARKSCODE_GRAPHFY_OPENAI_BASE_URL",
@@ -256,9 +264,10 @@ function graphifyMarksOpenAI() {
     "MARKS_API_KEY",
     "OPENAI_API_KEY",
   ])
+  const useOpenAI = Boolean(apiKey && graphifyHasProviderPrefix(model))
   return {
-    args: apiKey ? ["extract", ".", "--no-viz", "--backend", "openai", "--model", model] : ["extract", ".", "--no-viz", "--code-only"],
-    env: apiKey ? { ...process.env, OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: model, OPENAI_API_KEY: apiKey } : process.env,
+    args: useOpenAI ? ["extract", ".", "--no-viz", "--backend", "openai", "--model", model] : ["extract", ".", "--no-viz", "--code-only"],
+    env: useOpenAI ? { ...process.env, OPENAI_BASE_URL: baseUrl, OPENAI_MODEL: model, OPENAI_API_KEY: apiKey } : process.env,
   }
 }
 
@@ -323,6 +332,11 @@ async function copyMemvidSidecar(item: { os: string; arch: string; abi?: "musl" 
 }
 
 async function setupGraphify() {
+  if (graphifyDisabled()) {
+    console.log("setupGraphify: disabled by MARKSCODE_GRAPHFY_ENABLED=0")
+    return
+  }
+
   const uvCandidates = [
     process.env.UV_PATH,
     path.join(process.env.HOME ?? "/root", ".local/bin/uv"),
@@ -384,6 +398,31 @@ if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

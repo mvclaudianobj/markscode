@@ -1,5 +1,4 @@
 import { Account } from "@/account/account"
-import type { Info } from "@/account/schema"
 import { defaultMarkspanelUrl, markspanelLoginEffect } from "@/cli/cmd/account"
 import * as Prompt from "@/cli/effect/prompt"
 import { InstanceStore } from "@/project/instance-store"
@@ -31,16 +30,14 @@ const remoteConfigStats = (config: Record<string, unknown>) => {
 
 const activeAccountWithOrg = Effect.fn("markspanel.startup.active")(function* () {
   const service = yield* Account.Service
-  const active = yield* service.active().pipe(Effect.catch(() => Effect.succeed(Option.none())))
-  if (Option.isNone(active) || !active.value.active_org_id) return Option.none<Info>()
-  return active
+  return yield* service.activeOrg().pipe(Effect.catch(() => Effect.succeed(Option.none())))
 })
 
-const loadConfig = Effect.fn("markspanel.startup.config")(function* (input: { account: Info; warningPrefix?: string }) {
+const loadConfig = Effect.fn("markspanel.startup.config")(function* (input: { active: Account.ActiveOrg; warningPrefix?: string }) {
   const service = yield* Account.Service
   const spin = Prompt.spinner()
   yield* spin.start("Carregando perfil Markspanel...")
-  const config = yield* service.config(input.account.id, input.account.active_org_id!).pipe(
+  const config = yield* service.configActive(input.active).pipe(
     Effect.catch(() =>
       Effect.gen(function* () {
         yield* spin.stop(`${input.warningPrefix ?? "Aviso"}: erro ao carregar perfil Markspanel (rede/auth).`, 2)
@@ -60,7 +57,7 @@ const continueFreeMode = Effect.fn("markspanel.startup.free")(function* (message
   yield* Prompt.log.warn("Continuando em modo livre — verifique conexão, token ou perfil Markspanel.")
 })
 
-const configFailureChoice = Effect.fn("markspanel.startup.config.choice")(function* (active: Info) {
+const configFailureChoice = Effect.fn("markspanel.startup.config.choice")(function* (active: Account.ActiveOrg) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     yield* continueFreeMode("Markspanel não carregou /api/config — usando providers locais/free.")
     return Option.none<Record<string, unknown>>()
@@ -83,7 +80,7 @@ const configFailureChoice = Effect.fn("markspanel.startup.config.choice")(functi
     return Option.none<Record<string, unknown>>()
   }
 
-  yield* markspanelLoginEffect(active.url || defaultMarkspanelUrl)
+  yield* markspanelLoginEffect(active.account.url || defaultMarkspanelUrl)
   const refreshed = yield* activeAccountWithOrg()
   if (Option.isNone(refreshed)) {
     return yield* failure(
@@ -91,7 +88,7 @@ const configFailureChoice = Effect.fn("markspanel.startup.config.choice")(functi
     )
   }
 
-  const retry = yield* loadConfig({ account: refreshed.value, warningPrefix: "Aviso após novo login" })
+  const retry = yield* loadConfig({ active: refreshed.value, warningPrefix: "Aviso após novo login" })
   if (Option.isSome(retry)) return retry
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -128,10 +125,10 @@ export const ensureParentGate = Effect.fn("markspanel.startup.ensure")(function*
     )
   }
 
-  const email = active.value.email ?? active.value.id
+  const email = active.value.account.email ?? active.value.account.id
   yield* Prompt.log.success(`Logado como ${email}`)
 
-  const initialConfig = yield* loadConfig({ account: active.value })
+  const initialConfig = yield* loadConfig({ active: active.value })
   const config = Option.isSome(initialConfig) ? initialConfig : yield* configFailureChoice(active.value)
   if (Option.isNone(config)) {
     return

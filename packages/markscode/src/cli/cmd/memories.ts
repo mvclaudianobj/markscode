@@ -29,21 +29,15 @@ import {
   type MemoryProvider,
 } from "../../memory-hybrid"
 import { diagnoseBrainSystem, formatDiagnosisForDisplay } from "../../memory-diagnose"
-
-const DEFAULT_USER = "marks-local"
-
-const hasEnvMemoryAPIKey = () => Boolean(process.env.MARKSCODE_MEMORIES_API_KEY?.trim() || process.env.MEMORIES_API_KEY?.trim())
+import { fallbackMemoryIdentity, resolveMemoryIdentityEffect } from "@/memory-identity"
 
 async function hydrateRemoteMemoryConfigFromActiveAccount() {
-  if (hasEnvMemoryAPIKey()) return
-
   await AppRuntime.runPromise(
     Effect.gen(function* () {
       const service = yield* Account.Service
-      const active = yield* service.active()
+      const active = yield* service.activeOrg()
       if (Option.isNone(active)) return
-      if (!active.value.active_org_id) return
-      yield* service.config(active.value.id, active.value.active_org_id)
+      yield* service.configActive(active.value)
     }).pipe(Effect.catch(() => Effect.void)),
   ).catch(() => undefined)
 }
@@ -61,7 +55,6 @@ export const MemoriesCommand = cmd({
       .option("user-id", {
         describe: "memory user id",
         type: "string",
-        default: DEFAULT_USER,
       })
       .option("session-id", {
         describe: "session id",
@@ -94,7 +87,6 @@ export const MemoriesCommand = cmd({
       .option("importance", {
         describe: "importance score (0-1)",
         type: "number",
-        default: 0.7,
       })
       .option("tag", {
         describe: "tag(s) for memory",
@@ -166,7 +158,6 @@ export const MemoriesCommand = cmd({
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
       const action = String(args.action)
-      const userID = String(args.userId || process.env.MEMORIES_USER_ID || DEFAULT_USER)
       const sessionID = String(
         args.sessionId ||
           process.env.MEMORIES_SESSION_ID ||
@@ -174,9 +165,12 @@ export const MemoriesCommand = cmd({
           process.env.OPENCODE_SESSION_ID ||
           "",
       )
+      const memoryIdentity = await AppRuntime.runPromise(resolveMemoryIdentityEffect(sessionID || undefined)).catch(() => fallbackMemoryIdentity(sessionID || undefined))
+      const userID = String(args.userId || memoryIdentity.user_id)
 
       try {
         if (action === "recent-topics" || action === "topics") {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
           const result = await listHybridRecentTopics({
             user_id: userID,
             session_id: sessionID || undefined,
@@ -240,6 +234,7 @@ export const MemoriesCommand = cmd({
         }
 
         if (action === "hybrid-recall") {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
           const cue = args.cue ? String(args.cue).trim() : ""
           if (!cue) {
             UI.error("Missing --cue argument for hybrid-recall")
@@ -274,12 +269,16 @@ export const MemoriesCommand = cmd({
             title: args.title,
             subject: args.subject,
             content,
-            importance: Number(args.importance ?? 0.7),
+            ...(args.importance === undefined ? {} : { importance: Number(args.importance) }),
             tags: Array.isArray(args.tag) ? args.tag.map(String).filter(Boolean) : undefined,
             triggers: Array.isArray(args.trigger) ? args.trigger.map(String).filter(Boolean) : undefined,
             retrieval_cues: Array.isArray(args.cue) ? args.cue.map(String).filter(Boolean) : undefined,
             mnemonic_techniques: Array.isArray(args.technique) ? args.technique.map(String).filter(Boolean) : undefined,
             visual_refs: Array.isArray(args.visualRef) ? args.visualRef.map(String).filter(Boolean) : undefined,
+            identity: memoryIdentity.identity,
+            customer_id: memoryIdentity.customer_id,
+            org_id: memoryIdentity.org_id,
+            metadata: memoryIdentity.metadata,
           })
 
           UI.println(JSON.stringify(result, null, 2) + EOL)
@@ -287,6 +286,7 @@ export const MemoriesCommand = cmd({
         }
 
         if (action === "context") {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
           if (!sessionID) {
             UI.error("Missing --session-id for context")
             return
@@ -326,6 +326,7 @@ export const MemoriesCommand = cmd({
         }
 
         if (action === "recall") {
+          await hydrateRemoteMemoryConfigFromActiveAccount()
           const cue = args.cue ? String(args.cue).trim() : ""
           if (!cue) {
             UI.error("Missing --cue argument for recall")
@@ -368,11 +369,15 @@ export const MemoriesCommand = cmd({
             subject: args.subject,
             default_user_id: userID,
             default_session_id: sessionID || `session-${Date.now()}`,
+            identity: memoryIdentity.identity,
+            customer_id: memoryIdentity.customer_id,
+            org_id: memoryIdentity.org_id,
+            metadata: memoryIdentity.metadata,
             items: items.map(item => ({
               content: item.content || String(item),
               type: item.type as MemoryType || "semantic",
               memory_mode: item.memory_mode as MemoryMode || "long_term",
-              importance: item.importance ?? 0.7,
+              importance: item.importance === 0.7 ? undefined : item.importance,
               tags: item.tags,
               triggers: item.triggers,
               retrieval_cues: item.retrieval_cues,

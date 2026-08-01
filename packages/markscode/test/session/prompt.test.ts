@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "bun:test"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Option } from "effect"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -30,7 +30,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
-import { SessionPrompt } from "../../src/session/prompt"
+import { explicitAdminMemoryFallbackRequested, explicitMemoryRecallRequested, SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -55,6 +55,11 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { MapGate } from "@/map/gate"
+import { MapBinding } from "@/map/binding"
+import { MapClient } from "@/map/client"
+import { MapShadow } from "@/map/shadow"
+import { RagClient } from "@/rag/rag-client"
 
 void Log.init({ print: false })
 
@@ -155,6 +160,46 @@ const lsp = Layer.succeed(
 const status = SessionStatus.layer.pipe(Layer.provideMerge(Bus.layer))
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
+const observedPrompts = new Set<SessionID>()
+let mapShadowHangSession: SessionID | undefined
+let mapShadowReady: Deferred.Deferred<void> | undefined
+const mapGate = MapGate.layer.pipe(
+  Layer.provide(
+    Layer.mock(MapShadow.Service)({
+      observe: (sessionID) =>
+        Effect.sync(() => observedPrompts.add(sessionID)).pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              sessionID === mapShadowHangSession && mapShadowReady
+                ? Deferred.succeed(mapShadowReady, undefined)
+                : Effect.void,
+            ),
+          ),
+          Effect.andThen(
+            Effect.suspend(() =>
+              sessionID === mapShadowHangSession ? Effect.never : Effect.die("shadow unavailable"),
+            ),
+          ),
+        ),
+    }),
+  ),
+  Layer.provide(Layer.mock(MapBinding.Service)({ get: () => Effect.succeed(Option.none()) })),
+  Layer.provide(Layer.mock(MapClient.Service)({
+    authenticated: (use) => use({
+      capabilities: () => Effect.die("unused"),
+      createEvent: () => Effect.die("unused"),
+      events: () => Effect.die("unused"),
+      me: () => Effect.die("unused"),
+      modules: () => Effect.die("unused"),
+      orgs: () => Effect.die("unused"),
+      projects: () => Effect.die("unused"),
+      tasks: () => Effect.die("unused"),
+      updateTask: () => Effect.die("unused"),
+    }),
+  })),
+)
+
+const ragClient = Layer.mock(RagClient.Service)({ query: () => Effect.die("unexpected rag query") })
 
 const processorCreateStarted: Array<() => void> = []
 const blockingProcessor = Layer.succeed(
@@ -216,6 +261,8 @@ function makePrompt(input?: { processor?: "blocking" }) {
     Layer.provideMerge(deps),
   )
   return SessionPrompt.layer.pipe(
+    Layer.provide(mapGate),
+    Layer.provide(ragClient),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(Image.defaultLayer),
     Layer.provide(Reference.defaultLayer),
@@ -332,6 +379,22 @@ const waitForBusy = (sessionID: SessionID, duration: Duration.Input = "2 seconds
     `session ${sessionID} never became busy`,
     duration,
   )
+
+function messageWithText(text: string): MessageV2.WithParts {
+  const sessionID = SessionID.make("ses_test")
+  const messageID = MessageID.make("msg_test")
+  return {
+    info: {
+      id: messageID,
+      sessionID,
+      role: "user",
+      agent: "build",
+      model: ref,
+      time: { created: 0 },
+    },
+    parts: [{ id: PartID.make("prt_test"), sessionID, messageID, type: "text", text }],
+  }
+}
 
 const hasBash = Effect.sync(() => Bun.which("bash") !== null)
 
@@ -508,6 +571,141 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("system prompt directs generated temporary artifacts to markscode tmp", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Temporary artifacts",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "create a transition script" }],
+    })
+    yield* llm.text("ok")
+
+    yield* prompt.loop({ sessionID: chat.id })
+    const input = (yield* llm.inputs)[0]
+    const serialized = JSON.stringify(input)
+    expect(serialized).toContain("/tmp/markscode")
+    expect(serialized).toContain("Never use /tmp/opencode for new artifacts")
+  }),
+)
+
+it.effect("detects explicit OAuth memory recall without hybrid memory env", () =>
+  Effect.sync(() => {
+    const prev = process.env.MARKSCODE_HYBRID_MEMORY
+    delete process.env.MARKSCODE_HYBRID_MEMORY
+    expect(explicitMemoryRecallRequested([messageWithText("Sem varrer .tasks nem filesystem e sem Bash/env: use apenas BrainSystem/Memories/RAG via OAuth da sessão para buscar memórias antigas")])).toBe(true)
+    expect(explicitMemoryRecallRequested([messageWithText("explique este codigo")])).toBe(false)
+    if (prev === undefined) delete process.env.MARKSCODE_HYBRID_MEMORY
+    else process.env.MARKSCODE_HYBRID_MEMORY = prev
+  }),
+)
+
+it.effect("detects explicit admin fallback authorization only when requested", () =>
+  Effect.sync(() => {
+    expect(explicitAdminMemoryFallbackRequested([messageWithText("se o recall escopado vier vazio, use o fallback admin read-only")])).toBe(true)
+    expect(explicitAdminMemoryFallbackRequested([messageWithText("busque nas minhas memórias via OAuth")])).toBe(false)
+    expect(explicitAdminMemoryFallbackRequested([messageWithText("use fallback local se a memória vier vazia")])).toBe(false)
+  }),
+)
+
+it.instance("system prompt forbids Bash env and filesystem fallback for OAuth memory recall", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "OAuth memory recall",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Sem varrer .tasks nem filesystem: use apenas BrainSystem/Memories/RAG via OAuth da sessão" }],
+    })
+    yield* llm.text("ok")
+
+    yield* prompt.loop({ sessionID: chat.id })
+    const serialized = JSON.stringify((yield* llm.inputs)[0])
+    expect(serialized).toContain("MUST NOT use Bash, shell env, or terminal commands")
+    expect(serialized).toContain("MEMORIES_API_KEY")
+    expect(serialized).toContain("MARKSCODE_API_KEY")
+    expect(serialized).toContain("MAP_API_KEY")
+    expect(serialized).toContain("Account.acquireActiveOrgLease/configActive")
+    expect(serialized).toContain("without falling back to .tasks or filesystem scanning")
+  }),
+)
+
+noLLMServer.instance("prompt uses real MapGate and preserves output when shadow fails", () =>
+  Effect.gen(function* () {
+    mapShadowHangSession = undefined
+    mapShadowReady = undefined
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "MapGate" })
+
+    const message = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "preserved" }],
+    })
+
+    expect(observedPrompts.has(chat.id)).toBe(true)
+    expect(message.parts).toContainEqual(expect.objectContaining({ type: "text", text: "preserved" }))
+  }),
+)
+
+noLLMServer.instance("prompt uses real MapGate and preserves output after shadow timeout", () =>
+  Effect.gen(function* () {
+    mapShadowReady = undefined
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "MapGate timeout" })
+    mapShadowHangSession = chat.id
+
+    const message = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "preserved after timeout" }],
+    })
+
+    expect(message.parts).toContainEqual(expect.objectContaining({ type: "text", text: "preserved after timeout" }))
+  }),
+)
+
+noLLMServer.instance("prompt cancellation during shadow observation remains interrupted", () =>
+  Effect.gen(function* () {
+    mapShadowReady = yield* Deferred.make<void>()
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "MapGate cancellation" })
+    mapShadowHangSession = chat.id
+    const fiber = yield* prompt
+      .prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "must not succeed" }],
+      })
+      .pipe(Effect.forkChild)
+    yield* Deferred.await(mapShadowReady)
+
+    yield* Fiber.interrupt(fiber)
+    const exit = yield* Fiber.await(fiber)
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
   }),
 )
 
@@ -1670,7 +1868,7 @@ unix(
 
       yield* llm.tool("bash", {
         command:
-          'i=0; while [ "$i" -lt 4000 ]; do printf "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx %05d\\n" "$i"; i=$((i + 1)); done; sleep 30',
+          'i=0; while [ "$i" -lt 4000 ]; do printf "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx %05d\\n" "$i"; i=$((i + 1)); done; touch .bash-output-ready; sleep 30',
         description: "Print many lines",
         timeout: 30_000,
         workdir: path.resolve(dir),
@@ -1678,7 +1876,14 @@ unix(
 
       const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* llm.wait(1)
-      yield* Effect.sleep(150)
+      yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const fs = yield* AppFileSystem.Service
+          return (yield* fs.existsSafe(path.join(dir, ".bash-output-ready"))) ? (true as const) : undefined
+        }),
+        "bash output did not reach truncation sentinel",
+        "10 seconds",
+      )
       yield* prompt.cancel(chat.id)
 
       const exit = yield* Fiber.await(run)

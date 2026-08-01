@@ -51,6 +51,23 @@ function live(client: HttpClient.HttpClient) {
   )
 }
 
+function requestLive(activeOrg: ReturnType<Account.Interface["activeOrg"]>) {
+  const http = Layer.succeed(HttpClient.HttpClient, none)
+  return ShareNext.layer.pipe(
+    Layer.provide(Bus.layer),
+    Layer.provide(
+      Layer.mock(Account.Service)({
+        activeOrg: () => activeOrg,
+        token: () => Effect.succeed(Option.some(AccessToken.make("st_test_token"))),
+      }),
+    ),
+    Layer.provide(Config.defaultLayer),
+    Layer.provide(http),
+    Layer.provide(Provider.defaultLayer),
+    Layer.provide(Session.defaultLayer),
+  )
+}
+
 function wired(client: HttpClient.HttpClient) {
   const http = Layer.succeed(HttpClient.HttpClient, client)
   return Layer.mergeAll(
@@ -126,9 +143,23 @@ describe("ShareNext", () => {
   it.live("request uses org share API with auth headers when account is active", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
-        yield* seed("https://control.example.com", "org-1")
-
-        const req = yield* ShareNext.use.request().pipe(Effect.provide(live(none)))
+        const req = yield* ShareNext.use.request().pipe(
+          Effect.provide(
+            requestLive(
+              Effect.succeed(
+                Option.some({
+                  account: {
+                    id: AccountID.make("account-1"),
+                    email: "user@example.com",
+                    url: "https://control.example.com",
+                    active_org_id: OrgID.make("org-1"),
+                  },
+                  org: { id: OrgID.make("org-1"), name: "One" },
+                }),
+              ),
+            ),
+          ),
+        )
 
         expect(req.api.create).toBe("/api/shares")
         expect(req.api.sync("shr_123")).toBe("/api/shares/shr_123/sync")
@@ -139,6 +170,35 @@ describe("ShareNext", () => {
           authorization: "Bearer st_test_token",
           "x-org-id": "org-1",
         })
+      }),
+    ),
+  )
+
+  it.live("request does not use console sharing without a reconciled org", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const req = yield* ShareNext.use.request().pipe(
+            Effect.provide(requestLive(Effect.succeed(Option.none()))),
+          )
+
+          expect(req.api.create).toBe("/api/share")
+          expect(req.headers).toEqual({})
+        }),
+      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+    ),
+  )
+
+  it.live("request fails closed when org validation fails", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const result = yield* Effect.exit(
+          ShareNext.use.request().pipe(
+            Effect.provide(requestLive(Effect.fail(new Account.AccountServiceError({ message: "temporary" })))),
+          ),
+        )
+
+        expect(result._tag).toBe("Failure")
       }),
     ),
   )

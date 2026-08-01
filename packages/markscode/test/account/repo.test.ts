@@ -217,6 +217,124 @@ it.live("use stores the selected org and marks the account active", () =>
   }),
 )
 
+it.live("increments account state revision for every state mutation", () =>
+  Effect.gen(function* () {
+    const id = AccountID.make("user-1")
+    const initial = yield* AccountRepo.use.state()
+    yield* AccountRepo.use.persistAccount({
+      id,
+      email: "first@example.com",
+      url: "https://control.example.com",
+      accessToken: AccessToken.make("at_1"),
+      refreshToken: RefreshToken.make("rt_1"),
+      expiry: Date.now() + 3600_000,
+      orgID: Option.some(OrgID.make("org-a")),
+    })
+    const persisted = yield* AccountRepo.use.state()
+    yield* AccountRepo.use.use(id, Option.some(OrgID.make("org-b")))
+    const used = yield* AccountRepo.use.state()
+    const compared = yield* AccountRepo.use.compareAndUse({
+      accountID: id,
+      expectedOrgID: Option.some(OrgID.make("org-b")),
+      expectedRevision: used.revision,
+      orgID: Option.some(OrgID.make("org-a")),
+    })
+    const cas = yield* AccountRepo.use.state()
+    yield* AccountRepo.use.remove(id)
+    const removed = yield* AccountRepo.use.state()
+
+    expect(compared).toBeTrue()
+    expect([persisted.revision, used.revision, cas.revision, removed.revision]).toEqual([
+      initial.revision + 1,
+      initial.revision + 2,
+      initial.revision + 3,
+      initial.revision + 4,
+    ])
+  }),
+)
+
+it.live("rejects stale revision after account org ABA", () =>
+  Effect.gen(function* () {
+    const id = AccountID.make("user-1")
+    yield* AccountRepo.use.persistAccount({
+      id,
+      email: "first@example.com",
+      url: "https://control.example.com",
+      accessToken: AccessToken.make("at_1"),
+      refreshToken: RefreshToken.make("rt_1"),
+      expiry: Date.now() + 3600_000,
+      orgID: Option.some(OrgID.make("org-a")),
+    })
+    const observed = yield* AccountRepo.use.state()
+    yield* AccountRepo.use.use(id, Option.some(OrgID.make("org-b")))
+    yield* AccountRepo.use.use(id, Option.some(OrgID.make("org-a")))
+
+    const stale = yield* AccountRepo.use.compareAndUse({
+      accountID: id,
+      expectedOrgID: Option.some(OrgID.make("org-a")),
+      expectedRevision: observed.revision,
+      orgID: Option.some(OrgID.make("org-c")),
+    })
+
+    expect(stale).toBeFalse()
+    expect((yield* AccountRepo.use.state()).active_org_id).toBe(OrgID.make("org-a"))
+  }),
+)
+
+it.live("compareAndUse updates only the observed active account and org", () =>
+  Effect.gen(function* () {
+    const first = AccountID.make("user-1")
+    const second = AccountID.make("user-2")
+    yield* AccountRepo.use.persistAccount({
+      id: first,
+      email: "first@example.com",
+      url: "https://control.example.com",
+      accessToken: AccessToken.make("at_1"),
+      refreshToken: RefreshToken.make("rt_1"),
+      expiry: Date.now() + 3600_000,
+      orgID: Option.some(OrgID.make("org-a")),
+    })
+    const initialRevision = (yield* AccountRepo.use.state()).revision
+
+    const updated = yield* AccountRepo.use.compareAndUse({
+      accountID: first,
+      expectedOrgID: Option.some(OrgID.make("org-a")),
+      expectedRevision: initialRevision,
+      orgID: Option.some(OrgID.make("org-b")),
+    })
+    const staleOrg = yield* AccountRepo.use.compareAndUse({
+      accountID: first,
+      expectedOrgID: Option.some(OrgID.make("org-a")),
+      expectedRevision: initialRevision,
+      orgID: Option.some(OrgID.make("org-c")),
+    })
+
+    yield* AccountRepo.use.persistAccount({
+      id: second,
+      email: "second@example.com",
+      url: "https://control.example.com",
+      accessToken: AccessToken.make("at_2"),
+      refreshToken: RefreshToken.make("rt_2"),
+      expiry: Date.now() + 3600_000,
+      orgID: Option.some(OrgID.make("org-2")),
+    })
+    const staleAccount = yield* AccountRepo.use.compareAndUse({
+      accountID: first,
+      expectedOrgID: Option.some(OrgID.make("org-b")),
+      expectedRevision: (yield* AccountRepo.use.state()).revision,
+      orgID: Option.none(),
+    })
+
+    expect(updated).toBeTrue()
+    expect(staleOrg).toBeFalse()
+    expect(staleAccount).toBeFalse()
+    expect(Option.getOrThrow(yield* AccountRepo.use.active())).toMatchObject({
+      id: second,
+      active_org_id: OrgID.make("org-2"),
+    })
+  }),
+)
+
 it.live("persistToken updates token fields", () =>
   Effect.gen(function* () {
     const id = AccountID.make("user-1")

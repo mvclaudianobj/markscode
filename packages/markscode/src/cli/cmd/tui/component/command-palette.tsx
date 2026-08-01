@@ -40,7 +40,12 @@ export function CommandPaletteDialog() {
       commands: reachable.map((entry) => entry.command.name),
     })
 
-    return reachable.map((entry) => ({
+    const seen = new Set<string>()
+    return reachable.filter((entry) => {
+      if (seen.has(entry.command.name)) return false
+      seen.add(entry.command.name)
+      return true
+    }).map((entry) => ({
       ...entry,
       bindings: registeredBindings.get(entry.command.name) ?? entry.bindings,
     }))

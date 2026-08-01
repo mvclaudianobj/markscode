@@ -319,8 +319,8 @@ export function diagnoseBrainSystem(input?: {
     layers.push({
       layer: "Memória Remota API",
       status: "unavailable",
-      details: "API key não configurada",
-      recommendation: "Padrão local-first ativo; configure MARKSCODE_MEMORIES_API_KEY/MEMORIES_API_KEY apenas se quiser sincronização remota",
+      details: "Sessão/configuração Markspanel indisponível para API remota",
+      recommendation: "Padrão local-first ativo; faça login pelo fluxo OAuth/device do MarksCode/Markspanel para sincronização remota",
     })
   }
 

@@ -216,20 +216,20 @@ export const layer = Layer.effect(
 
     const request = Effect.fn("ShareNext.request")(function* () {
       const headers: Record<string, string> = {}
-      const active = yield* account.active()
-      if (Option.isNone(active) || !active.value.active_org_id) {
+      const active = yield* account.activeOrg()
+      if (Option.isNone(active)) {
         const baseUrl = (yield* cfg.get()).enterprise?.url ?? "https://opncd.ai"
         return { headers, api: legacyApi, baseUrl } satisfies Req
       }
 
-      const token = yield* account.token(active.value.id)
+      const token = yield* account.token(active.value.account.id)
       if (Option.isNone(token)) {
         throw new Error("No active account token available for sharing")
       }
 
       headers.authorization = `Bearer ${token.value}`
-      headers["x-org-id"] = active.value.active_org_id
-      return { headers, api: consoleApi, baseUrl: active.value.url } satisfies Req
+      headers["x-org-id"] = active.value.org.id
+      return { headers, api: consoleApi, baseUrl: active.value.account.url } satisfies Req
     })
 
     const get = Effect.fnUntraced(function* (sessionID: SessionID) {

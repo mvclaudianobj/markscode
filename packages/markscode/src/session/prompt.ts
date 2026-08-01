@@ -61,7 +61,11 @@ import { SessionTable } from "./session.sql"
 import { referencePromptMetadata, referenceTextPart } from "./prompt/reference"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
+import { MapGate } from "@/map/gate"
+import { RagClient } from "@/rag/rag-client"
 import { LLMEvent } from "@opencode-ai/llm"
+import { resolveMemoryIdentity } from "@/memory-identity"
+import { getMarksAgentBoolean } from "@/marks-agent-config-source"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -79,14 +83,22 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
-const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context lacks knowledge, use Hybrid Memory when available. For Markdown memory/context searches, consider files named with Memory, MEMORY, or memory, plus any .md/.MD in scanned directories that contains or references the search terms. If unavailable or failed, state uncertainty instead of inventing details.`
+const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context lacks knowledge, query BrainSystem layers first (RAG, Memories, MAP, session context, Graphfy, vault) before any broad filesystem scan. If unavailable or insufficient, state uncertainty, then use fast selective directory search only.
+
+When the user asks for Memories, BrainSystem, RAG, or MAP via OAuth/session, or explicitly says not to scan filesystem, .tasks, or files, you MUST NOT use Bash, shell env, or terminal commands to look for MEMORIES_API_KEY, MARKSCODE_API_KEY, MAP_API_KEY, or related API keys. Use only internal BrainSystem/Memories/RAG/MAP recall backed by the active session OAuth account through Account.acquireActiveOrgLease/configActive. If the internal OAuth/session recall is unavailable, report that exact unavailability without inventing results and without falling back to .tasks or filesystem scanning.`
+
+const TEMPORARY_ARTIFACTS_SYSTEM_PROMPT = `For temporary, transition, harness, or generated script files, use /tmp/markscode. Never use /tmp/opencode for new artifacts. If documentation, history, or memory mentions /tmp/opencode, adapt it to /tmp/markscode for new executions. Do not create opencode paths for temporary artifacts.`
 
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
 
 function hybridMemoryPromptEnabled() {
-  return /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || "")
+  return getMarksAgentBoolean("MARKSCODE_HYBRID_MEMORY") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || "")
+}
+
+function ragPromptEnabled() {
+  return getMarksAgentBoolean("MARKSCODE_RAG") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_RAG || "")
 }
 
 function extractHybridMemoryCue(messages: MessageV2.WithParts[]) {
@@ -96,6 +108,44 @@ function extractHybridMemoryCue(messages: MessageV2.WithParts[]) {
     .map((part) => part.text)
     .join("\n")
     .trim()
+}
+
+export function explicitMemoryRecallRequested(messages: MessageV2.WithParts[]) {
+  const text = extractHybridMemoryCue(messages)
+  if (!text) return false
+  const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  const noFilesystem = [
+    /sem\s+(?:varrer|consultar|ler|usar|acessar)\s+(?:a\s+)?\.tasks\b/,
+    /sem\s+(?:usar\s+)?filesystem\b/,
+    /sem\s+(?:bash|shell|terminal)(?:\s*\/\s*|\s+ou\s+|\s+e\s+)?env\b/,
+    /sem\s+(?:bash|shell|terminal)\b.*\benv\b/,
+    /nao\s+(?:varra|consulte|leia|use|acesse)\s+(?:a\s+)?\.tasks\b/,
+    /nao\s+(?:use|acesse|varra|consulte)\s+(?:o\s+)?filesystem\b/,
+  ].some((pattern) => pattern.test(normalized))
+  if (noFilesystem) return true
+  const directMemoryRecall = [
+    /bus(?:que|ca|car)\s+(?:nas?|em|minhas?\s+)?memorias\b/,
+    /memorias\s+(?:antigas|globais|locais|da\s+sessao|da\s+session|do\s+usuario|recentes)\b/,
+  ].some((pattern) => pattern.test(normalized))
+  if (directMemoryRecall) return true
+  const mentionsMemoryLayer = /\b(?:brainsystem|memories|memorias?|rag)\b/.test(normalized)
+  const mentionsSessionAuth = /\b(?:oauth|sessao|session|login|conta|account|usuario)\b/.test(normalized)
+  if (mentionsMemoryLayer && mentionsSessionAuth) return true
+  return /\bmap\b.*\b(?:oauth|sessao|session)\b|\b(?:oauth|sessao|session)\b.*\bmap\b/.test(normalized)
+}
+
+export function explicitAdminMemoryFallbackRequested(messages: MessageV2.WithParts[]) {
+  const text = extractHybridMemoryCue(messages)
+  if (!text) return false
+  const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  return [
+    /\bfallback\s+admin\b/,
+    /\badmin\s+fallback\b/,
+    /\badmin\s+read[-\s]?only\b/,
+    /\bread[-\s]?only\s+admin\b/,
+    /\badmin\b.*\bunscoped\b/,
+    /\bunscoped\b.*\badmin\b/,
+  ].some((pattern) => pattern.test(normalized))
 }
 
 function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
@@ -115,7 +165,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
-export const layer = Layer.effect(
+const baseLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
@@ -146,6 +196,8 @@ export const layer = Layer.effect(
     const references = yield* Reference.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const gate = yield* MapGate.Service
+    const rag = yield* RagClient.Service
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -1232,6 +1284,8 @@ export const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
+      yield* gate.bind(input.sessionID)
+      yield* gate.prompt(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1258,7 +1312,7 @@ export const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
+    const runLoop = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
         const ctx = yield* InstanceState.context
         const slog = elog.with({ sessionID })
@@ -1415,6 +1469,7 @@ export const layer = Layer.effect(
               Effect.provideService(ToolRegistry.Service, registry),
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
+              Effect.provideService(MapGate.Service, gate),
             )
 
             if (lastUser.format?.type === "json_schema") {
@@ -1456,14 +1511,19 @@ export const layer = Layer.effect(
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            system.push(TEMPORARY_ARTIFACTS_SYSTEM_PROMPT)
             system.push(HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT)
-            if (hybridMemoryPromptEnabled()) {
+            if (hybridMemoryPromptEnabled() || explicitMemoryRecallRequested(msgs)) {
               const memoryContext = yield* Effect.tryPromise(() =>
-                recallHybridMemories({
-                  user_id: process.env.MEMORIES_USER_ID || "marks-local",
-                  session_id: String(sessionID),
-                  cue: extractHybridMemoryCue(msgs) || "current session context",
-                }).then((result) => formatMemoryContext(result)),
+                resolveMemoryIdentity(String(sessionID)).then((memoryIdentity) =>
+                  recallHybridMemories({
+                    user_id: memoryIdentity.user_id,
+                    session_id: memoryIdentity.session_id,
+                    cue: extractHybridMemoryCue(msgs) || "current session context",
+                    admin_fallback: explicitAdminMemoryFallbackRequested(msgs),
+                    max_chars: explicitAdminMemoryFallbackRequested(msgs) ? 8000 : 3000,
+                  }),
+                ).then((result) => formatMemoryContext(result)),
               ).pipe(
                 Effect.catchCause((cause) =>
                   Effect.sync(() => {
@@ -1473,6 +1533,17 @@ export const layer = Layer.effect(
                 ),
               )
               if (memoryContext) system.push(memoryContext)
+            }
+            if (ragPromptEnabled()) {
+              const ragContext = yield* rag.query({ query: extractHybridMemoryCue(msgs) || "current session context", limit: 3 }).pipe(
+                Effect.map((result) => result.items.slice(0, 3).map((item) => item.content.trim()).filter(Boolean).join("\n\n")),
+                Effect.map((content) => content ? `<rag-context>\n${content}\n</rag-context>` : undefined),
+                Effect.catch(() => Effect.succeed(undefined)),
+                Effect.catchDefect(() => Effect.succeed(undefined)),
+                Effect.timeoutOption("2 seconds"),
+                Effect.map((value) => Option.isSome(value) ? value.value : undefined),
+              )
+              if (ragContext) system.push(ragContext)
             }
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -1673,6 +1744,8 @@ export const layer = Layer.effect(
   }),
 )
 
+export const layer = baseLayer
+
 export const defaultLayer = Layer.suspend(() =>
   layer.pipe(
     Layer.provide(SessionRunState.defaultLayer),
@@ -1704,6 +1777,8 @@ export const defaultLayer = Layer.suspend(() =>
         Bus.layer,
         CrossSpawnSpawner.defaultLayer,
         RuntimeFlags.defaultLayer,
+        MapGate.defaultLayer,
+        RagClient.defaultLayer,
       ),
     ),
   ),

@@ -9,6 +9,7 @@ import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
+import { VisionTool } from "./vision"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
@@ -122,6 +123,7 @@ export const layer: Layer.Layer<
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const webfetch = yield* WebFetchTool
+    const vision = yield* VisionTool
     const websearch = yield* WebSearchTool
     const repoClone = yield* RepoCloneTool
     const repoOverview = yield* RepoOverviewTool
@@ -232,6 +234,7 @@ export const layer: Layer.Layer<
           write: Tool.init(writetool),
           task: Tool.init(task),
           fetch: Tool.init(webfetch),
+          vision: Tool.init(vision),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
           repo_clone: Tool.init(repoClone),
@@ -256,6 +259,7 @@ export const layer: Layer.Layer<
             tool.write,
             tool.task,
             tool.fetch,
+            tool.vision,
             tool.todo,
             tool.search,
             ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),

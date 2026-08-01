@@ -695,16 +695,15 @@ export const layer = Layer.effect(
           log.debug("loaded custom config from OPENCODE_CONFIG_CONTENT")
         }
 
-        const activeAccount = Option.getOrUndefined(
-          yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
+        const activeOrg = Option.getOrUndefined(
+          yield* accountSvc.activeOrg().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
         )
-        if (activeAccount?.active_org_id) {
-          const accountID = activeAccount.id
-          const orgID = activeAccount.active_org_id
-          const url = activeAccount.url
+        if (activeOrg) {
+          const accountID = activeOrg.account.id
+          const url = activeOrg.account.url
           yield* Effect.gen(function* () {
             const [configOpt, tokenOpt] = yield* Effect.all(
-              [accountSvc.config(accountID, orgID), accountSvc.token(accountID)],
+              [accountSvc.configActive(activeOrg), accountSvc.token(accountID)],
               { concurrency: 2 },
             )
             if (Option.isSome(tokenOpt)) {

@@ -63,6 +63,8 @@ import { RepositoryCache } from "../../src/reference/repository-cache"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { MapGate } from "@/map/gate"
+import { RagClient } from "@/rag/rag-client"
 
 void Log.init({ print: false })
 
@@ -165,6 +167,8 @@ function makeHttp() {
     TestLLMServer.layer,
     SessionSummary.defaultLayer,
     SessionPrompt.layer.pipe(
+      Layer.provide(MapGate.defaultLayer),
+      Layer.provide(Layer.mock(RagClient.Service)({ query: () => Effect.die("unexpected rag query") })),
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(Image.defaultLayer),
       Layer.provide(Reference.defaultLayer),

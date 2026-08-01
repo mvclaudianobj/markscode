@@ -1,13 +1,26 @@
 import type { Argv } from "yargs"
 import { EOL } from "os"
+import { Effect, Option } from "effect"
+import { Account } from "@/account/account"
 import { Database } from "@/storage/db"
 import { cmd } from "./cmd"
 import { UI } from "../ui"
 import { bootstrap } from "../bootstrap"
 import { diagnoseBrainSystem, formatDiagnosisForDisplay } from "../../memory-diagnose"
 import { doctorHybridMemory, hybridMemoryStatus, listHybridSources, recallHybridMemories, type MemoryProvider } from "../../memory-hybrid"
+import { AppRuntime } from "@/effect/app-runtime"
+import { fallbackMemoryIdentity, resolveMemoryIdentityEffect } from "@/memory-identity"
 
-const DEFAULT_USER = "marks-local"
+async function hydrateRemoteBrainConfigFromActiveAccount() {
+  await AppRuntime.runPromise(
+    Effect.gen(function* () {
+      const service = yield* Account.Service
+      const active = yield* service.activeOrg()
+      if (Option.isNone(active)) return
+      yield* service.configActive(active.value)
+    }).pipe(Effect.catch(() => Effect.void)),
+  ).catch(() => undefined)
+}
 
 export const BrainCommand = cmd({
   command: "brain <action>",
@@ -40,7 +53,6 @@ export const BrainCommand = cmd({
       .option("user-id", {
         describe: "memory user id",
         type: "string",
-        default: DEFAULT_USER,
       })
       .option("session-id", {
         describe: "session id",
@@ -53,8 +65,9 @@ export const BrainCommand = cmd({
   handler: async (args) => {
     await bootstrap(process.cwd(), async () => {
       const action = String(args.action)
-      const userID = String(args.userId || process.env.MEMORIES_USER_ID || DEFAULT_USER)
       const sessionID = String(args.sessionId || process.env.MEMORIES_SESSION_ID || process.env.MARKSCODE_SESSION_ID || process.env.OPENCODE_SESSION_ID || "")
+      const memoryIdentity = await AppRuntime.runPromise(resolveMemoryIdentityEffect(sessionID || undefined)).catch(() => fallbackMemoryIdentity(sessionID || undefined))
+      const userID = String(args.userId || memoryIdentity.user_id)
 
       if (action === "diagnose") {
         UI.println(formatDiagnosisForDisplay(diagnoseBrainSystem({
@@ -65,11 +78,13 @@ export const BrainCommand = cmd({
       }
 
       if (action === "status") {
+        await hydrateRemoteBrainConfigFromActiveAccount()
         UI.println(JSON.stringify(await hybridMemoryStatus({ capsule: args.capsule ? String(args.capsule) : undefined }), null, 2) + EOL)
         return
       }
 
       if (action === "doctor") {
+        await hydrateRemoteBrainConfigFromActiveAccount()
         UI.println(JSON.stringify(await doctorHybridMemory({ capsule: args.capsule ? String(args.capsule) : undefined }), null, 2) + EOL)
         return
       }
@@ -80,6 +95,7 @@ export const BrainCommand = cmd({
       }
 
       if (action === "recall") {
+        await hydrateRemoteBrainConfigFromActiveAccount()
         const cue = args.cue ? String(args.cue).trim() : ""
         if (!cue) {
           UI.error("Missing --cue argument for brain recall")

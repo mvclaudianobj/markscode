@@ -72,13 +72,20 @@ export function deduplicatePluginOrigins(plugins: Origin[]): Origin[] {
 
   for (const plugin of plugins.toReversed()) {
     const spec = pluginSpecifier(plugin.spec)
-    const name = spec.startsWith("file://") ? spec : parsePluginSpecifier(spec).pkg
+    const name = pluginIdentity(spec)
     if (seen.has(name)) continue
     seen.add(name)
     list.push(plugin)
   }
 
   return list.toReversed()
+}
+
+function pluginIdentity(spec: string) {
+  if (/opencode-dcp|supermemory/i.test(spec)) return spec.startsWith("file://") ? spec : parsePluginSpecifier(spec).pkg
+  if (/markscode-telegram-notifier/i.test(spec)) return "markscode-telegram-notifier"
+  if (/markscode-notifier|opencode-notifier|notifier/i.test(spec) && !/telegram/i.test(spec)) return "markscode-notifier"
+  return spec.startsWith("file://") ? spec : parsePluginSpecifier(spec).pkg
 }
 
 export * as ConfigPlugin from "./plugin"

@@ -55,8 +55,22 @@ test("does not duplicate existing plugin packages", async () => {
   await ConfigGlobal.ensureDefaultPlugins({ XDG_CONFIG_HOME: tmp.path })
 
   const data = JSON.parse(await fs.readFile(file, "utf8"))
-  expect(data.plugin).toHaveLength(5)
+  expect(data.plugin).toHaveLength(6)
   expect(data.plugin[0]).toBe("@tarquinen/opencode-dcp@1.0.0")
+})
+
+test("keeps canonical markscode notifier and removes external notifier duplicates", async () => {
+  await using tmp = await tmpdir()
+  const file = path.join(tmp.path, "markscode", "markscode.json")
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, JSON.stringify({ plugin: ["opencode-notifier@latest", ConfigGlobal.DEFAULT_MARKSCODE_PLUGINS[1]] }, null, 2))
+
+  await ConfigGlobal.ensureDefaultPlugins({ XDG_CONFIG_HOME: tmp.path })
+
+  const data = JSON.parse(await fs.readFile(file, "utf8"))
+  expect(data.plugin).not.toContain("opencode-notifier@latest")
+  expect(data.plugin.filter((item: string) => item === ConfigGlobal.DEFAULT_MARKSCODE_PLUGINS[1])).toHaveLength(1)
+  expect(data.plugin).toContain(ConfigGlobal.DEFAULT_MARKSCODE_PLUGINS[2])
 })
 
 test("skips invalid json without overwriting", async () => {

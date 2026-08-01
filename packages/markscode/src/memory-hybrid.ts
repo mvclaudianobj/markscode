@@ -2,9 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { homedir, tmpdir } from "os"
 import { dirname, join } from "path"
 import { resolveMemoryConfig } from "./memory-config"
-import { importMemories, recallHumanMemories, type MemoryMode, type MemoryType } from "./memories-api"
+import { importMemories, recallAdminFallbackMemories, recallHumanMemories, type MemoryMode, type MemoryType } from "./memories-api"
 import { brainRecall } from "./brain-client"
 import { isBrainEnabled, getBrainConfig } from "./brain-config"
+import { fallbackMemoryIdentity, memoryUserIDFromIdentity } from "./memory-identity"
+import { getMarksAgentBoolean, getMarksAgentString } from "./marks-agent-config-source"
 
 export type MemoryProvider = "cloud" | "local" | "hybrid"
 
@@ -17,6 +19,7 @@ export interface HybridRecallInput {
   provider?: MemoryProvider
   capsule?: string
   token?: string
+  admin_fallback?: boolean
 }
 
 export interface HybridStatusInput {
@@ -228,13 +231,13 @@ const PROVIDER_CONTEXT_EXPANSION_TERMS = [
 ]
 
 function saneLimit(value?: number) {
-  const raw = Number.isFinite(value) ? Number(value) : Number(process.env.MARKSCODE_MEMORY_RECALL_LIMIT || 4)
+  const raw = Number.isFinite(value) ? Number(value) : Number(getMarksAgentString("MARKSCODE_MEMORY_RECALL_LIMIT") || process.env.MARKSCODE_MEMORY_RECALL_LIMIT || 4)
   return Math.min(12, Math.max(1, Math.floor(raw || 4)))
 }
 
 function saneMaxChars(value?: number) {
-  const raw = Number.isFinite(value) ? Number(value) : Number(process.env.MARKSCODE_MEMORY_MAX_CHARS || 1200)
-  return Math.min(12000, Math.max(200, Math.floor(raw || 1200)))
+  const raw = Number.isFinite(value) ? Number(value) : Number(getMarksAgentString("MARKSCODE_MEMORY_MAX_CHARS") || process.env.MARKSCODE_MEMORY_MAX_CHARS || 3000)
+  return Math.min(12000, Math.max(500, Math.floor(raw || 3000)))
 }
 
 function saneIngestLimit(value?: number) {
@@ -243,16 +246,71 @@ function saneIngestLimit(value?: number) {
 }
 
 function providerFrom(value?: string): MemoryProvider {
-  const provider = String(value || process.env.MARKSCODE_MEMORY_PROVIDER || "hybrid").toLowerCase()
+  const provider = String(value || getMarksAgentString("MARKSCODE_MEMORY_PROVIDER") || process.env.MARKSCODE_MEMORY_PROVIDER || "hybrid").toLowerCase()
   return PROVIDERS.has(provider as MemoryProvider) ? (provider as MemoryProvider) : "hybrid"
 }
 
 function memoryUserID(value?: string) {
-  return value || resolveMemoryConfig().user_id
+  const configUserID = resolveMemoryConfig().user_id.trim()
+  return configUserID && configUserID !== "marks-local" ? configUserID : value || memoryUserIDFromIdentity()
 }
 
 function cloudMemoryAvailable() {
   return Boolean(resolveMemoryConfig().memories.api_key)
+}
+
+function adminMemoryFallbackEnabled() {
+  return /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
+}
+
+function adminMemoryFallbackAllowed(input: HybridRecallInput) {
+  return input.admin_fallback === true || adminMemoryFallbackEnabled()
+}
+
+function adminMemoryFallbackLimit(value?: number) {
+  if (!Number.isFinite(value)) return 3
+  return Math.min(5, Math.max(1, Math.floor(Number(value))))
+}
+
+function memoryTextSize(memories: HybridRecallItem[]) {
+  return memories.reduce((total, memory) => total + memory.content.trim().length, 0)
+}
+
+function hasWeakMemorySignal(memories: HybridRecallItem[]) {
+  return memories.some((memory) => /\b(truncad[oa]|parcial|placeholder|ignore in recall|\.\.\.|…|\[\.\.\.\])\b/i.test([memory.title, memory.subject, memory.content].filter(Boolean).join("\n")))
+}
+
+function weakScopedCloudRecall(memories: HybridRecallItem[], fallbackLimit: number) {
+  return memories.length < fallbackLimit || memoryTextSize(memories) < 800 || hasWeakMemorySignal(memories)
+}
+
+function clearlyWeakScopedCloudRecall(memories: HybridRecallItem[], fallbackLimit: number) {
+  return hasWeakMemorySignal(memories) || (memories.length < fallbackLimit && memoryTextSize(memories) < 400)
+}
+
+function shouldRunAdminFallback(input: HybridRecallInput, cloudMemories: HybridRecallItem[], fallbackLimit: number) {
+  if (!adminMemoryFallbackAllowed(input)) return false
+  if (cloudMemories.length === 0) return true
+  if (input.admin_fallback === true) return weakScopedCloudRecall(cloudMemories, fallbackLimit)
+  return clearlyWeakScopedCloudRecall(cloudMemories, fallbackLimit)
+}
+
+function dedupeRecallMemories(memories: HybridRecallItem[]) {
+  const indexes = new Map<string, number>()
+  const remember = (key: string, index: number) => indexes.set(key, index)
+  return memories.reduce((deduped, memory) => {
+    const contentKey = memory.content.replace(/\s+/g, " ").trim().toLowerCase()
+    const keys = [memory.id ? "id:" + memory.id.toLowerCase() : undefined, "content:" + contentKey].filter((key): key is string => Boolean(key))
+    const existing = keys.map((key) => indexes.get(key)).find((index) => index !== undefined)
+    if (existing === undefined) {
+      keys.forEach((key) => remember(key, deduped.length))
+      deduped.push(memory)
+      return deduped
+    }
+    keys.forEach((key) => remember(key, existing))
+    if (memory.content.length > deduped[existing].content.length) deduped[existing] = memory
+    return deduped
+  }, [] as HybridRecallItem[])
 }
 
 function expandHybridMemoryCue(cue: string) {
@@ -398,13 +456,18 @@ function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
   return { available: false, capsule, reason: "No official markscode-memvid sidecar/CLI contract v1 found" }
 }
 
+function isIndexMdNoise(item: HybridRecallItem): boolean {
+  const t = item.title ?? ""
+  return t === "index.md" || t.endsWith("/index.md") || t.endsWith("\\index.md")
+}
+
 function normalizeCloudResult(result: unknown): HybridRecallItem[] {
   if (!result || typeof result !== "object") return []
   const body = result as Record<string, unknown>
 
   if (Array.isArray(body.memories)) {
     const scores = Array.isArray(body.scores) ? body.scores : []
-    return body.memories.flatMap((memory, index) => normalizeMemoryRecord(memory, numberOrUndefined(scores[index])))
+    return body.memories.flatMap((memory, index) => normalizeMemoryRecord(memory, numberOrUndefined(scores[index]))).filter((item) => !isIndexMdNoise(item))
   }
 
   if (Array.isArray(body.items)) {
@@ -412,7 +475,7 @@ function normalizeCloudResult(result: unknown): HybridRecallItem[] {
       if (!entry || typeof entry !== "object") return []
       const row = entry as Record<string, unknown>
       return normalizeMemoryRecord(row.item ?? row, numberOrUndefined(row.score))
-    })
+    }).filter((item) => !isIndexMdNoise(item))
   }
 
   return []
@@ -923,6 +986,7 @@ export async function previewHybridIngest(input: HybridIngestInput): Promise<Hyb
 }
 
 export async function ingestHybridMemories(input: HybridIngestInput): Promise<HybridIngestResult> {
+  const identity = fallbackMemoryIdentity(input.session_id)
   const preview = await previewHybridIngest(input)
   const errors: string[] = []
   const warnings = [...preview.warnings]
@@ -937,13 +1001,17 @@ export async function ingestHybridMemories(input: HybridIngestInput): Promise<Hy
         source: preview.source,
         source_name: input.source_name || input.source || preview.source,
         subject: input.subject,
-        default_user_id: memoryUserID(input.user_id),
+        default_user_id: memoryUserIDFromIdentity(input.user_id || identity),
         default_session_id: input.session_id || "hybrid-ingest-" + Date.now(),
+        identity: identity.identity,
+        customer_id: identity.customer_id,
+        org_id: identity.org_id,
+        metadata: identity.metadata,
         items: preview.items.map((item) => ({
           content: item.content,
           type: item.type,
           memory_mode: item.memory_mode,
-          importance: item.importance,
+          importance: item.importance === 0.7 ? undefined : item.importance,
           tags: item.tags,
         })),
       }).catch((err: unknown) => {
@@ -1173,7 +1241,8 @@ export async function hybridMemoryStatus(input?: HybridStatusInput): Promise<unk
   const embeddedCLI = embeddedMemvidCandidates().find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
   return {
     provider: providerFrom(),
-    hybrid_prompt_enabled: /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || ""),
+    hybrid_prompt_enabled:
+      getMarksAgentBoolean("MARKSCODE_HYBRID_MEMORY") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_HYBRID_MEMORY || ""),
     local_available: local.available,
     local,
     auto_init,
@@ -1201,11 +1270,11 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
     ok: Boolean(status.local_available || status.cloud_available),
     checks: [
       {
-        name: "cloud-memories-api-env",
+        name: "cloud-memories-api-oauth",
         ok: Boolean(status.cloud_available),
         message: status.cloud_available
-          ? "Cloud Memories API appears configured"
-          : "Set MARKSCODE_MEMORIES_API_KEY or MEMORIES_API_KEY, and optionally MARKSCODE_MEMORIES_URL or MEMORIES_URL for cloud recall",
+          ? "Cloud Memories API disponível via sessão/configuração Markspanel"
+          : "Faça login no Markspanel pelo fluxo OAuth/device do MarksCode para habilitar recall remoto",
       },
       {
         name: "local-memvid-detection",
@@ -1219,14 +1288,14 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
 function qdrantConfig() {
   const host = process.env.MARKSCODE_QDRANT_HOST ?? "10.66.0.1"
   const port = Number(process.env.MARKSCODE_QDRANT_PORT ?? "6333")
-  const apiKey = process.env.MARKSCODE_QDRANT_API_KEY ?? "Kenosis7!@#"
+  const apiKey = process.env.MARKSCODE_QDRANT_API_KEY
   const collection = process.env.MARKSCODE_QDRANT_COLLECTION ?? "markscode-memory"
   return { host, port, apiKey, collection, base: `http://${host}:${port}` }
 }
 
 function qdrantEnabled() {
   const e = process.env.MARKSCODE_QDRANT_ENABLED
-  return e !== undefined ? /^(1|true|yes|on)$/i.test(e) : true
+  return e !== undefined ? /^(1|true|yes|on)$/i.test(e) : false
 }
 
 async function qdrantRequest(path: string, method = "GET", body?: unknown): Promise<unknown> {
@@ -1321,7 +1390,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
   const local = detectLocalMemvid()
   const expandedCue = expandHybridMemoryCue(input.cue)
   const recallInput = expandedCue === input.cue ? input : { ...input, cue: expandedCue }
-  const cloudAvailable = cloudMemoryAvailable()
+  const cloudConfigured = cloudMemoryAvailable()
 
   const localMemories = provider !== "cloud"
     ? await recallLocalMemvid(recallInput, local).catch((err: unknown) => {
@@ -1330,9 +1399,7 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
       })
     : []
 
-  if (provider === "cloud" && !cloudAvailable) errors.push("cloud: Memories API key not configured")
-
-  const cloudMemories = provider !== "local" && cloudAvailable
+  const cloudMemories = provider !== "local"
       ? await recallHumanMemories({
           user_id: userID,
           session_id: input.session_id,
@@ -1342,6 +1409,27 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
         .then(normalizeCloudResult)
         .catch((err: unknown) => {
           errors.push("cloud: " + errorMessage(err))
+    return [] as HybridRecallItem[]
+  })
+    : []
+  const cloudFailed = errors.some((x) => x.startsWith("cloud:"))
+
+  const fallbackLimit = adminMemoryFallbackLimit(limit)
+  const adminFallbackMemories = provider !== "local" && shouldRunAdminFallback(input, cloudMemories, fallbackLimit)
+    ? await recallAdminFallbackMemories({ query: expandedCue, limit: fallbackLimit, allow: input.admin_fallback === true })
+        .then((result) => {
+          const memories = normalizeCloudResult(result).map((memory) => ({
+            ...memory,
+            title: memory.title?.startsWith("[admin_fallback_unscoped]") ? memory.title : "[admin_fallback_unscoped] " + (memory.title || memory.subject || memory.id || "memory"),
+            subject: memory.subject?.startsWith("[admin_fallback_unscoped]") ? memory.subject : memory.subject ? "[admin_fallback_unscoped] " + memory.subject : "admin_fallback_unscoped",
+            tags: Array.from(new Set([...(memory.tags || []), "admin_fallback_unscoped"])),
+          }))
+          if (memories.length) errors.push("admin_fallback_unscoped: used")
+          else errors.push("admin_fallback_unscoped: unavailable")
+          return memories
+        })
+        .catch((err: unknown) => {
+          errors.push("admin_fallback_unscoped: unavailable")
           return [] as HybridRecallItem[]
         })
     : []
@@ -1370,20 +1458,24 @@ export async function recallHybridMemories(input: HybridRecallInput): Promise<Hy
     : []
 
   const maxChars = saneMaxChars(input.max_chars)
+  const adminFallbackMaxChars = input.admin_fallback ? Math.min(12000, maxChars * 2) : maxChars
   return {
     provider,
     local_available: local.available,
-    cloud_available: provider === "local" ? false : cloudAvailable && !errors.some((x) => x.startsWith("cloud:")),
+    cloud_available: provider === "local" ? false : !cloudFailed && (cloudConfigured || cloudMemories.length > 0),
     brain_available: brainResult?.ok === true,
-    qdrant_available: qdrantEnabled() && qdrantItems.length >= 0,
+    qdrant_available: qdrantEnabled() && qdrantItems.length > 0,
     errors,
-    memories: [...localMemories, ...cloudMemories, ...brainItems, ...qdrantItems]
+    memories: dedupeRecallMemories([...localMemories, ...cloudMemories, ...adminFallbackMemories, ...brainItems, ...qdrantItems])
       .filter((memory) => memory.content.trim())
       .slice(0, limit)
-      .map((memory) => ({
-        ...memory,
-        content: memory.content.length > maxChars ? memory.content.slice(0, maxChars - 1).trimEnd() + "\u2026" : memory.content,
-      })),
+      .map((memory) => {
+        const charLimit = memory.tags?.includes("admin_fallback_unscoped") ? adminFallbackMaxChars : maxChars
+        return {
+          ...memory,
+          content: memory.content.length > charLimit ? memory.content.slice(0, charLimit - 1).trimEnd() + "\u2026" : memory.content,
+        }
+      }),
   }
 }
 
