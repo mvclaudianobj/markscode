@@ -1,3 +1,5 @@
+import { getMarksAgentConfigValue, getMarksAgentSecretValue } from "../marks-agent-config-source"
+
 export type MarksSTTConfigSource = {
   get<T>(key: string, fallback?: T): T | undefined
 }
@@ -12,20 +14,25 @@ const providers = new Set<STTProvider>(["auto", "faster-whisper", "whisper-cpp"]
 
 export const defaultSttServerUrl = "http://127.0.0.1:38087"
 
-const valueFrom = <T>(config: { kv?: MarksSTTConfigSource } | undefined, key: string, env: string, fallback: T) =>
-  config?.kv?.get<T>(key, fallback) ?? (process.env[env] === undefined ? fallback : (process.env[env] as T))
+const marksAgentValue = (env: string[]) => env.map((name) => getMarksAgentConfigValue(name) || getMarksAgentSecretValue(name)).find((value) => value !== undefined)
+
+const valueFrom = <T>(config: { kv?: MarksSTTConfigSource } | undefined, key: string, env: string, fallback: T) => {
+  const configured = config?.kv?.get<T>(key)
+  if (configured !== undefined) return configured
+  const agent = marksAgentValue([env])
+  if (agent !== undefined) return agent as T
+  return process.env[env] === undefined ? fallback : (process.env[env] as T)
+}
 
 const optionalValueFrom = (config: { kv?: MarksSTTConfigSource } | undefined, key: string, ...env: string[]) =>
-  String(config?.kv?.get(key, "") || env.map((name) => process.env[name]).find((value) => value) || "")
+  String(config?.kv?.get(key, "") || marksAgentValue(env) || env.map((name) => process.env[name]).find((value) => value) || "")
 
 const isRootOrSudo = () => process.getuid?.() === 0 || Boolean(process.env.SUDO_USER)
 
 const desktopUser = (config: { kv?: MarksSTTConfigSource } | undefined) =>
   String(
-    process.env.MARKSCODE_STT_DESKTOP_USER ||
-      config?.kv?.get("markscode_stt_desktop_user", "") ||
-      process.env.MARKSCODE_TTS_DESKTOP_USER ||
-      config?.kv?.get("markscode_tts_desktop_user", "") ||
+    optionalValueFrom(config, "markscode_stt_desktop_user", "MARKSCODE_STT_DESKTOP_USER") ||
+      optionalValueFrom(config, "markscode_tts_desktop_user", "MARKSCODE_TTS_DESKTOP_USER") ||
       process.env.SUDO_USER ||
       "marcos",
   )
@@ -43,10 +50,8 @@ const uidFromUser = (user: string) => {
 
 const desktopUid = (config: { kv?: MarksSTTConfigSource } | undefined, user: string) =>
   String(
-    process.env.MARKSCODE_STT_DESKTOP_UID ||
-      config?.kv?.get("markscode_stt_desktop_uid", "") ||
-      process.env.MARKSCODE_TTS_DESKTOP_UID ||
-      config?.kv?.get("markscode_tts_desktop_uid", "") ||
+    optionalValueFrom(config, "markscode_stt_desktop_uid", "MARKSCODE_STT_DESKTOP_UID") ||
+      optionalValueFrom(config, "markscode_tts_desktop_uid", "MARKSCODE_TTS_DESKTOP_UID") ||
       process.env.SUDO_UID ||
       uidFromUser(user) ||
       "1000",

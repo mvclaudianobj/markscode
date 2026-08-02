@@ -1,4 +1,5 @@
 import { TuiAudio } from "@/cli/cmd/tui/util/audio"
+import { getMarksAgentConfigValue, getMarksAgentSecretValue } from "../marks-agent-config-source"
 
 export type MarksTTSConfigSource = {
   get<T>(key: string, fallback?: T): T | undefined
@@ -35,8 +36,15 @@ const g4fSpaceVoices = new Set([
   "vale",
 ])
 
-const valueFrom = <T>(config: { kv?: MarksTTSConfigSource } | undefined, key: string, env: string, fallback: T) =>
-  config?.kv?.get<T>(key, fallback) ?? (process.env[env] === undefined ? fallback : (process.env[env] as T))
+const marksAgentValue = (env: string[]) => env.map((name) => getMarksAgentConfigValue(name) || getMarksAgentSecretValue(name)).find((value) => value !== undefined)
+
+const valueFrom = <T>(config: { kv?: MarksTTSConfigSource } | undefined, key: string, env: string, fallback: T) => {
+  const configured = config?.kv?.get<T>(key)
+  if (configured !== undefined) return configured
+  const agent = marksAgentValue([env])
+  if (agent !== undefined) return agent as T
+  return process.env[env] === undefined ? fallback : (process.env[env] as T)
+}
 
 export const ttsVolume = (config: { kv?: MarksTTSConfigSource } | undefined) => {
   const volume = Number(valueFrom(config, "markscode_tts_volume", "MARKSCODE_TTS_VOLUME", 3))
@@ -45,10 +53,10 @@ export const ttsVolume = (config: { kv?: MarksTTSConfigSource } | undefined) => 
 }
 
 const optionalValueFrom = (config: { kv?: MarksTTSConfigSource } | undefined, key: string, ...env: string[]) =>
-  String(config?.kv?.get(key, "") || env.map((name) => process.env[name]).find((value) => value) || "")
+  String(config?.kv?.get(key, "") || marksAgentValue(env) || env.map((name) => process.env[name]).find((value) => value) || "")
 
 const optionalValueFromKeys = (config: { kv?: MarksTTSConfigSource } | undefined, keys: string[], env: string[]) =>
-  String(keys.map((key) => config?.kv?.get(key, "")).find((value) => value) || env.map((name) => process.env[name]).find((value) => value) || "")
+  String(keys.map((key) => config?.kv?.get(key, "")).find((value) => value) || marksAgentValue(env) || env.map((name) => process.env[name]).find((value) => value) || "")
 
 export const g4fSpaceDirectToken = (config: { kv?: MarksTTSConfigSource } | undefined) =>
   optionalValueFromKeys(config, ["markscode_tts_g4f_space_token"], ["MARKSCODE_TTS_G4F_SPACE_TOKEN", "MARKS_G4F_SPACE_TOKEN"])
@@ -56,7 +64,7 @@ export const g4fSpaceDirectToken = (config: { kv?: MarksTTSConfigSource } | unde
 const isRootOrSudo = () => process.getuid?.() === 0 || Boolean(process.env.SUDO_USER)
 
 const desktopUser = (config: { kv?: MarksTTSConfigSource } | undefined) =>
-  String(process.env.MARKSCODE_TTS_DESKTOP_USER || config?.kv?.get("markscode_tts_desktop_user", "") || process.env.SUDO_USER || "marcos")
+  optionalValueFrom(config, "markscode_tts_desktop_user", "MARKSCODE_TTS_DESKTOP_USER") || process.env.SUDO_USER || "marcos"
 
 const uidFromUser = (user: string) => {
   try {
@@ -70,7 +78,7 @@ const uidFromUser = (user: string) => {
 }
 
 const desktopUid = (config: { kv?: MarksTTSConfigSource } | undefined, user: string) =>
-  String(process.env.MARKSCODE_TTS_DESKTOP_UID || config?.kv?.get("markscode_tts_desktop_uid", "") || process.env.SUDO_UID || uidFromUser(user) || "1000")
+  optionalValueFrom(config, "markscode_tts_desktop_uid", "MARKSCODE_TTS_DESKTOP_UID") || process.env.SUDO_UID || uidFromUser(user) || "1000"
 
 const cleanText = (value: string, maxChars: number) =>
   value

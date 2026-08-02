@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync } from "fs"
 import { execFileSync } from "child_process"
 import { dirname, join } from "path"
 import { compressRtkText } from "./rtk"
+import { getMarksAgentConfigValue, getMarksAgentSecretValue } from "./marks-agent-config-source"
 
 export type GraphfyStatus = {
   available: boolean
@@ -15,7 +16,7 @@ export type GraphfyStatus = {
 }
 
 function isDisabled() {
-  return process.env.MARKSCODE_GRAPHFY_ENABLED === "0" || process.env.MARKSCODE_GRAPHIFY_ENABLED === "0"
+  return envValue(["MARKSCODE_GRAPHFY_ENABLED", "MARKSCODE_GRAPHIFY_ENABLED"]) === "0"
 }
 
 function isExecutable(path: string) {
@@ -40,7 +41,7 @@ function uniquePaths(paths: (string | undefined)[]) {
 }
 
 function envValue(keys: string[]) {
-  return keys.map((key) => process.env[key]?.trim()).find(Boolean)
+  return keys.map((key) => getMarksAgentConfigValue(key) || getMarksAgentSecretValue(key) || process.env[key]?.trim()).find(Boolean)
 }
 
 function hasProviderPrefix(model: string) {
@@ -76,16 +77,16 @@ function graphfyMarksOpenAI() {
 
 export function findGraphfyCli() {
   return uniquePaths([
-    process.env.MARKSCODE_GRAPHFY_CLI?.trim(),
-    process.env.MARKSCODE_GRAPHIFY_CLI?.trim(),
+    envValue(["MARKSCODE_GRAPHFY_CLI"]),
+    envValue(["MARKSCODE_GRAPHIFY_CLI"]),
     commandPath("graphify"),
   ]).find((path) => path === "graphify" || path.includes("/") ? isExecutable(path) : Boolean(commandPath(path)))
 }
 
 function graphCandidates(projectRoot: string) {
   return uniquePaths([
-    process.env.MARKSCODE_GRAPHFY_GRAPH?.trim(),
-    process.env.MARKSCODE_GRAPHIFY_GRAPH?.trim(),
+    envValue(["MARKSCODE_GRAPHFY_GRAPH"]),
+    envValue(["MARKSCODE_GRAPHIFY_GRAPH"]),
     join(projectRoot, "graphify-out", "graph.json"),
     join(projectRoot, "graph.json"),
   ])

@@ -4,6 +4,7 @@ import stripAnsi from "strip-ansi"
 import { HttpClient, HttpClientRequest, HttpClientResponse, FetchHttpClient } from "effect/unstable/http"
 
 import { Account } from "@/account/account"
+import { getMarksAgentString } from "../marks-agent-config-source"
 const defaultBaseUrl = "https://map.marks.ia.br/api/map/v3"
 const userAgent = "markscode/1.1.0"
 const ID = Schema.String.pipe(Schema.check(Schema.isMinLength(1)), Schema.check(Schema.isMaxLength(128)))
@@ -229,7 +230,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Ma
 export const use = serviceUse(Service)
 
 const baseUrl = () => {
-  const configured = process.env.MAP_API_BASE_URL ?? process.env.MARKSCODE_MAP_API_URL ?? defaultBaseUrl
+  const configured = getMarksAgentString("MAP_API_BASE_URL") ?? getMarksAgentString("MARKSCODE_MAP_API_URL") ?? process.env.MAP_API_BASE_URL ?? process.env.MARKSCODE_MAP_API_URL ?? defaultBaseUrl
   const parsed = URL.parse(configured)
   if (
     !parsed ||

@@ -3,6 +3,7 @@ import os from "os"
 import path from "path"
 import { existsSync } from "fs"
 import * as Tool from "./tool"
+import { getMarksAgentString } from "../marks-agent-config-source"
 
 const DEFAULT_TIMEOUT = 60
 const MAX_TIMEOUT = 180
@@ -82,9 +83,10 @@ export const VisionTool = Tool.define(
 )
 
 function resolveOmniParser() {
-  const env = process.env.MARKSCODE_OMNIPARSER_BIN
+  const env = getMarksAgentString("MARKSCODE_OMNIPARSER_BIN") || process.env.MARKSCODE_OMNIPARSER_BIN
   if (env) return { command: expandHome(env), display: env, configured: true }
-  const ecosystem = process.env.MARKS_ECOSYSTEM_DIR ? expandHome(process.env.MARKS_ECOSYSTEM_DIR) : path.join(os.homedir(), ".marks", "ecosystem")
+  const ecosystemEnv = getMarksAgentString("MARKS_ECOSYSTEM_DIR") || process.env.MARKS_ECOSYSTEM_DIR
+  const ecosystem = ecosystemEnv ? expandHome(ecosystemEnv) : path.join(os.homedir(), ".marks", "ecosystem")
   const candidates = [
     path.join(ecosystem, "bin", "omniparser"),
     path.join(os.homedir(), ".markscode", "bin", "vendor", "omniparser", "omniparser"),
@@ -95,7 +97,7 @@ function resolveOmniParser() {
 }
 
 function omniParserArgs(imagePath: string) {
-  const template = process.env.MARKSCODE_OMNIPARSER_ARGS
+  const template = getMarksAgentString("MARKSCODE_OMNIPARSER_ARGS") || process.env.MARKSCODE_OMNIPARSER_ARGS
   if (!template) return [imagePath]
   const parts = template.split(" ").filter(Boolean).map((part) => (part === "{image}" ? imagePath : part))
   if (parts.includes(imagePath)) return parts

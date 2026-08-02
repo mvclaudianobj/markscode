@@ -7,7 +7,7 @@ import { Config } from "@/config/config"
 import { Image } from "@/image/image"
 import { Agent } from "../../src/agent/agent"
 import { LLM } from "../../src/session/llm"
-import { SessionCompaction } from "../../src/session/compaction"
+import { sanitizeDcpSummaryForMemory, saveDcpSummaryMemory, SessionCompaction } from "../../src/session/compaction"
 import { Token } from "@/util/token"
 import * as Log from "@opencode-ai/core/util/log"
 import { Permission } from "../../src/permission"
@@ -51,10 +51,19 @@ const ref = {
 const usage = (input: ConstructorParameters<typeof Usage>[0]) => new Usage(input)
 
 const basicUsage = () => usage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 })
+const originalFetch = globalThis.fetch
 
 afterEach(() => {
+  globalThis.fetch = originalFetch
+  delete process.env.MARKSCODE_MEMORIES_URL
+  delete process.env.MARKSCODE_MEMORIES_API_KEY
+  delete process.env.MARKSCODE_MEMORIES_USER_ID
   mock.restore()
 })
+
+function jsonResponse(value: unknown) {
+  return Promise.resolve(new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } }))
+}
 
 function createModel(opts: {
   context: number
@@ -788,6 +797,48 @@ describe("session.compaction.prune", () => {
 })
 
 describe("session.compaction.process", () => {
+  test("sanitizes DCP summaries before memory save", () => {
+    expect(sanitizeDcpSummaryForMemory("ok\napi_key=abc\nBearer xyz\nfinal")).toBe("ok\n[REDACTED SENSITIVE LINE]\n[REDACTED SENSITIVE LINE]\nfinal")
+  })
+
+  itCompaction.effect(
+    "saves DCP summary memory with tags metadata and best-effort failure",
+    Effect.gen(function* () {
+      process.env.MARKSCODE_MEMORIES_URL = "http://memories.test"
+      process.env.MARKSCODE_MEMORIES_API_KEY = "test-key"
+      process.env.MARKSCODE_MEMORIES_USER_ID = "u-dcp"
+      const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
+      globalThis.fetch = mock((url: string | URL | Request, init?: RequestInit) => {
+        calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })
+        return calls.length === 1 ? jsonResponse({ ok: true }) : Promise.reject(new Error("offline"))
+      }) as unknown as typeof fetch
+
+      yield* saveDcpSummaryMemory({ sessionID: SessionID.make("session-dcp"), content: "summary\npassword=abc" })
+      yield* saveDcpSummaryMemory({ sessionID: SessionID.make("session-dcp-fail"), content: "summary" })
+
+      const dcpCalls = calls.filter((call) => String(call.body?.title || "").startsWith("DCP session summary:"))
+      expect(dcpCalls).toHaveLength(2)
+      expect(dcpCalls[0].url).toBe("http://memories.test/memories/human")
+      expect(dcpCalls[0].body).toMatchObject({
+        user_id: "u-dcp",
+        session_id: "session-dcp",
+        type: "episodic",
+        memory_mode: "long_term",
+        content: "summary\n[REDACTED SENSITIVE LINE]",
+        source_name: "markscode-dcp-summary",
+        dedup: true,
+        session_rollup: true,
+      })
+      expect(dcpCalls[0].body?.tags).toEqual(["DCP", "dcp", "session-summary", "markscode"])
+      expect(dcpCalls[0].body?.metadata).toMatchObject({
+        dcp: true,
+        dcp_summary: true,
+        session_id: "session-dcp",
+        schema_version: 1,
+      })
+    }),
+  )
+
   it.instance(
     "throws when parent is not a user message",
     Effect.gen(function* () {

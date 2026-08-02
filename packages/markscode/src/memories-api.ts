@@ -3,7 +3,7 @@ import type { MemoryIdentity } from "./memory-identity"
 import { Effect, Option } from "effect"
 import { Account } from "@/account/account"
 import { makeRuntime } from "@/effect/run-service"
-import { getMarksAgentString } from "./marks-agent-config-source"
+import { getMarksAgentBoolean, getMarksAgentString } from "./marks-agent-config-source"
 export type MemoryMode = "short_term" | "long_term" | "visual"
 export type MemoryType = "episodic" | "semantic" | "procedural"
 
@@ -606,7 +606,7 @@ function adminFallbackLimit(value?: number) {
 }
 
 function adminFallbackEnabled() {
-  return /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
+  return getMarksAgentBoolean("MARKSCODE_ADMIN_MEMORY_FALLBACK") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
 }
 
 function adminFallbackQueries(query: string) {
@@ -775,7 +775,7 @@ export async function listRecentCloudMemoryTopics(input: { user_id?: string; ses
   if (!hasMemoriesAPIKey() && !(await hasActiveOrgLease())) return { available: false, source: "cloud", topics: [], errors: ["Sessão Markspanel indisponível; faça login pelo fluxo OAuth/device do MarksCode/Markspanel"], status: "cloud_unconfigured" }
   const errors: string[] = []
   const limit = Math.max(1, Math.floor(input.limit || 12))
-  const timeoutMs = Math.min(30000, Math.max(1000, Math.floor(Number(input.timeout_ms ?? process.env.MARKSCODE_RECENT_TOPICS_TIMEOUT_MS ?? 3500))))
+  const timeoutMs = Math.min(30000, Math.max(1000, Math.floor(Number(input.timeout_ms ?? getMarksAgentString("MARKSCODE_RECENT_TOPICS_TIMEOUT_MS") ?? process.env.MARKSCODE_RECENT_TOPICS_TIMEOUT_MS ?? 3500))))
   const query = input.query || "Markscode BrainSystem memória sessão projeto assunto tópico markscode brain memvid"
   const advanced = await searchAdvancedMemories({ user_id: input.user_id, session_id: input.session_id, query, fuzzy: true, cross_session: true, limit, timeout_ms: timeoutMs }).catch((err) => {
     errors.push("advanced: " + (err instanceof Error ? err.message : String(err)))

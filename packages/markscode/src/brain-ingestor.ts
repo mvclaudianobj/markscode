@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { Database } from "bun:sqlite"
 import { brainGraphIngest, type BrainIngestItem } from "./brain-client"
 import { isBrainEnabled } from "./brain-config"
+import { getMarksAgentString } from "./marks-agent-config-source"
 
 export type { BrainIngestItem }
 
@@ -246,7 +247,7 @@ async function collectGraphfyItems(user_id: string, session_id?: string): Promis
 
 async function collectObsidianItems(user_id: string, session_id?: string): Promise<BrainIngestItem[]> {
   const candidates = [
-    process.env.MARKSCODE_OBSIDIAN_PATH?.trim() || "",
+    getMarksAgentString("MARKSCODE_OBSIDIAN_PATH") || process.env.MARKSCODE_OBSIDIAN_PATH?.trim() || "",
     join(homedir(), "Documents/Obsidian"),
     join(homedir(), "Obsidian"),
   ].filter(Boolean)

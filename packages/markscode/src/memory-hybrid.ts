@@ -6,7 +6,7 @@ import { importMemories, recallAdminFallbackMemories, recallHumanMemories, type 
 import { brainRecall } from "./brain-client"
 import { isBrainEnabled, getBrainConfig } from "./brain-config"
 import { fallbackMemoryIdentity, memoryUserIDFromIdentity } from "./memory-identity"
-import { getMarksAgentBoolean, getMarksAgentString } from "./marks-agent-config-source"
+import { getMarksAgentBoolean, getMarksAgentSecretValue, getMarksAgentString } from "./marks-agent-config-source"
 
 export type MemoryProvider = "cloud" | "local" | "hybrid"
 
@@ -260,7 +260,7 @@ function cloudMemoryAvailable() {
 }
 
 function adminMemoryFallbackEnabled() {
-  return /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
+  return getMarksAgentBoolean("MARKSCODE_ADMIN_MEMORY_FALLBACK") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_ADMIN_MEMORY_FALLBACK || "")
 }
 
 function adminMemoryFallbackAllowed(input: HybridRecallInput) {
@@ -363,11 +363,11 @@ function dataHome() {
 }
 
 function defaultMemvidCapsulePath() {
-  return process.env.MARKSCODE_MEMVID_CAPSULE?.trim() || join(dataHome(), "markscode/memory/hybrid.mv2")
+  return getMarksAgentString("MARKSCODE_MEMVID_CAPSULE") || process.env.MARKSCODE_MEMVID_CAPSULE?.trim() || join(dataHome(), "markscode/memory/hybrid.mv2")
 }
 
 function memvidAutoInitEnabled() {
-  return !/^(0|false)$/i.test(process.env.MARKSCODE_MEMVID_AUTO_INIT || "")
+  return getMarksAgentBoolean("MARKSCODE_MEMVID_AUTO_INIT") ?? !/^(0|false)$/i.test(process.env.MARKSCODE_MEMVID_AUTO_INIT || "")
 }
 
 function sqliteJSON(db: string, sql: string) {
@@ -425,7 +425,7 @@ function capsuleItemCount(cli: string | undefined, capsule: string) {
 function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
   const capsule = input?.capsule || defaultMemvidCapsulePath()
   const officialCandidates = uniquePaths([
-    process.env.MARKSCODE_MEMVID_CLI?.trim() || "",
+    getMarksAgentString("MARKSCODE_MEMVID_CLI") || process.env.MARKSCODE_MEMVID_CLI?.trim() || "",
     ...embeddedMemvidCandidates(),
     commandExists("markscode-memvid") || "",
   ])
@@ -448,7 +448,7 @@ function detectLocalMemvid(input?: HybridStatusInput): LocalMemoryStatus {
     return { available: existsSync(capsule), cli: foundCLI, capsule, reason: "non-official Memvid CLI found in PATH; markscode-memvid sidecar contract unavailable" }
   }
 
-  const dir = process.env.MEMVID_DIR?.trim() || join(REPO_ROOT, "ecosystem/systems/memvid")
+  const dir = getMarksAgentString("MEMVID_DIR") || process.env.MEMVID_DIR?.trim() || join(REPO_ROOT, "ecosystem/systems/memvid")
   if (dir && existsSync(join(dir, "Cargo.toml"))) {
     return { available: existsSync(capsule), dir, capsule, reason: "MEMVID_DIR contains Cargo.toml; official markscode-memvid CLI not installed" }
   }
@@ -1286,16 +1286,16 @@ export async function doctorHybridMemory(input?: HybridStatusInput): Promise<unk
 }
 
 function qdrantConfig() {
-  const host = process.env.MARKSCODE_QDRANT_HOST ?? "10.66.0.1"
-  const port = Number(process.env.MARKSCODE_QDRANT_PORT ?? "6333")
-  const apiKey = process.env.MARKSCODE_QDRANT_API_KEY
-  const collection = process.env.MARKSCODE_QDRANT_COLLECTION ?? "markscode-memory"
+  const host = getMarksAgentString("MARKSCODE_QDRANT_HOST") ?? process.env.MARKSCODE_QDRANT_HOST ?? "10.66.0.1"
+  const port = Number(getMarksAgentString("MARKSCODE_QDRANT_PORT") ?? process.env.MARKSCODE_QDRANT_PORT ?? "6333")
+  const apiKey = getMarksAgentSecretValue("MARKSCODE_QDRANT_API_KEY") ?? getMarksAgentString("MARKSCODE_QDRANT_API_KEY") ?? process.env.MARKSCODE_QDRANT_API_KEY
+  const collection = getMarksAgentString("MARKSCODE_QDRANT_COLLECTION") ?? process.env.MARKSCODE_QDRANT_COLLECTION ?? "markscode-memory"
   return { host, port, apiKey, collection, base: `http://${host}:${port}` }
 }
 
 function qdrantEnabled() {
-  const e = process.env.MARKSCODE_QDRANT_ENABLED
-  return e !== undefined ? /^(1|true|yes|on)$/i.test(e) : false
+  const e = getMarksAgentBoolean("MARKSCODE_QDRANT_ENABLED")
+  return e ?? (process.env.MARKSCODE_QDRANT_ENABLED !== undefined ? /^(1|true|yes|on)$/i.test(process.env.MARKSCODE_QDRANT_ENABLED) : false)
 }
 
 async function qdrantRequest(path: string, method = "GET", body?: unknown): Promise<unknown> {

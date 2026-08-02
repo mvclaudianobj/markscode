@@ -20,6 +20,8 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionEvent } from "@opencode-ai/core/session-event"
+import { saveHumanMemory } from "@/memories-api"
+import { resolveMemoryIdentity } from "@/memory-identity"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -39,6 +41,8 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+const DCP_SUMMARY_MEMORY_TAGS = ["DCP", "dcp", "session-summary", "markscode"]
+const DCP_SUMMARY_SENSITIVE_LINE = /\b(password|secret|token|key|api_key|bearer|authorization|cookie|private_key)\b/i
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Goal
@@ -100,6 +104,49 @@ function summaryText(message: MessageV2.WithParts) {
     .join("\n\n")
     .trim()
   return text || undefined
+}
+
+export function sanitizeDcpSummaryForMemory(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => DCP_SUMMARY_SENSITIVE_LINE.test(line) ? "[REDACTED SENSITIVE LINE]" : line)
+    .join("\n")
+    .trim()
+}
+
+export function saveDcpSummaryMemory(input: { sessionID: SessionID; content: string }) {
+  return Effect.tryPromise(async () => {
+    const content = sanitizeDcpSummaryForMemory(input.content)
+    if (!content) return
+    const identity = await resolveMemoryIdentity(input.sessionID)
+    await saveHumanMemory({
+      user_id: identity.user_id,
+      session_id: input.sessionID,
+      type: "episodic",
+      memory_mode: "long_term",
+      title: "DCP session summary: " + input.sessionID,
+      subject: "DCP session summary",
+      content,
+      tags: DCP_SUMMARY_MEMORY_TAGS,
+      source_name: "markscode-dcp-summary",
+      identity: identity.identity,
+      customer_id: identity.customer_id,
+      org_id: identity.org_id,
+      metadata: {
+        ...identity.metadata,
+        dcp: true,
+        dcp_summary: true,
+        session_id: input.sessionID,
+        schema_version: 1,
+      },
+      dedup: true,
+      session_rollup: true,
+    })
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => log.warn("failed to save DCP summary memory", { error: error instanceof Error ? error.message : String(error) })),
+    ),
+  )
 }
 
 function completedCompactions(messages: MessageV2.WithParts[]) {
@@ -571,6 +618,7 @@ export const layer = Layer.effect(
             parts: [],
           },
         )
+        if (summary) yield* saveDcpSummaryMemory({ sessionID: input.sessionID, content: summary })
         if (flags.experimentalEventSystem) {
           yield* events.publish(SessionEvent.Compaction.Ended, {
             sessionID: input.sessionID,

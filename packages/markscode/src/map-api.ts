@@ -3,6 +3,7 @@
 import { Effect, Option } from "effect"
 import { Account } from "@/account/account"
 import { makeRuntime } from "@/effect/run-service"
+import { getMarksAgentString } from "./marks-agent-config-source"
 
 /* MARKSCODE_MAP_API_START */
 
@@ -104,7 +105,7 @@ export interface MapSessionLifecycleResult {
   recent_events?: Array<Record<string, unknown>>
 }
 
-const mapBase = String(process.env.MAP_API_BASE_URL || process.env.MARKSCODE_MAP_API_URL || "https://map.marks.ia.br/")
+const mapBase = String(getMarksAgentString("MAP_API_BASE_URL") || getMarksAgentString("MARKSCODE_MAP_API_URL") || process.env.MAP_API_BASE_URL || process.env.MARKSCODE_MAP_API_URL || "https://map.marks.ia.br/")
 
 const normalizeMapBase = (value: string) => {
   const raw = value.trim() || "https://map.marks.ia.br/"
