@@ -84,5 +84,8 @@ export const TuiInfo = Schema.Struct({
   }),
   scroll_acceleration: Schema.optional(ScrollAcceleration),
   diff_style: Schema.optional(DiffStyle),
+  language: Schema.optional(Schema.Literals(["en-US", "pt-BR"])).annotate({
+    description: "TUI language: 'en-US' (default) or 'pt-BR'",
+  }),
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable or disable mouse capture (default: true)" }),
 })

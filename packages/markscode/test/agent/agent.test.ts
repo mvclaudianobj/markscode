@@ -52,6 +52,7 @@ it.instance("returns default native agents when no config", () =>
     const agents = yield* load((svc) => svc.list())
     const names = agents.map((a) => a.name)
     expect(names).toContain("build")
+    expect(names).toContain("auto-mode")
     expect(names).toContain("plan")
     expect(names).toContain("general")
     expect(names).toContain("explore")
@@ -59,6 +60,24 @@ it.instance("returns default native agents when no config", () =>
     expect(names).toContain("compaction")
     expect(names).toContain("title")
     expect(names).toContain("summary")
+  }),
+)
+
+it.instance("auto-mode agent exposes MAP guardrails and validation prompt", () =>
+  Effect.gen(function* () {
+    const autoMode = yield* load((svc) => svc.get("auto-mode"))
+    expect(autoMode).toBeDefined()
+    expect(autoMode?.mode).toBe("primary")
+    expect(autoMode?.native).toBe(true)
+    expect(autoMode?.hidden).toBeUndefined()
+    expect(autoMode?.steps).toBe(200)
+    expect(autoMode?.prompt).toContain("MAP")
+    expect(autoMode?.prompt).toContain("Guardrails")
+    expect(autoMode?.prompt).toContain("validação")
+    expect(evalPerm(autoMode, "edit")).toBe("allow")
+    expect(evalPerm(autoMode, "write")).toBe("allow")
+    expect(evalPerm(autoMode, "task")).toBe("allow")
+    expect(evalPerm(autoMode, "todowrite")).toBe("allow")
   }),
 )
 
@@ -725,7 +744,12 @@ it.instance(
     config: {
       agent: {
         build: { disable: true },
+        "auto-mode": { disable: true },
         plan: { disable: true },
+        debug: { disable: true },
+        docs: { disable: true },
+        orchestrator: { disable: true },
+        ask: { disable: true },
       },
     },
   },

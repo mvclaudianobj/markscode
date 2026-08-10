@@ -9,7 +9,8 @@ import { Identifier } from "../id/id"
 import * as Log from "@opencode-ai/core/util/log"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
-import { compressRtkText } from "../rtk"
+import { compressRtkTextHybrid, rtkSavings } from "../rtk"
+import { getMarksAgentNumber } from "../marks-agent-config-source"
 
 const log = Log.create({ service: "truncation" })
 const RETENTION = Duration.days(7)
@@ -137,17 +138,23 @@ export const layer = Layer.effect(
         : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
 
       const rtk = rtkAutoEnabled()
-        ? yield* Effect.sync(() => compressRtkText({ text, max_lines: maxLines, max_chars: maxBytes })).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        ? yield* Effect.tryPromise(() => compressRtkTextHybrid({
+          text,
+          max_lines: getMarksAgentNumber("MARKSCODE_RTK_MAX_LINES") ?? (Number(process.env.MARKSCODE_RTK_MAX_LINES) || maxLines),
+          max_chars: getMarksAgentNumber("MARKSCODE_RTK_MAX_CHARS") ?? (Number(process.env.MARKSCODE_RTK_MAX_CHARS) || maxBytes),
+        })).pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
 
       if (rtk?.text) {
+        const savings = rtkSavings(rtk.input, rtk.output)
         return {
           content: [
             rtk.text,
             "",
-            "RTK native compression applied",
+            `RTK ${rtk.method} compression applied`,
             `input: ${rtk.input.chars} chars / ${rtk.input.lines} lines`,
             `output: ${rtk.output.chars} chars / ${rtk.output.lines} lines`,
+            `savings: ${savings.chars} chars / ${savings.lines} lines (${savings.percent}%)`,
             "",
             hint,
           ].join("\n"),

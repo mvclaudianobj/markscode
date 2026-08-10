@@ -107,6 +107,14 @@ export interface MapSessionLifecycleResult {
 
 const mapBase = String(getMarksAgentString("MAP_API_BASE_URL") || getMarksAgentString("MARKSCODE_MAP_API_URL") || process.env.MAP_API_BASE_URL || process.env.MARKSCODE_MAP_API_URL || "https://map.marks.ia.br/")
 
+const mapApiKey = () =>
+  getMarksAgentString("MARKSCODE_MAP_API_KEY") ||
+  getMarksAgentString("MAP_API_KEY") ||
+  getMarksAgentString("MARKS_API_KEY") ||
+  process.env.MARKSCODE_MAP_API_KEY ||
+  process.env.MAP_API_KEY ||
+  process.env.MARKS_API_KEY
+
 const normalizeMapBase = (value: string) => {
   const raw = value.trim() || "https://map.marks.ia.br/"
   const url = new URL(raw)
@@ -143,8 +151,10 @@ const activeOrgLeaseHeaders = (): Promise<Record<string, string>> =>
 
 const mapHeaders = async (): Promise<Record<string, string>> => {
   const leaseHeaders = await activeOrgLeaseHeaders()
+  const apiKey = mapApiKey()
   return {
     "Content-Type": "application/json",
+    ...(apiKey ? { "X-API-Key": apiKey } : {}),
     ...leaseHeaders,
   }
 }

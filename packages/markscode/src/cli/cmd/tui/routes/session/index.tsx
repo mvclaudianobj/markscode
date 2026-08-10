@@ -352,6 +352,21 @@ export function Session() {
 
   const memoryHash = (value: string) => value.length + ":" + value.slice(0, 256)
 
+  const cleanSnapshotForMemory = (text: string): string => {
+    return text
+      .split("\n")
+      .filter((line) => {
+        const trimmed = line.trim()
+        if (/^\$\s/.test(trimmed) || /^>\s/.test(trimmed)) return false
+        if (/^(On branch |Changes not staged|Untracked files|nothing to commit|cargo test|bun typecheck|bun test|systemctl|sudo |apt |yum |brew |npm |npx |yarn |pnpm )/.test(trimmed)) return false
+        if (/^(modified:|new file:|deleted:|renamed:)/.test(trimmed)) return false
+        if (!trimmed) return false
+        return true
+      })
+      .join("\n")
+      .trim()
+  }
+
   const normalizeMemoryText = (value: unknown) =>
     typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
 
@@ -1483,8 +1498,10 @@ export function Session() {
   }
 
   const saveSessionMemoryFor = async (sessionID: string, origin: "manual" | "auto") => {
-    const text = cachedMemorySnapshotFor(sessionID)
-    if (!text || !sessionID) return false
+    const rawText = cachedMemorySnapshotFor(sessionID)
+    if (!rawText || !sessionID) return false
+    const text = cleanSnapshotForMemory(rawText)
+    if (!text) return false
     const memoryIdentity = await resolveMemoryIdentity(sessionID)
     const title = (sync.session.get(sessionID)?.title || "").trim()
     const selected = local.model.current()
@@ -1532,8 +1549,10 @@ export function Session() {
   }
 
   const saveCurrentTopicMemory = async () => {
-    const text = memorySnapshot()
-    if (!text || !route.sessionID) return false
+    const rawText = memorySnapshot()
+    if (!rawText || !route.sessionID) return false
+    const text = cleanSnapshotForMemory(rawText)
+    if (!text) return false
     const title = (sync.session.get(route.sessionID)?.title || "Assunto atual BrainSystem").trim()
     await saveHumanMemory({
       user_id: memoriesUserID,
@@ -1743,15 +1762,15 @@ export function Session() {
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
   const renderer = useRenderer()
-  // Graphfy auto-setup: aguarda TUI montar completamente antes de abrir dialog
   onMount(() => {
-    setTimeout(() => {
+    const attemptGraphfyAutoSetup = () => setTimeout(() => {
       void (async () => {
         const graphfyAsked = kv.get("graphfy_autosetup_asked")
         if (graphfyAsked) return
         const graphfyStatus = getGraphfyStatus({ projectRoot: process.cwd() })
         if (graphfyStatus.available) return
         if (process.env.MARKSCODE_GRAPHFY_ENABLED === "0" || process.env.MARKSCODE_GRAPHIFY_ENABLED === "0") return
+        if (dialog.stack.length) return
         kv.set("graphfy_autosetup_asked", "1")
         const platform = process.platform
         const installerHint = platform === "win32" ? "uv ou pipx (Windows)" : platform === "darwin" ? "uv ou pipx (macOS)" : "uv ou pipx (Linux)"
@@ -1771,6 +1790,7 @@ export function Session() {
         await refreshHybridMemoryStatus().catch(() => undefined)
       })()
     }, 3000)
+    attemptGraphfyAutoSetup()
   })
   // MARKSCODE_MAP_HELPERS_START
   const mapHost = String(process.env.MARKSCODE_MAP_HOST || process.env.HOSTNAME || "markscode")
@@ -4390,7 +4410,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   const { theme } = useTheme()
   const sync = useSync()
   const messages = createMemo(() => sync.data.message[props.message.sessionID] ?? [])
-  const model = createMemo(() => Model.name(ctx.providers(), props.message.providerID, props.message.modelID))
+  const model = createMemo(() => Model.label(ctx.providers(), props.message.providerID, props.message.modelID))
 
   const final = createMemo(() => {
     return props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish)

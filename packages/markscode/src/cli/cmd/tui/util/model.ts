@@ -1,4 +1,5 @@
 import type { Provider } from "@opencode-ai/sdk/v2"
+import { VisualLabel } from "@/visual-label"
 
 export function index(list: Provider[] | undefined) {
   return new Map((list ?? []).map((item) => [item.id, item] as const))
@@ -19,5 +20,17 @@ export function name(
   providerID: string,
   modelID: string,
 ) {
-  return get(list, providerID, modelID)?.name ?? modelID
+  return VisualLabel.model(get(list, providerID, modelID)?.name ?? modelID)
+}
+
+export function label(
+  list: Provider[] | ReadonlyMap<string, Provider> | undefined,
+  providerID: string,
+  modelID: string,
+) {
+  return VisualLabel.modelWithProvider({
+    providerID,
+    modelID,
+    modelName: get(list, providerID, modelID)?.name,
+  })
 }

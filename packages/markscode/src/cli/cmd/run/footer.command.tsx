@@ -7,6 +7,7 @@ import { RunFooterMenu, createFooterMenuState, type RunFooterMenuItem } from "./
 import { formatBindings } from "./keymap.shared"
 import type { RunFooterTheme } from "./theme"
 import type { FooterKeybinds, FooterSubagentTab, RunCommand, RunInput, RunProvider } from "./types"
+import { VisualLabel } from "@/visual-label"
 
 type PanelEntry = RunFooterMenuItem & {
   category: string
@@ -672,7 +673,7 @@ export function RunModelSelectBody(props: {
         Object.entries(provider.models)
           .filter(([, model]) => model.status !== "deprecated")
           .map(([modelID, model]) => {
-            const title = model.name ?? modelID
+            const title = VisualLabel.model(model.name ?? modelID)
             const current = props.current()?.providerID === provider.id && props.current()?.modelID === modelID
             const footer = current
               ? "current"
@@ -684,8 +685,8 @@ export function RunModelSelectBody(props: {
             return {
               providerID: provider.id,
               modelID,
-              providerName: provider.name,
-              category: provider.name,
+              providerName: VisualLabel.provider(provider.name),
+              category: VisualLabel.provider(provider.name),
               display: title,
               footer,
               keywords: `${provider.id} ${provider.name} ${modelID} ${title} ${footer ?? ""}`,

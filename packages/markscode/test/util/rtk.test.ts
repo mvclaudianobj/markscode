@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { compressRtkText, extractRtkText, stripRtkAnsi } from "../../src/rtk"
+import { compressRtkText, compressRtkTextHybrid, extractRtkText, rtkSavings, stripRtkAnsi } from "../../src/rtk"
 
 describe("rtk", () => {
   test("strips ansi sequences", () => {
@@ -15,6 +15,20 @@ describe("rtk", () => {
     expect(result.text).toContain("lines omitted")
     expect(result.output.lines).toBeLessThanOrEqual(5)
     expect(result.input.chars).toBeGreaterThan(result.output.chars)
+    expect(result.method).toBe("native")
+  })
+
+  test("hybrid falls back to native when external is disabled", async () => {
+    const previous = process.env.MARKSCODE_RTK_EXTERNAL
+    process.env.MARKSCODE_RTK_EXTERNAL = "0"
+    const result = await compressRtkTextHybrid({ text: Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"), max_lines: 5, max_chars: 200 })
+    if (previous === undefined) delete process.env.MARKSCODE_RTK_EXTERNAL
+    else process.env.MARKSCODE_RTK_EXTERNAL = previous
+    expect(result.method).toBe("native")
+  })
+
+  test("computes savings", () => {
+    expect(rtkSavings({ chars: 100, lines: 10 }, { chars: 40, lines: 4 })).toEqual({ chars: 60, lines: 6, percent: 60 })
   })
 
   test("limits compressed chars preserving start and end", () => {

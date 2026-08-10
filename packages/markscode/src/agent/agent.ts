@@ -12,6 +12,7 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_DEBUG from "./prompt/debug.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_ASK from "./prompt/ask.txt"
+import PROMPT_AUTO_MODE from "./prompt/auto-mode.txt"
 import PROMPT_DOCS from "./prompt/docs.txt"
 import PROMPT_ORCHESTRATOR from "./prompt/orchestrator.txt"
 import PROMPT_SCOUT from "./prompt/scout.txt"
@@ -230,6 +231,44 @@ export const layer = Layer.effect(
             glob: "allow",
             list: "allow",
             bash: "allow",
+            question: "allow",
+            task: "allow",
+            todoread: "allow",
+            todowrite: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      "auto-mode": {
+        name: "auto-mode",
+        description: "Autonomous MarksCode agent for completing tasks end-to-end with MAP checkpoints, guardrails, delegation, and validation.",
+        prompt: PROMPT_AUTO_MODE,
+        options: {},
+        steps: 200,
+        permission: Permission.merge(
+          defaults,
+          Permission.fromConfig({
+            "*": "deny",
+            read: {
+              "*": "allow",
+              "*.env": "ask",
+              "*.env.*": "ask",
+              "*.env.example": "allow",
+            },
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            edit: "allow",
+            write: "allow",
             question: "allow",
             task: "allow",
             todoread: "allow",

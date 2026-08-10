@@ -56,6 +56,7 @@ export const Definitions = {
   app_toggle_diffwrap: keybind("none", "Toggle diff wrapping"),
   app_toggle_paste_summary: keybind("none", "Toggle paste summary"),
   app_toggle_session_directory_filter: keybind("none", "Toggle session directory filtering"),
+  markscode_profile_name: keybind("ctrl+y", "Change preferred user name"),
   command_list: keybind("ctrl+p", "List available commands"),
   help_show: keybind("none", "Open help dialog"),
   docs_open: keybind("none", "Open documentation"),
@@ -193,6 +194,7 @@ export const Definitions = {
   input_select_all: keybind("super+a", "Select all in input"),
   history_previous: keybind("up", "Previous history item"),
   history_next: keybind("down", "Next history item"),
+  dialog_prompt_submit: keybind("return", "Submit dialog prompt"),
 
   "dialog.select.prev": keybind("up,ctrl+p", "Move to previous dialog item"),
   "dialog.select.next": keybind("down,ctrl+n", "Move to next dialog item"),
@@ -201,7 +203,6 @@ export const Definitions = {
   "dialog.select.home": keybind("home", "Move to first dialog item"),
   "dialog.select.end": keybind("end", "Move to last dialog item"),
   "dialog.select.submit": keybind("return", "Submit selected dialog item"),
-  "dialog.prompt.submit": keybind("return", "Submit dialog prompt"),
   "dialog.mcp.toggle": keybind("space", "Toggle MCP in MCP dialog"),
   "prompt.autocomplete.prev": keybind("up,ctrl+p", "Move to previous autocomplete item"),
   "prompt.autocomplete.next": keybind("down,ctrl+n", "Move to next autocomplete item"),
@@ -233,13 +234,16 @@ export const Definitions = {
 
 type KeybindName = keyof typeof Definitions
 const KeybindNames = new Set<string>(Object.keys(Definitions))
+const KeybindAliases = {
+  "dialog.prompt.submit": "dialog_prompt_submit",
+} satisfies Record<string, KeybindName>
 
 export const KeybindOverrides = Schema.Struct(
   Object.fromEntries(
-    Object.entries(Definitions).map(([name, item]) => [
-      name,
-      Schema.optional(BindingValueSchema).annotate({ description: item.description }),
-    ]),
+    [
+      ...Object.entries(Definitions),
+      ...Object.entries(KeybindAliases).map(([alias, name]) => [alias, Definitions[name]] as const),
+    ].map(([name, item]) => [name, Schema.optional(BindingValueSchema).annotate({ description: item.description })]),
   ),
 ).annotate({ description: "TUI keybinding overrides" })
 export const Descriptions = Object.fromEntries(
@@ -255,6 +259,7 @@ export const CommandMap = {
   app_toggle_diffwrap: "app.toggle.diffwrap",
   app_toggle_paste_summary: "app.toggle.paste_summary",
   app_toggle_session_directory_filter: "app.toggle.session_directory_filter",
+  markscode_profile_name: "markscode.profile.name",
   command_list: "command.palette.show",
   help_show: "help.show",
   docs_open: "docs.open",
@@ -386,6 +391,7 @@ export const CommandMap = {
   input_select_all: "input.select.all",
   history_previous: "prompt.history.previous",
   history_next: "prompt.history.next",
+  dialog_prompt_submit: "dialog.prompt.submit",
   terminal_suspend: "terminal.suspend",
   terminal_title_toggle: "terminal.title.toggle",
   tips_toggle: "tips.toggle",
@@ -434,10 +440,13 @@ export function defaultValue(name: KeybindName) {
 export function parse(keybinds: KeybindOverrides): Keybinds {
   const invalid = unknownKeys(keybinds)
   if (invalid.length) throw new Error(`Unrecognized keybind${invalid.length === 1 ? "" : "s"}: ${invalid.join(", ")}`)
+  const normalized = Object.fromEntries(
+    Object.entries(keybinds).map(([name, value]) => [KeybindAliases[name as keyof typeof KeybindAliases] ?? name, value]),
+  )
   return Object.fromEntries(
     Object.entries(Definitions).map(([name, item]) => [
       name,
-      decodeBindingValue(keybinds[name as KeybindName] ?? item.default),
+      decodeBindingValue(normalized[name] ?? item.default),
     ]),
   ) as Keybinds
 }
@@ -445,7 +454,7 @@ export function parse(keybinds: KeybindOverrides): Keybinds {
 export const Keybinds = { parse }
 
 export function unknownKeys(input: object) {
-  return Object.keys(input).filter((key) => !KeybindNames.has(key))
+  return Object.keys(input).filter((key) => !KeybindNames.has(key) && !(key in KeybindAliases))
 }
 
 export function bindingDefaults(): BindingDefaults<Renderable, KeyEvent> {

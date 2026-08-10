@@ -164,7 +164,7 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: msg })
   })
 
-  test("detects orchestrator fallback eligibility once for provider limits", () => {
+  test("detects model fallback eligibility for retryable errors", () => {
     const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
       new MessageV2.APIError({
         message: "Rate limit exceeded",
@@ -187,14 +187,7 @@ describe("session.retry.retryable", () => {
         error,
       }),
     ).toBe(false)
-    expect(
-      SessionRetry.shouldFallbackModel({
-        agent: "build",
-        assistantAgent: "build",
-        alreadyUsed: false,
-        error,
-      }),
-    ).toBe(false)
+    expect(SessionRetry.shouldFallbackModel({ agent: "build", assistantAgent: "build", error })).toBe(true)
   })
 
   test("retries transport timeout errors", () => {
@@ -223,6 +216,28 @@ describe("session.retry.retryable", () => {
     }).toObject()
 
     expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
+  })
+
+  test("does not retry textual context overflow api errors", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "fail fallback context prompt is too long for this model",
+        isRetryable: true,
+        statusCode: 503,
+      }).toObject(),
+    )
+
+    expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
+  })
+
+  test("does not retry textual context overflow plain errors", () => {
+    expect(SessionRetry.retryable(wrap("Request too large: too many tokens"), retryProvider)).toBeUndefined()
+  })
+
+  test("does not classify common rate limit as context overflow", () => {
+    const msg = "Rate limit exceeded, please try again later"
+
+    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toEqual({ message: msg })
   })
 
   test("retries 500 errors even when isRetryable is false", () => {

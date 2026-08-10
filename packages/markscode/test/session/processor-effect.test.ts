@@ -73,6 +73,54 @@ const cfg = {
         baseURL: "http://localhost:1/v1",
       },
     },
+    marks: {
+      name: "Marks",
+      id: "marks",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      models: {
+        "MarksIA-2.0.0": {
+          id: "MarksIA-2.0.0",
+          name: "MarksIA-2.0.0",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+        },
+      },
+      options: {
+        apiKey: "test-key",
+        baseURL: "http://localhost:1/v1",
+      },
+    },
+    zen: {
+      name: "Zen",
+      id: "zen",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      models: {
+        "big-pickle": {
+          id: "big-pickle",
+          name: "big-pickle",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+        },
+      },
+      options: {
+        apiKey: "test-key",
+        baseURL: "http://localhost:1/v1",
+      },
+    },
   },
 }
 
@@ -85,6 +133,20 @@ function providerCfg(url: string) {
         ...cfg.provider.test,
         options: {
           ...cfg.provider.test.options,
+          baseURL: url,
+        },
+      },
+      marks: {
+        ...cfg.provider.marks,
+        options: {
+          ...cfg.provider.marks.options,
+          baseURL: url,
+        },
+      },
+      zen: {
+        ...cfg.provider.zen,
+        options: {
+          ...cfg.provider.zen.options,
           baseURL: url,
         },
       },
@@ -627,6 +689,53 @@ it.live("session.processor effect tests complete provider retries without proces
   ),
 )
 
+it.live("session.processor effect tests fallback to MarksIA then Marks-big on retryable model errors", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.error(503, { error: "first" })
+        yield* llm.error(503, { error: "second" })
+        yield* llm.text("after")
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "retry fallbacks")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "retry fallbacks" }],
+          tools: {},
+        })
+
+        expect(value).toBe("continue")
+        expect(yield* llm.calls).toBe(3)
+        expect(handle.message.providerID).toBe(ProviderID.make("zen"))
+        expect(handle.message.modelID).toBe(ModelID.make("big-pickle"))
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+  15_000,
+)
+
 it.live("session.processor effect tests compact on structured context overflow", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
@@ -665,6 +774,52 @@ it.live("session.processor effect tests compact on structured context overflow",
         expect(value).toBe("compact")
         expect(yield* llm.calls).toBe(1)
         expect(handle.message.error).toBeUndefined()
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests compact on textual context overflow", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.error(503, { error: "fail fallback context prompt is too long for this model" })
+        yield* llm.text("fallback should not run")
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "compact text")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "compact text" }],
+          tools: {},
+        })
+
+        expect(value).toBe("compact")
+        expect(yield* llm.calls).toBe(1)
+        expect(handle.message.error).toBeUndefined()
+        expect(handle.message.providerID).toBe(ref.providerID)
+        expect(handle.message.modelID).toBe(ref.modelID)
       }),
     { config: (url) => providerCfg(url) },
   ),

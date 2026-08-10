@@ -51,6 +51,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("RTK native compression applied")
+        expect(result.content).toContain("savings:")
         if (result.truncated) expect(result.outputPath).toBeDefined()
       }),
     )
@@ -197,6 +198,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("RTK native compression applied")
+        expect(result.content).toContain("savings:")
         expect(result.content).toContain("Full output saved to:")
         expect(result.content.length).toBeLessThan(content.length)
         if (!result.truncated) throw new Error("expected truncated")

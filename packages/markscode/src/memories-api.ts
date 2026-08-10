@@ -293,41 +293,7 @@ export async function saveHumanMemory(input: SaveMemoryInput): Promise<any> {
 }
 
 async function ensureHumanMemoryLayersOnce(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {
-  const errors: string[] = []
-  const results = await Promise.all(HUMAN_MEMORY_LAYER_MODES.map(async (mode) => {
-    const saved = await postHumanMemory({
-      user_id: input.user_id,
-      session_id: input.session_id,
-      type: mode === "short_term" ? "episodic" : "semantic",
-      memory_mode: mode,
-      title: "MarksCode memory layer bootstrap: " + input.session_id + ":" + mode,
-      subject: "markscode-system-memory-layer",
-      content: "MarksCode system memory layer bootstrap placeholder for session " + input.session_id + " and mode " + mode + ". Ignore in recall and user-facing context.",
-      importance: 0,
-      tags: [HUMAN_MEMORY_LAYER_MARKER_TAG, "system", "bootstrap", "session:" + input.session_id, "mode:" + mode],
-      triggers: [],
-      retrieval_cues: [],
-      mnemonic_techniques: [],
-      visual_refs: [],
-      source_name: input.source_name || "markscode-memory-layer-ensure",
-      identity: input.identity,
-      customer_id: input.customer_id,
-      org_id: input.org_id,
-      metadata: { ...input.metadata, memory_layer_mode: mode, session_id: input.session_id },
-      dedup: false,
-      session_rollup: false,
-    }).catch((err: unknown) => {
-      if (isHumanMemoryLayerDuplicate(err)) return "existing"
-      errors.push(mode + ": " + (err instanceof Error ? err.message : String(err)))
-      return undefined
-    })
-    if (saved === "existing") return { mode, status: "existing" as const }
-    return saved ? { mode, status: "created" as const } : undefined
-  }))
-  const created = results.flatMap((result) => result?.status === "created" ? [result.mode] : [])
-  const existing = results.flatMap((result) => result?.status === "existing" ? [result.mode] : [])
-
-  return { ok: errors.length === 0, ensured: HUMAN_MEMORY_LAYER_MODES, created, existing, errors }
+  return { ok: true, ensured: HUMAN_MEMORY_LAYER_MODES, created: [], existing: HUMAN_MEMORY_LAYER_MODES, errors: [] }
 }
 
 export async function ensureHumanMemoryLayers(input: EnsureHumanMemoryLayersInput): Promise<EnsureHumanMemoryLayersResult> {

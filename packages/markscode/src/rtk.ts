@@ -1,3 +1,6 @@
+import { getMarksAgentBoolean, getMarksAgentString } from "./marks-agent-config-source"
+import { which } from "./util/which"
+
 export type RtkStats = {
   chars: number
   lines: number
@@ -13,6 +16,13 @@ export type RtkCompressResult = {
   text: string
   input: RtkStats
   output: RtkStats
+  method: "native" | "external"
+}
+
+export type RtkSavings = {
+  chars: number
+  lines: number
+  percent: number
 }
 
 export type RtkExtractInput = {
@@ -46,6 +56,15 @@ export function rtkStats(text: string): RtkStats {
   return {
     chars: text.length,
     lines: text.length ? text.split("\n").length : 0,
+  }
+}
+
+export function rtkSavings(input: RtkStats, output: RtkStats): RtkSavings {
+  const chars = Math.max(0, input.chars - output.chars)
+  return {
+    chars,
+    lines: Math.max(0, input.lines - output.lines),
+    percent: input.chars > 0 ? Math.round((chars / input.chars) * 100) : 0,
   }
 }
 
@@ -84,7 +103,52 @@ export function compressRtkText(input: RtkCompressInput): RtkCompressResult {
     text,
     input: rtkStats(input.text),
     output: rtkStats(text),
+    method: "native",
   }
+}
+
+function rtkExternalEnabled() {
+  return getMarksAgentBoolean("MARKSCODE_RTK_EXTERNAL") ?? !/^(0|false|off|no)$/i.test(process.env.MARKSCODE_RTK_EXTERNAL || "")
+}
+
+function rtkExternalBin() {
+  const configured = getMarksAgentString("MARKSCODE_RTK_BIN") || process.env.MARKSCODE_RTK_BIN?.trim()
+  if (configured) return configured
+  return which("rtk")
+}
+
+async function tryExternalRtkCompress(input: RtkCompressInput) {
+  if (!rtkExternalEnabled()) return undefined
+  const bin = rtkExternalBin()
+  if (!bin) return undefined
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 2000)
+  try {
+    const proc = Bun.spawn([bin, "compress", "--max-lines", String(Math.max(1, Math.floor(input.max_lines ?? 120))), "--max-chars", String(Math.max(1, Math.floor(input.max_chars ?? 12000)))], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+      signal: controller.signal,
+    })
+    await proc.stdin.write(input.text)
+    proc.stdin.end()
+    const out = await new Response(proc.stdout).text()
+    const code = await proc.exited.catch(() => 1)
+    const text = normalizeText(out)
+    if (code !== 0 || !text) return undefined
+    return {
+      text,
+      input: rtkStats(input.text),
+      output: rtkStats(text),
+      method: "external" as const,
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function compressRtkTextHybrid(input: RtkCompressInput): Promise<RtkCompressResult> {
+  return (await tryExternalRtkCompress(input).catch(() => undefined)) ?? compressRtkText(input)
 }
 
 function matcher(input: RtkExtractInput) {

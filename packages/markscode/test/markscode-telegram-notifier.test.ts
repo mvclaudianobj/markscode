@@ -61,4 +61,48 @@ describe("markscode-telegram-notifier", () => {
     expect(requests).toHaveLength(1)
     expect(requests[0]?.body).toMatchObject({ chat_id: "456", text: "Done\nOK" })
   })
+
+  test("notifies when a bus session.status changes from active to idle", async () => {
+    await using tmp = await tmpdir()
+    process.env.MARKSCODE_AGENT_CONFIG_SOURCE_PATH = join(tmp.path, "modules.json")
+    process.env.MARKSCODE_TELEGRAM_TEST_TOKEN = "test-token"
+    process.env.MARKSCODE_TELEGRAM_BOT_TOKEN = ""
+    process.env.MARKSCODE_TELEGRAM_ALLOWED_USER_IDS = ""
+    process.env.MARKSCODE_TELEGRAM_CHAT_ID = ""
+    await Bun.write(
+      process.env.MARKSCODE_AGENT_CONFIG_SOURCE_PATH,
+      JSON.stringify({
+        modules: {
+          markscode: {
+            configurator: {
+              env: {
+                MARKSCODE_TELEGRAM_CHAT_ID: "456",
+              },
+              secret_refs: {
+                MARKSCODE_TELEGRAM_BOT_TOKEN: { env_ref: "MARKSCODE_TELEGRAM_TEST_TOKEN" },
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const requests = new Array<{ url: string; body: unknown }>()
+    globalThis.fetch = ((url: string, init: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init.body)) })
+      return Promise.resolve(new Response("{}"))
+    }) as typeof fetch
+
+    const plugin = (await import("../vendor/markscode-telegram-notifier/dist/index.js")).default
+    const notifier = await plugin()
+    await notifier.event?.({
+      event: { type: "session.status", properties: { sessionID: "ses_123", status: { type: "busy" } } },
+    })
+    await notifier.event?.({
+      event: { type: "session.status", properties: { sessionID: "ses_123", status: { type: "idle" } } },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.body).toMatchObject({ chat_id: "456", text: "MarksCode\nSession done\nses_123" })
+  })
 })

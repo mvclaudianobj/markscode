@@ -31,6 +31,9 @@ import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { LLMEvent, Usage } from "@opencode-ai/llm"
+import { clearRemoteMemoryConfig } from "@/memory-config"
+import { setActiveOrgLeaseHeadersForTest } from "@/memories-api"
+import { clearMarksAgentConfigSourceCache } from "@/marks-agent-config-source"
 
 void Log.init({ print: false })
 
@@ -52,12 +55,36 @@ const usage = (input: ConstructorParameters<typeof Usage>[0]) => new Usage(input
 
 const basicUsage = () => usage({ inputTokens: 1, outputTokens: 1, totalTokens: 2 })
 const originalFetch = globalThis.fetch
+const restoreActiveOrgLeaseHeaders: Array<() => void> = []
+const originalMemoryEnv = Object.fromEntries(
+  [
+    "MARKSCODE_AGENT_CONFIG_SOURCE_PATH",
+    "MARKS_AGENT_CONFIG_SOURCE_PATH",
+    "MARKSCODE_MARKS_AGENT_ENV_FILE",
+    "MARKS_AGENT_ENV_FILE",
+    "MARKSCODE_AGENT_SECRET_RESOLVE",
+    "MARKSCODE_MEMORIES_URL",
+    "MEMORIES_URL",
+    "MARKSCODE_MEMORIES_API_KEY",
+    "MEMORIES_API_KEY",
+    "MARKSCODE_MEMORIES_USER_ID",
+    "MEMORIES_USER_ID",
+  ].map((key) => [key, process.env[key]]),
+)
+
+function restoreMemoryEnv() {
+  for (const [key, value] of Object.entries(originalMemoryEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
 
 afterEach(() => {
   globalThis.fetch = originalFetch
-  delete process.env.MARKSCODE_MEMORIES_URL
-  delete process.env.MARKSCODE_MEMORIES_API_KEY
-  delete process.env.MARKSCODE_MEMORIES_USER_ID
+  restoreActiveOrgLeaseHeaders.splice(0).forEach((restore) => restore())
+  clearRemoteMemoryConfig()
+  restoreMemoryEnv()
+  clearMarksAgentConfigSourceCache()
   mock.restore()
 })
 
@@ -71,10 +98,11 @@ function createModel(opts: {
   input?: number
   cost?: Provider.Model["cost"]
   npm?: string
+  providerID?: string
 }): Provider.Model {
   return {
     id: "test-model",
-    providerID: "test",
+    providerID: opts.providerID ?? "test",
     name: "Test",
     limit: {
       context: opts.context,
@@ -397,6 +425,30 @@ describe("session.compaction.isOverflow", () => {
   )
 
   it.live(
+    "returns true above fixed auto compaction context threshold",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 1_000_000, output: 32_000 })
+        const tokens = { input: 190_001, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
+      }),
+    ),
+  )
+
+  it.live(
+    "returns true above fixed threshold for marks provider",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 1_000_000, output: 32_000, providerID: "marks" })
+        const tokens = { input: 260_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
+      }),
+    ),
+  )
+
+  it.live(
     "returns false when token count within usable context",
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -438,7 +490,7 @@ describe("session.compaction.isOverflow", () => {
       Effect.gen(function* () {
         const compact = yield* SessionCompaction.Service
         const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
-        const tokens = { input: 200_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
+        const tokens = { input: 150_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
         expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
       }),
     ),
@@ -804,9 +856,15 @@ describe("session.compaction.process", () => {
   itCompaction.effect(
     "saves DCP summary memory with tags metadata and best-effort failure",
     Effect.gen(function* () {
+      for (const key of Object.keys(originalMemoryEnv)) delete process.env[key]
+      process.env.MARKSCODE_AGENT_CONFIG_SOURCE_PATH = "/tmp/markscode/marks-agent-config-source-test-missing.json"
+      process.env.MARKSCODE_AGENT_SECRET_RESOLVE = "0"
       process.env.MARKSCODE_MEMORIES_URL = "http://memories.test"
       process.env.MARKSCODE_MEMORIES_API_KEY = "test-key"
       process.env.MARKSCODE_MEMORIES_USER_ID = "u-dcp"
+      clearRemoteMemoryConfig()
+      clearMarksAgentConfigSourceCache()
+      restoreActiveOrgLeaseHeaders.push(setActiveOrgLeaseHeadersForTest(() => Promise.resolve({})))
       const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
       globalThis.fetch = mock((url: string | URL | Request, init?: RequestInit) => {
         calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined })

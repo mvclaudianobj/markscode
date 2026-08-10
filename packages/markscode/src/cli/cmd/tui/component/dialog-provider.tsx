@@ -15,6 +15,7 @@ import { useToast } from "../ui/toast"
 import { isConsoleManagedProvider } from "@tui/util/provider-origin"
 import { useConnected } from "./use-connected"
 import { useBindings } from "../keymap"
+import { VisualLabel } from "@/visual-label"
 
 async function promptsMethod(input: {
   dialog: ReturnType<typeof useDialog>
@@ -71,7 +72,7 @@ export function providerOptions(list: { id: string; name: string }[]): ProviderO
       sortBy((x) => PROVIDER_PRIORITY[x.id] ?? 99),
       map((provider) => ({
         type: "provider" as const,
-        title: provider.name,
+        title: VisualLabel.provider(provider.name),
         value: provider.id,
         providerID: provider.id,
         description: {
@@ -112,7 +113,7 @@ export function createDialogProviderOptions() {
       placeholder: "Provider id",
       description: () => (
         <text fg={theme.textMuted}>
-          This only stores a credential. Configure the provider in opencode.json to use it.
+          This only stores a credential. Configure the provider in markscode.json to use it.
         </text>
       ),
     })

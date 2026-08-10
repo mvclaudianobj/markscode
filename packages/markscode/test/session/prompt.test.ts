@@ -30,7 +30,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
-import { explicitAdminMemoryFallbackRequested, explicitMemoryRecallRequested, SessionPrompt } from "../../src/session/prompt"
+import { explicitAdminMemoryFallbackRequested, explicitMemoryRecallRequested, optionalEfficiencyPrompts, SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -615,6 +615,28 @@ it.effect("detects explicit admin fallback authorization only when requested", (
     expect(explicitAdminMemoryFallbackRequested([messageWithText("se o recall escopado vier vazio, use o fallback admin read-only")])).toBe(true)
     expect(explicitAdminMemoryFallbackRequested([messageWithText("busque nas minhas memórias via OAuth")])).toBe(false)
     expect(explicitAdminMemoryFallbackRequested([messageWithText("use fallback local se a memória vier vazia")])).toBe(false)
+  }),
+)
+
+it.effect("optional efficiency prompts only appear when enabled", () =>
+  Effect.sync(() => {
+    const previousPonytail = process.env.MARKSCODE_PONYTAIL_MODE
+    const previousCaveman = process.env.MARKSCODE_CAVEMAN_OUTPUT
+    try {
+      delete process.env.MARKSCODE_PONYTAIL_MODE
+      delete process.env.MARKSCODE_CAVEMAN_OUTPUT
+      expect(optionalEfficiencyPrompts()).toEqual([])
+      process.env.MARKSCODE_PONYTAIL_MODE = "lite"
+      process.env.MARKSCODE_CAVEMAN_OUTPUT = "full"
+      const prompts = optionalEfficiencyPrompts().join("\n")
+      expect(prompts).toContain("Ponytail mode")
+      expect(prompts).toContain("Caveman output")
+    } finally {
+      if (previousPonytail === undefined) delete process.env.MARKSCODE_PONYTAIL_MODE
+      else process.env.MARKSCODE_PONYTAIL_MODE = previousPonytail
+      if (previousCaveman === undefined) delete process.env.MARKSCODE_CAVEMAN_OUTPUT
+      else process.env.MARKSCODE_CAVEMAN_OUTPUT = previousCaveman
+    }
   }),
 )
 
@@ -1665,6 +1687,7 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const { llm } = yield* useServerConfig(providerCfg)
+      const test = yield* TestInstance
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({
@@ -1672,9 +1695,10 @@ it.instance(
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       yield* llm.text("after-shell")
+      const marker = path.join(test.directory, "resume-shell-loop")
 
       const sh = yield* prompt
-        .shell({ sessionID: chat.id, agent: "build", command: "sleep 0.2" })
+        .shell({ sessionID: chat.id, agent: "build", command: `while [ ! -f ${JSON.stringify(marker)} ]; do sleep 0.01; done` })
         .pipe(Effect.forkChild)
       yield* waitForBusy(chat.id)
 
@@ -1683,6 +1707,7 @@ it.instance(
 
       expect(yield* llm.calls).toBe(0)
 
+      yield* Effect.promise(() => Bun.write(marker, "1"))
       yield* Fiber.await(sh)
       const exit = yield* Fiber.await(loop)
 
@@ -1702,6 +1727,7 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const { llm } = yield* useServerConfig(providerCfg)
+      const test = yield* TestInstance
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const chat = yield* sessions.create({
@@ -1709,9 +1735,10 @@ it.instance(
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       yield* llm.text("done")
+      const marker = path.join(test.directory, "resume-shell-callers")
 
       const sh = yield* prompt
-        .shell({ sessionID: chat.id, agent: "build", command: "sleep 0.2" })
+        .shell({ sessionID: chat.id, agent: "build", command: `while [ ! -f ${JSON.stringify(marker)} ]; do sleep 0.01; done` })
         .pipe(Effect.forkChild)
       yield* waitForBusy(chat.id)
 
@@ -1721,6 +1748,7 @@ it.instance(
 
       expect(yield* llm.calls).toBe(0)
 
+      yield* Effect.promise(() => Bun.write(marker, "1"))
       yield* Fiber.await(sh)
       const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
 

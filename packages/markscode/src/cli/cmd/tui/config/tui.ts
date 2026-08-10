@@ -25,6 +25,7 @@ import { Npm } from "@opencode-ai/core/npm"
 import type { DeepMutable } from "@opencode-ai/core/schema"
 import type { TuiAttentionSoundName } from "@opencode-ai/plugin/tui"
 import { FormatError, FormatUnknownError } from "@/cli/error"
+import { resolveLanguage } from "@/util/i18n"
 
 const log = Log.create({ service: "tui.config" })
 
@@ -36,7 +37,8 @@ type Acc = {
   plugin_origins: ConfigPlugin.Origin[]
 }
 
-export type Resolved = Omit<Info, "attention" | "keybinds" | "leader_timeout"> & {
+export type Resolved = Omit<Info, "attention" | "keybinds" | "leader_timeout" | "language"> & {
+  language: "en-US" | "pt-BR"
   attention: {
     enabled: boolean
     notifications: boolean
@@ -299,6 +301,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       bindingDefaults: TuiKeybind.bindingDefaults(),
     }),
     leader_timeout: acc.result.leader_timeout ?? KeymapLeaderTimeoutDefault,
+    language: resolveLanguage(acc.result.language),
     plugin_origins: acc.plugin_origins.length ? acc.plugin_origins : undefined,
   }
 

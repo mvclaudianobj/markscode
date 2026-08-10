@@ -162,7 +162,7 @@ const audioExtensionFrom = (bytes: Uint8Array, contentType: string) => {
 }
 
 type TTSPlayer = "auto" | "native" | "ffplay" | "mpv" | "paplay" | "aplay" | "marcos-pulse" | "none"
-type TTSProvider = "orbit-fallback" | "g4f-space" | "g4f-gemini"
+export type TTSProvider = "orbit-fallback" | "g4f-space" | "g4f-gemini"
 type TTSStep = { provider: string; response: () => Promise<Response> }
 
 const ttsPlayers = new Set<TTSPlayer>(["auto", "native", "ffplay", "mpv", "paplay", "aplay", "marcos-pulse", "none"])
@@ -172,6 +172,17 @@ let ttsGeneration = 0
 let ttsRateLimitedUntil = 0
 let currentPlayer: ReturnType<typeof Bun.spawn> | undefined
 let currentVoice: Parameters<typeof TuiAudio.stopVoice>[0] | undefined
+
+export const ttsProviderNames = (provider: TTSProvider, directToken: string) =>
+  provider === "g4f-gemini"
+    ? ["g4f-gemini"]
+    : provider === "g4f-space"
+      ? directToken
+        ? ["g4f-space-direct"]
+        : ["g4f-space-proxy", "g4f-gemini"]
+      : directToken
+        ? ["g4f-space-direct", "g4f-space-proxy", "g4f-gemini"]
+        : ["g4f-space-proxy", "g4f-gemini"]
 
 const playerCommand = (player: Exclude<TTSPlayer, "auto" | "native" | "none">, file: string, config?: { kv?: MarksTTSConfigSource }) =>
   player === "ffplay"
@@ -313,9 +324,8 @@ async function speakNow(text: string, config: { kv?: MarksTTSConfigSource; messa
           : []
         const proxyStep = [{ provider: "g4f-space-proxy", response: () => g4fSpaceAudioResponse(audioBase + "/ai/audio/" + encodeURIComponent(chunk) + "?voice=" + encodeURIComponent(voice), timeout) }]
         const geminiStep = [{ provider: "g4f-gemini", response: () => g4fGeminiAudioResponse(audioBase + "/api/Gemini/audio/speech", chunk, voice, timeout) }]
-        const providerSteps: TTSStep[] =
-          provider === "g4f-gemini" ? geminiStep : provider === "g4f-space" ? (directToken ? directStep : proxyStep) : [...directStep, ...proxyStep, ...geminiStep]
-        const steps = provider === "g4f-space" && isEnabled(String(valueFrom(config, "markscode_tts_disable_provider_fallback", "MARKSCODE_TTS_DISABLE_PROVIDER_FALLBACK", "1"))) ? providerSteps.slice(0, 1) : providerSteps
+        const providerSteps: TTSStep[] = ttsProviderNames(provider as TTSProvider, directToken).flatMap((name) => (name === "g4f-space-direct" ? directStep : name === "g4f-space-proxy" ? proxyStep : geminiStep))
+        const steps = provider === "g4f-space" && directToken && isEnabled(String(valueFrom(config, "markscode_tts_disable_provider_fallback", "MARKSCODE_TTS_DISABLE_PROVIDER_FALLBACK", "1"))) ? providerSteps.slice(0, 1) : providerSteps
         const response = await synthesizeWithFallback(steps, config)
         if (config.generation !== ttsGeneration) return
         const bytes = new Uint8Array(await response.arrayBuffer())

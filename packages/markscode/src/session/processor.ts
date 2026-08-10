@@ -30,6 +30,7 @@ import * as DateTime from "effect/DateTime"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { VisualLabel } from "@/visual-label"
 
 const DOOM_LOOP_THRESHOLD = 3
 const log = Log.create({ service: "session.processor" })
@@ -123,7 +124,7 @@ export const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
-      let orchestratorRateLimitFallbackUsed = false
+      const fallbackModelsUsed = new Set([`${input.model.providerID}/${input.model.id}`])
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
 
       const parse = (e: unknown) =>
@@ -778,7 +779,7 @@ export const layer = Layer.effect(
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
         slog.error("process", { error: errorMessage(e), stack: e instanceof Error ? e.stack : undefined })
         const error = parse(e)
-        if (MessageV2.ContextOverflowError.isInstance(error)) {
+        if (SessionRetry.isContextOverflowError(error)) {
           ctx.needsCompaction = true
           yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
           return
@@ -807,22 +808,21 @@ export const layer = Layer.effect(
       const fallbackModel = Effect.fn("SessionProcessor.fallbackModel")(function* (currentProviderID: string, currentModelID: string) {
         const providers = yield* provider.list().pipe(Effect.catch(() => Effect.succeed({} as Record<ProviderID, Provider.Info>)))
         const allModels = Object.values(providers).flatMap((item) => Object.values(item.models))
-        const isSame = (m: { providerID: string; id: string }) => m.providerID === currentProviderID && m.id === currentModelID
+        const isSame = (m: { providerID: string; id: string }) =>
+          (m.providerID === currentProviderID && m.id === currentModelID) || fallbackModelsUsed.has(`${m.providerID}/${m.id}`)
+
+        const marks = allModels.find((m) => !isSame(m) && (m.id === "MarksIA-2.0.0" || m.id.includes("MarksIA-2.0.0") || m.id === "MarksAI-2.0.0" || m.id.includes("MarksAI-2.0.0")))
+        if (marks) return marks
+
+        const direct = yield* provider.getModel(ProviderID.make("zen"), ModelID.make("big-pickle")).pipe(Effect.option)
+        if (Option.isSome(direct) && !isSame(direct.value)) return direct.value
+        const big = allModels.find((model) => !isSame(model) && model.providerID === "zen" && model.id.includes("big-pickle"))
+        if (big) return big
 
         const autoOfCurrent = allModels.find((m) => !isSame(m) && m.providerID === currentProviderID && m.id.startsWith("auto/"))
         if (autoOfCurrent) return autoOfCurrent
 
-        const autoAny = allModels.find((m) => !isSame(m) && m.id.startsWith("auto/"))
-        if (autoAny) return autoAny
-
-        const marks = allModels.find((m) => !isSame(m) && (m.id === "MarksAI-2.0.0" || m.id.includes("MarksAI-2.0.0")))
-        if (marks) return marks
-
-        const direct = yield* provider
-          .getModel(ProviderID.make("zen"), ModelID.make("big-pickle"))
-          .pipe(Effect.option)
-        if (Option.isSome(direct)) return direct.value
-        return allModels.find((model) => model.providerID === "zen" && model.id.includes("big-pickle"))
+        return allModels.find((m) => !isSame(m) && m.id.startsWith("auto/"))
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
@@ -865,12 +865,11 @@ export const layer = Layer.effect(
                     const shouldFallback = SessionRetry.shouldFallbackModel({
                       agent: currentStreamInput.agent.name,
                       assistantAgent: ctx.assistantMessage.agent,
-                      alreadyUsed: orchestratorRateLimitFallbackUsed,
                       error: info.error,
                     })
                     const fallback = shouldFallback ? yield* fallbackModel(currentStreamInput.model.providerID, currentStreamInput.model.id) : undefined
                     if (fallback) {
-                      orchestratorRateLimitFallbackUsed = true
+                      fallbackModelsUsed.add(`${fallback.providerID}/${fallback.id}`)
                       ctx.model = fallback
                       currentStreamInput = { ...currentStreamInput, model: fallback }
                       ctx.assistantMessage.providerID = fallback.providerID
@@ -878,7 +877,9 @@ export const layer = Layer.effect(
                       yield* session.updateMessage(ctx.assistantMessage)
                       slog.info("orchestrator rate limit fallback", { providerID: fallback.providerID, modelID: fallback.id })
                     }
-                    const message = fallback ? `${info.message}; switched orchestrator to ${fallback.providerID}/${fallback.id}` : info.message
+                    const message = fallback
+                      ? `${info.message}; switched orchestrator to ${VisualLabel.modelWithProvider({ providerID: fallback.providerID, modelID: fallback.id, modelName: fallback.name })}`
+                      : info.message
                     // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
                     const event = flags.experimentalEventSystem
                       ? events.publish(SessionEvent.Retried, {

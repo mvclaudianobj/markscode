@@ -71,6 +71,8 @@ import { ArgsProvider, useArgs, type Args } from "./context/args"
 import open from "open"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig } from "./context/tui-config"
+import { I18nProvider } from "./context/i18n"
+import { resolveLanguage } from "@/util/i18n"
 import { TuiConfig } from "@/cli/cmd/tui/config/tui"
 import { TuiPluginRuntime } from "@/cli/cmd/tui/plugin/runtime"
 import { createTuiApi } from "@/cli/cmd/tui/plugin/api"
@@ -86,6 +88,7 @@ import {
   useBindings,
   useOpencodeKeymap,
 } from "./keymap"
+import { isPreferredNamePromptPending, resolveConfiguredPromptUserName, sanitizePromptUserName, savePromptUserName } from "@/session/system"
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
@@ -136,7 +139,10 @@ const appBindingCommands = [
   "app.toggle.diffwrap",
   "app.toggle.paste_summary",
   "app.toggle.session_directory_filter",
+  "markscode.profile.name",
 ] as const
+
+const MARKSCODE_PREFERRED_USER_NAME = "markscode_preferred_user_name"
 
 export function tuiRendererConfig(_config: TuiConfig.Resolved): CliRendererConfig {
   const mouseEnabled = !Flag.OPENCODE_DISABLE_MOUSE && (_config.mouse ?? true)
@@ -256,13 +262,14 @@ async function mountTui(input: TuiInput & { keymap: ReturnType<typeof createDefa
                     }
                   >
                     <TuiConfigProvider config={input.config}>
-                      <SDKProvider
-                        url={input.url}
-                        directory={input.directory}
-                        fetch={input.fetch}
-                        headers={input.headers}
-                        events={input.events}
-                      >
+                      <I18nProvider language={resolveLanguage(input.config.language)}>
+                        <SDKProvider
+                          url={input.url}
+                          directory={input.directory}
+                          fetch={input.fetch}
+                          headers={input.headers}
+                          events={input.events}
+                        >
                         <ProjectProvider>
                           <SyncProvider>
                             <SyncProviderV2>
@@ -287,6 +294,7 @@ async function mountTui(input: TuiInput & { keymap: ReturnType<typeof createDefa
                           </SyncProvider>
                         </ProjectProvider>
                       </SDKProvider>
+                      </I18nProvider>
                     </TuiConfigProvider>
                   </RouteProvider>
                 </ToastProvider>
@@ -645,6 +653,51 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   )
 
   const connected = useConnected()
+  let preferredNamePromptOpen = false
+  let preferredNamePromptDismissed = false
+  const showPreferredNamePrompt = async (options?: { force?: boolean }) => {
+    if (preferredNamePromptOpen) return
+    preferredNamePromptOpen = true
+    const current = sanitizePromptUserName(kv.get(MARKSCODE_PREFERRED_USER_NAME)) || resolveConfiguredPromptUserName()
+    const value = await DialogPrompt.show(dialog, "Como quer ser chamado?", {
+      placeholder: "Senhor Marcos",
+      value: current,
+    })
+    preferredNamePromptOpen = false
+    const input = sanitizePromptUserName(value ?? undefined)
+    if (!input) {
+      if (!options?.force) preferredNamePromptDismissed = true
+      dialog.clear()
+      return
+    }
+    try {
+      const saved = await savePromptUserName(input)
+      if (!saved) return
+      kv.set(MARKSCODE_PREFERRED_USER_NAME, saved)
+      dialog.clear()
+    } catch (error) {
+      toast.show({ message: error instanceof Error ? error.message : "Falha ao salvar nome preferido", variant: "error" })
+    }
+  }
+  createEffect(() => {
+    if (!ready()) return
+    if (!kv.ready) return
+    const stored = sanitizePromptUserName(kv.get(MARKSCODE_PREFERRED_USER_NAME))
+    const configured = resolveConfiguredPromptUserName()
+    if (configured) {
+      void savePromptUserName(configured)
+      kv.set(MARKSCODE_PREFERRED_USER_NAME, configured)
+      return
+    }
+    if (stored) {
+      void savePromptUserName(stored)
+      return
+    }
+    if (route.data.type !== "home") return
+    if (dialog.stack.length) return
+    if (!isPreferredNamePromptPending({ configured, stored, dismissed: preferredNamePromptDismissed })) return
+    void showPreferredNamePrompt()
+  })
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -846,6 +899,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
             },
           ]
         : []),
+      {
+        name: "markscode.profile.name",
+        title: "MarksCode: Trocar nome de tratamento",
+        category: "MarksCode",
+        slashName: "preferred-name",
+        slashAliases: ["nome"],
+        run: () => {
+          void showPreferredNamePrompt({ force: true })
+        },
+      },
       {
         name: "opencode.status",
         title: "View status",

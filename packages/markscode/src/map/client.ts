@@ -247,6 +247,14 @@ const baseUrl = () => {
   return parsed.toString().replace(/\/$/, "")
 }
 
+const apiKey = () =>
+  getMarksAgentString("MARKSCODE_MAP_API_KEY") ??
+  getMarksAgentString("MAP_API_KEY") ??
+  getMarksAgentString("MARKS_API_KEY") ??
+  process.env.MARKSCODE_MAP_API_KEY ??
+  process.env.MAP_API_KEY ??
+  process.env.MARKS_API_KEY
+
 export const layer: Layer.Layer<Service, never, Account.Service | HttpClient.HttpClient> = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -274,9 +282,13 @@ export const layer: Layer.Layer<Service, never, Account.Service | HttpClient.Htt
           : input.method === "PATCH"
             ? HttpClientRequest.patch(endpoint.toString())
             : HttpClientRequest.get(endpoint.toString())
+      const key = apiKey()
       const headed = base_request.pipe(
         HttpClientRequest.acceptJson,
-        HttpClientRequest.setHeaders({ "user-agent": userAgent }),
+        HttpClientRequest.setHeaders({
+          "user-agent": userAgent,
+          ...(key ? { "X-API-Key": key } : {}),
+        }),
       )
       const initial =
         input.body === undefined

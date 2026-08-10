@@ -65,8 +65,7 @@ export function delay(attempt: number, error?: MessageV2.APIError) {
 }
 
 export function retryable(error: Err, provider: string) {
-  // context overflow errors should not be retried
-  if (MessageV2.ContextOverflowError.isInstance(error)) return undefined
+  if (isContextOverflowError(error)) return undefined
   if (MessageV2.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,
@@ -166,10 +165,14 @@ export function isRateLimit(error: Err) {
   return typeof json.code === "string" && json.code.includes("rate_limit")
 }
 
-export function shouldFallbackModel(input: { agent?: string; assistantAgent?: string; alreadyUsed: boolean; error: Err }) {
-  if (input.alreadyUsed) return false
-  if (input.agent !== "orchestrator" && input.assistantAgent !== "orchestrator") return false
-  return isProviderLimit(input.error)
+export function shouldFallbackModel(input: { agent?: string; assistantAgent?: string; alreadyUsed?: boolean; error: Err }) {
+  if (input.alreadyUsed === true) return false
+  return retryable(input.error, "") !== undefined
+}
+
+export function isContextOverflowError(error: unknown) {
+  if (MessageV2.ContextOverflowError.isInstance(error)) return true
+  return contextText(extractText(error))
 }
 
 export function isProviderLimit(error: Err) {
@@ -229,6 +232,39 @@ function limitText(value: string) {
     lower.includes("timeout") ||
     lower.includes("timed out")
   )
+}
+
+function contextText(values: string[]) {
+  return values.some((value) => {
+    const lower = value.toLowerCase()
+    return (
+      lower.includes("fallback context") ||
+      lower.includes("context length") ||
+      lower.includes("context window") ||
+      lower.includes("maximum context") ||
+      lower.includes("prompt is too long") ||
+      lower.includes("token limit") ||
+      lower.includes("tokens exceeded") ||
+      lower.includes("too many tokens") ||
+      lower.includes("input too large") ||
+      lower.includes("request too large") ||
+      lower.includes("exceeds model") ||
+      /exceeded.*context/.test(lower) ||
+      (lower.includes("context") && !rateLimitText(lower))
+    )
+  })
+}
+
+function extractText(value: unknown): string[] {
+  if (typeof value === "string") return [value, ...extractText(parseJSON(value))]
+  if (value instanceof Error) return [value.message]
+  if (!isRecord(value)) return []
+  return Object.entries(value).flatMap(([key, item]) => {
+    if (key === "message" || key === "responseBody" || key === "data" || key === "error" || key === "code") {
+      return extractText(item)
+    }
+    return []
+  })
 }
 
 function str(value: unknown) {

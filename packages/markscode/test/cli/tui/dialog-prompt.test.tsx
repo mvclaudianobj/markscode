@@ -123,7 +123,7 @@ test("dialog prompt submit can be rebound separately from input submit", async (
     root: tmp.path,
     keybinds: {
       input_submit: "return",
-      "dialog.prompt.submit": "ctrl+y",
+      dialog_prompt_submit: "ctrl+y",
     },
     onConfirm: (value) => confirmed.push(value),
   })

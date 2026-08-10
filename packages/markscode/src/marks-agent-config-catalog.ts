@@ -1,4 +1,4 @@
-export type MarksAgentConfigGroup = "MEMORIES" | "TELEGRAM" | "TTS" | "STT" | "GRAPHFY" | "MAP" | "QDRANT" | "MEMVID" | "DATABASE" | "VISION" | "BRAIN_OBSIDIAN" | "UPDATER_INSTALL" | "NOTIFIER"
+export type MarksAgentConfigGroup = "PROFILE" | "MEMORIES" | "TELEGRAM" | "TTS" | "STT" | "GRAPHFY" | "MAP" | "QDRANT" | "MEMVID" | "DATABASE" | "VISION" | "BRAIN_OBSIDIAN" | "UPDATER_INSTALL" | "NOTIFIER" | "EFFICIENCY" | "UI"
 
 export type MarksAgentConfigType = "string" | "number" | "boolean" | "secret_ref" | "list" | "path" | "url" | "pattern"
 
@@ -16,6 +16,12 @@ export type MarksAgentConfigCatalogEntry = {
 const entry = (key: string, group: MarksAgentConfigGroup, type: MarksAgentConfigType, sensitive: boolean, scope: MarksAgentConfigScope, description: string) => ({ key, group, type, sensitive, scope, description })
 
 export const MARKS_AGENT_CONFIG_CATALOG = [
+  entry("MARKSCODE_ACCOUNT_NAME", "PROFILE", "string", false, "user", "Nome literal preferido injetado no prompt padrão."),
+  entry("MARKSCODE_PROFILE_NAME", "PROFILE", "string", false, "user", "Nome de perfil preferido injetado no prompt padrão."),
+  entry("MARKSCODE_USER_NAME", "PROFILE", "string", false, "user", "Nome de usuário preferido injetado no prompt padrão."),
+  entry("MARKSCODE_PREFERRED_NAME", "PROFILE", "string", false, "user", "Nome preferido injetado no prompt padrão."),
+  entry("MARKS_ACCOUNT_NAME", "PROFILE", "string", false, "user", "Nome de conta legado preferido injetado no prompt padrão."),
+  entry("MARKS_USER_NAME", "PROFILE", "string", false, "user", "Nome de usuário legado preferido injetado no prompt padrão."),
   entry("MARKSCODE_HYBRID_MEMORY", "MEMORIES", "boolean", false, "runtime", "Ativa o prompt de memória híbrida no MarksCode."),
   entry("MARKSCODE_RAG", "MEMORIES", "boolean", false, "runtime", "Ativa integração RAG para recuperação contextual."),
   entry("MARKSCODE_MEMORY_PROVIDER", "MEMORIES", "string", false, "runtime", "Seleciona provider de memória: cloud, local ou hybrid."),
@@ -105,6 +111,14 @@ export const MARKS_AGENT_CONFIG_CATALOG = [
   entry("MARKSCODE_NOTIFIER_CONFIG_PATH", "NOTIFIER", "path", false, "runtime", "Caminho do arquivo de configuração do notifier."),
   entry("MARKSCODE_NOTIFIER_WINDOW_ID", "NOTIFIER", "string", false, "session", "ID de janela usado pelo notifier."),
   entry("MARKSCODE_CLIENT", "NOTIFIER", "string", false, "runtime", "Cliente/origem usado por notificações e integrações."),
+  entry("MARKSCODE_RTK_AUTO", "EFFICIENCY", "boolean", false, "runtime", "Ativa compressão RTK automática em truncation."),
+  entry("MARKSCODE_RTK_EXTERNAL", "EFFICIENCY", "boolean", false, "runtime", "Permite usar binário externo rtk quando disponível."),
+  entry("MARKSCODE_RTK_BIN", "EFFICIENCY", "path", false, "runtime", "Caminho do binário externo rtk."),
+  entry("MARKSCODE_RTK_MAX_LINES", "EFFICIENCY", "number", false, "runtime", "Limite de linhas usado pela compressão RTK."),
+  entry("MARKSCODE_RTK_MAX_CHARS", "EFFICIENCY", "number", false, "runtime", "Limite de caracteres usado pela compressão RTK."),
+  entry("MARKSCODE_PONYTAIL_MODE", "EFFICIENCY", "string", false, "runtime", "Modo opcional de instruções Ponytail: off, lite, full ou ultra."),
+  entry("MARKSCODE_CAVEMAN_OUTPUT", "EFFICIENCY", "string", false, "runtime", "Modo opcional de saída Caveman: 0, 1, lite, full ou ultra."),
+  entry("MARKSCODE_LANGUAGE", "UI", "string", false, "user", "Idioma da interface do TUI MarksCode: en-US (padrão) ou pt-BR."),
 ] as const satisfies readonly MarksAgentConfigCatalogEntry[]
 
 export function getMarksAgentConfigCatalog() {

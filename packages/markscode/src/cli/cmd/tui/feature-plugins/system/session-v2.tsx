@@ -12,6 +12,7 @@ import { useBindings } from "../../keymap"
 import { Locale } from "@/util/locale"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import { webSearchProviderLabel } from "@/tool/websearch"
+import { VisualLabel } from "@/visual-label"
 import path from "path"
 import stripAnsi from "strip-ansi"
 import type {
@@ -274,8 +275,11 @@ function AgentSwitchedMessage(props: { message: SessionMessageAgentSwitched }) {
 function ModelSwitchedMessage(props: { message: SessionMessageModelSwitched }) {
   const { theme } = useTheme()
   const model = createMemo(() => {
-    const variant = props.message.model.variant ? `/${props.message.model.variant}` : ""
-    return `${props.message.model.providerID}/${props.message.model.id}${variant}`
+    return VisualLabel.modelWithProvider({
+      providerID: props.message.model.providerID,
+      modelID: props.message.model.id,
+      variant: props.message.model.variant,
+    })
   })
   return (
     <box paddingLeft={3} marginTop={1} flexShrink={0}>
@@ -307,8 +311,11 @@ function AssistantMessage(props: {
     return props.message.time.completed - (props.start ?? props.message.time.created)
   })
   const model = createMemo(() => {
-    const variant = props.message.model.variant ? `/${props.message.model.variant}` : ""
-    return `${props.message.model.providerID}/${props.message.model.id}${variant}`
+    return VisualLabel.modelWithProvider({
+      providerID: props.message.model.providerID,
+      modelID: props.message.model.id,
+      variant: props.message.model.variant,
+    })
   })
   const final = createMemo(() => props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish))
   return (

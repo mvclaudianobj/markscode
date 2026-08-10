@@ -12,6 +12,7 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
+import { exceedsAutoCompactionThreshold } from "./overflow"
 import { Bus } from "../bus"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
@@ -65,7 +66,8 @@ import { MapGate } from "@/map/gate"
 import { RagClient } from "@/rag/rag-client"
 import { LLMEvent } from "@opencode-ai/llm"
 import { resolveMemoryIdentity } from "@/memory-identity"
-import { getMarksAgentBoolean } from "@/marks-agent-config-source"
+import { getMarksAgentBoolean, getMarksAgentString } from "@/marks-agent-config-source"
+import { Token } from "@/util/token"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -85,9 +87,23 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 const HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT = `When the current conversation or workspace context lacks knowledge, query BrainSystem layers first (RAG, Memories, MAP, session context, Graphfy, vault) before any broad filesystem scan. If unavailable or insufficient, state uncertainty, then use fast selective directory search only.
 
+Before broad Grep, Glob, Read, or filesystem scans, if Graphify/Graphfy is available, use BrainSystem Graphfy query, path, explain, status, or an existing graph artifact to narrow context; only then perform broad filesystem discovery when Graphfy is unavailable or insufficient.
+
 When the user asks for Memories, BrainSystem, RAG, or MAP via OAuth/session, or explicitly says not to scan filesystem, .tasks, or files, you MUST NOT use Bash, shell env, or terminal commands to look for MEMORIES_API_KEY, MARKSCODE_API_KEY, MAP_API_KEY, or related API keys. Use only internal BrainSystem/Memories/RAG/MAP recall backed by the active session OAuth account through Account.acquireActiveOrgLease/configActive. If the internal OAuth/session recall is unavailable, report that exact unavailability without inventing results and without falling back to .tasks or filesystem scanning.`
 
 const TEMPORARY_ARTIFACTS_SYSTEM_PROMPT = `For temporary, transition, harness, or generated script files, use /tmp/markscode. Never use /tmp/opencode for new artifacts. If documentation, history, or memory mentions /tmp/opencode, adapt it to /tmp/markscode for new executions. Do not create opencode paths for temporary artifacts.`
+
+const PONYTAIL_LITE_SYSTEM_PROMPT = `Ponytail mode: prefer existing code, standard library, native APIs, and already-present dependencies before creating new code. Keep validation, security, accessibility, and maintainability while avoiding overengineering.`
+
+const PONYTAIL_FULL_SYSTEM_PROMPT = `${PONYTAIL_LITE_SYSTEM_PROMPT}\nReuse project patterns aggressively, reduce abstraction unless it clearly pays off, and avoid adding dependencies unless already present and justified.`
+
+const PONYTAIL_ULTRA_SYSTEM_PROMPT = `${PONYTAIL_FULL_SYSTEM_PROMPT}\nDefault to the smallest safe change that satisfies the request, preserving behavior and compatibility unless the user explicitly asks otherwise.`
+
+const CAVEMAN_LITE_SYSTEM_PROMPT = `Caveman output: final responses should be short, direct, in PT-BR, and without filler. Preserve code, commands, paths, URLs, and errors literally.`
+
+const CAVEMAN_FULL_SYSTEM_PROMPT = `${CAVEMAN_LITE_SYSTEM_PROMPT}\nAvoid long summaries unless requested. State files changed and validation results compactly.`
+
+const CAVEMAN_ULTRA_SYSTEM_PROMPT = `${CAVEMAN_FULL_SYSTEM_PROMPT}\nPrefer terse bullets or one-line answers when sufficient.`
 
 
 const log = Log.create({ service: "session.prompt" })
@@ -99,6 +115,15 @@ function hybridMemoryPromptEnabled() {
 
 function ragPromptEnabled() {
   return getMarksAgentBoolean("MARKSCODE_RAG") ?? /^(1|true|on)$/i.test(process.env.MARKSCODE_RAG || "")
+}
+
+export function optionalEfficiencyPrompts() {
+  const ponytail = (getMarksAgentString("MARKSCODE_PONYTAIL_MODE") || process.env.MARKSCODE_PONYTAIL_MODE || "off").toLowerCase()
+  const caveman = (getMarksAgentString("MARKSCODE_CAVEMAN_OUTPUT") || process.env.MARKSCODE_CAVEMAN_OUTPUT || "0").toLowerCase()
+  return [
+    ponytail === "lite" ? PONYTAIL_LITE_SYSTEM_PROMPT : ponytail === "full" ? PONYTAIL_FULL_SYSTEM_PROMPT : ponytail === "ultra" ? PONYTAIL_ULTRA_SYSTEM_PROMPT : undefined,
+    /^(1|true|on|lite)$/i.test(caveman) ? CAVEMAN_LITE_SYSTEM_PROMPT : caveman === "full" ? CAVEMAN_FULL_SYSTEM_PROMPT : caveman === "ultra" ? CAVEMAN_ULTRA_SYSTEM_PROMPT : undefined,
+  ].filter((item): item is string => Boolean(item))
 }
 
 function extractHybridMemoryCue(messages: MessageV2.WithParts[]) {
@@ -1319,6 +1344,7 @@ const baseLayer = Layer.effect(
         let structured: unknown
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        const efficiencyPrompts = optionalEfficiencyPrompts()
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
@@ -1415,6 +1441,80 @@ const baseLayer = Layer.effect(
             Effect.provideService(Session.Service, sessions),
           )
 
+          if (step > 1 && lastFinished) {
+            for (const m of msgs) {
+              if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
+              for (const p of m.parts) {
+                if (p.type !== "text" || p.ignored || p.synthetic) continue
+                if (!p.text.trim()) continue
+                p.text = [
+                  "<system-reminder>",
+                  "The user sent the following message:",
+                  p.text,
+                  "",
+                  "Please address this message and continue with your tasks.",
+                  "</system-reminder>",
+                ].join("\n")
+              }
+            }
+          }
+
+          yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+
+          const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+            sys.skills(agent),
+            sys.environment(model),
+            instruction.system().pipe(Effect.orDie),
+            MessageV2.toModelMessagesEffect(msgs, model),
+          ])
+          const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+          system.push(TEMPORARY_ARTIFACTS_SYSTEM_PROMPT)
+          system.push(HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT)
+          system.push(...efficiencyPrompts)
+          const memoryCue = extractHybridMemoryCue(msgs)
+          const adminMemoryFallbackRequested = explicitAdminMemoryFallbackRequested(msgs)
+          if (hybridMemoryPromptEnabled() || explicitMemoryRecallRequested(msgs)) {
+            const memoryContext = yield* Effect.tryPromise(() =>
+              resolveMemoryIdentity(String(sessionID)).then((memoryIdentity) =>
+                recallHybridMemories({
+                  user_id: memoryIdentity.user_id,
+                  session_id: memoryIdentity.session_id,
+                  cue: memoryCue || "current session context",
+                  admin_fallback: adminMemoryFallbackRequested,
+                  max_chars: adminMemoryFallbackRequested ? 8000 : 3000,
+                }),
+              ).then((result) => formatMemoryContext(result)),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                Effect.sync(() => {
+                  log.warn("hybrid-memory-context failed", { error: Cause.squash(cause) })
+                  return undefined
+                }),
+              ),
+            )
+            if (memoryContext) system.push(memoryContext)
+          }
+          if (ragPromptEnabled()) {
+            const ragContext = yield* rag.query({ query: memoryCue || "current session context", limit: 3 }).pipe(
+              Effect.map((result) => result.items.slice(0, 3).map((item) => item.content.trim()).filter(Boolean).join("\n\n")),
+              Effect.map((content) => content ? `<rag-context>\n${content}\n</rag-context>` : undefined),
+              Effect.catch(() => Effect.succeed(undefined)),
+              Effect.catchDefect(() => Effect.succeed(undefined)),
+              Effect.timeoutOption("2 seconds"),
+              Effect.map((value) => Option.isSome(value) ? value.value : undefined),
+            )
+            if (ragContext) system.push(ragContext)
+          }
+          const format = lastUser.format ?? { type: "text" as const }
+          if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+          if (
+            lastFinished?.summary !== true &&
+            exceedsAutoCompactionThreshold(Token.estimate(JSON.stringify({ system, messages: modelMsgs })))
+          ) {
+            yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+            continue
+          }
+
           const msg: MessageV2.Assistant = {
             id: MessageID.ascending(),
             parentID: lastUser.id,
@@ -1484,69 +1584,6 @@ const baseLayer = Layer.effect(
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-            if (step > 1 && lastFinished) {
-              for (const m of msgs) {
-                if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
-                for (const p of m.parts) {
-                  if (p.type !== "text" || p.ignored || p.synthetic) continue
-                  if (!p.text.trim()) continue
-                  p.text = [
-                    "<system-reminder>",
-                    "The user sent the following message:",
-                    p.text,
-                    "",
-                    "Please address this message and continue with your tasks.",
-                    "</system-reminder>",
-                  ].join("\n")
-                }
-              }
-            }
-
-            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-
-            const [skills, env, instructions, modelMsgs] = yield* Effect.all([
-              sys.skills(agent),
-              sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
-              MessageV2.toModelMessagesEffect(msgs, model),
-            ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
-            system.push(TEMPORARY_ARTIFACTS_SYSTEM_PROMPT)
-            system.push(HYBRID_MEMORY_SEARCH_SYSTEM_PROMPT)
-            if (hybridMemoryPromptEnabled() || explicitMemoryRecallRequested(msgs)) {
-              const memoryContext = yield* Effect.tryPromise(() =>
-                resolveMemoryIdentity(String(sessionID)).then((memoryIdentity) =>
-                  recallHybridMemories({
-                    user_id: memoryIdentity.user_id,
-                    session_id: memoryIdentity.session_id,
-                    cue: extractHybridMemoryCue(msgs) || "current session context",
-                    admin_fallback: explicitAdminMemoryFallbackRequested(msgs),
-                    max_chars: explicitAdminMemoryFallbackRequested(msgs) ? 8000 : 3000,
-                  }),
-                ).then((result) => formatMemoryContext(result)),
-              ).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() => {
-                    log.warn("hybrid-memory-context failed", { error: Cause.squash(cause) })
-                    return undefined
-                  }),
-                ),
-              )
-              if (memoryContext) system.push(memoryContext)
-            }
-            if (ragPromptEnabled()) {
-              const ragContext = yield* rag.query({ query: extractHybridMemoryCue(msgs) || "current session context", limit: 3 }).pipe(
-                Effect.map((result) => result.items.slice(0, 3).map((item) => item.content.trim()).filter(Boolean).join("\n\n")),
-                Effect.map((content) => content ? `<rag-context>\n${content}\n</rag-context>` : undefined),
-                Effect.catch(() => Effect.succeed(undefined)),
-                Effect.catchDefect(() => Effect.succeed(undefined)),
-                Effect.timeoutOption("2 seconds"),
-                Effect.map((value) => Option.isSome(value) ? value.value : undefined),
-              )
-              if (ragContext) system.push(ragContext)
-            }
-            const format = lastUser.format ?? { type: "text" as const }
-            if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
               user: lastUser,
               agent,

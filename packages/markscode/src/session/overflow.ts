@@ -4,6 +4,15 @@ import { ProviderTransform } from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
+const AUTO_COMPACTION_CONTEXT_THRESHOLD = 190_000
+
+function tokenCount(tokens: MessageV2.Assistant["tokens"]) {
+  return tokens.total ?? tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+}
+
+export function exceedsAutoCompactionThreshold(tokens: number) {
+  return tokens > AUTO_COMPACTION_CONTEXT_THRESHOLD
+}
 
 export function usable(input: { cfg: Config.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
@@ -24,6 +33,8 @@ export function isOverflow(input: {
   outputTokenMax?: number
 }) {
   if (input.cfg.compaction?.auto === false) return false
+  const count = tokenCount(input.tokens)
+  if (exceedsAutoCompactionThreshold(count)) return true
   if (["marks", "local-proxy", "local-proxy2"].includes(input.model.providerID)) return false
   const list = input.cfg.compaction?.models
   if (Array.isArray(list)) {
@@ -33,7 +44,5 @@ export function isOverflow(input: {
   }
   if (input.model.limit.context === 0) return false
 
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
   return count >= usable(input)
 }
